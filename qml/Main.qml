@@ -28,12 +28,16 @@ Window {
     property int anchorIndex: -1
     property string renaming: ""
     property bool editingPath: false
-    property string selectAfterLoad: ""         // file to select once the folder has loaded (typed file paths)
     // Sidebar: sections of places, saved as JSON in the settings. Paths may start with "~".
     // Items have a path (a folder) or an action (overview, find, network).
     property string placesJson: ""
     readonly property var places: placesJson ? JSON.parse(placesJson) : defaultPlaces()
     property string renamingPlace: ""           // "si/ii" of the sidebar entry being renamed
+    property int sortField: FolderListModel.Name   // Name, Time, Size, Type
+    property bool sortReversed: false
+    property string quickLook: ""               // path shown in Quick Look ("" = closed)
+    property var pendingSelect: []              // paths to select once they appear (duplicate, alias, typed file)
+    property string typeAhead: ""               // type-to-select buffer
     property real wheelValue: .352              // thumbwheel 0..1
     readonly property real iconScale: .55 + wheelValue * 1.05
     readonly property real k: u * iconScale     // px per icon unit (icons are drawn in a 100-unit box)
@@ -58,6 +62,8 @@ Window {
         property alias viewMode: win.viewMode
         property alias showHidden: win.showHidden
         property alias places: win.placesJson
+        property alias sortField: win.sortField
+        property alias sortReversed: win.sortReversed
         property alias width: win.width
         property alias height: win.height
     }
@@ -101,16 +107,22 @@ Window {
         editingPath = false
         keys.forceActiveFocus()
         go(r.dir)
-        if (r.file) { selectAfterLoad = r.file; selectPending() }
+        if (r.file) selectWhenReady([r.file])
         return true
     }
+    function selectWhenReady(paths) { pendingSelect = paths; selectPending() }
+    // Selects the pending paths as soon as they're all in the folder model.
     function selectPending() {
-        if (!selectAfterLoad) return
-        const i = folder.indexOf("file://" + selectAfterLoad)
-        if (i < 0) return
-        selectAfterLoad = ""
-        select(i, folder.get(i, "filePath"), 0)
-        view().positionViewAtIndex(i, ListView.Contain)
+        if (!pendingSelect.length) return
+        const idx = pendingSelect.map(p => folder.indexOf("file://" + p))
+        if (idx.some(i => i < 0)) return
+        const s = ({})
+        for (const p of pendingSelect) s[p] = true
+        pendingSelect = []
+        selection = s
+        anchorIndex = idx[0]
+        view().currentIndex = idx[0]
+        view().positionViewAtIndex(idx[0], ListView.Contain)
     }
 
     // ---- selection -----------------------------------------------------------
@@ -203,6 +215,43 @@ Window {
         })
         return rows
     }
+    // ---- Finder commands -----------------------------------------------------------
+    function sortBy(field) {
+        if (sortField === field) sortReversed = !sortReversed
+        else { sortField = field; sortReversed = false }
+    }
+    function openSelection() { for (const p of paths()) activate(p, Fm.kind(p) === "folder") }
+    function duplicateSelected() { if (paths().length) selectWhenReady(Fm.duplicate(paths())) }
+    function aliasSelected() { if (paths().length) selectWhenReady(Fm.makeAlias(paths())) }
+    function showOriginal() {
+        const t = paths().length === 1 ? Fm.showOriginal(paths()[0]) : ""
+        if (t) submitPath(t)
+    }
+    function getInfo() {
+        for (const p of (paths().length ? paths() : [dir]))
+            infoComponent.createObject(null, { path: p, tu: tu, fontFamily: fontFamily, assetFor: asset })
+    }
+    // Quick Look shows the focused item (the last one clicked or reached with the keys).
+    function focusedPath() {
+        const p = anchorIndex >= 0 ? folder.get(anchorIndex, "filePath") : ""
+        return p && selection[p] ? p : (paths()[0] || "")
+    }
+    function toggleQuickLook() { quickLook = quickLook ? "" : focusedPath() }
+    // Type to select: letters typed within a second form a prefix; the first matching name is selected.
+    function typeSelect(text) {
+        typeAhead += text.toLowerCase()
+        typeAheadTimer.restart()
+        for (let i = 0; i < folder.count; ++i)
+            if (folder.get(i, "fileName").toLowerCase().startsWith(typeAhead)) {
+                select(i, folder.get(i, "filePath"), 0)
+                view().positionViewAtIndex(i, ListView.Contain)
+                return
+            }
+    }
+    Timer { id: typeAheadTimer; interval: 1000; onTriggered: win.typeAhead = "" }
+    // Quick Look follows the selection while it's open.
+    onSelectionChanged: if (quickLook && paths().length) quickLook = focusedPath()
+
     function trashSelected() { Fm.trash(paths()); selection = ({}) }
     function newFolder() { const p = Fm.makeFolder(dir); const s = ({}); s[p] = true; selection = s; renaming = p }
 
@@ -214,6 +263,8 @@ Window {
         showDotAndDotDot: false
         caseSensitive: false
         sortCaseSensitive: false
+        sortField: win.sortField
+        sortReversed: win.sortReversed
         nameFilters: search.text ? ["*" + search.text + "*"] : []
         onCountChanged: win.selectPending()
         onStatusChanged: win.selectPending()
@@ -570,9 +621,19 @@ Window {
             const cols = Math.max(1, Math.floor(grid.width / grid.cellWidth))
             const vertical = win.viewMode === 1 ? 1 : cols
             if (win.renaming) return
-            if ((event.text === "/" || event.text === "~") && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+            const plain = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+            if ((event.text === "/" || event.text === "~") && plain) {
                 win.editPath(event.text); event.accepted = true; return
             }
+            if (event.key === Qt.Key_Space && plain && !win.typeAhead) { win.toggleQuickLook(); event.accepted = true; return }
+            if (win.quickLook && event.key === Qt.Key_Escape) { win.quickLook = ""; event.accepted = true; return }
+            // Letters type-select; a space continues a name being typed (Space alone is Quick Look).
+            if (plain && event.text.length === 1 && (event.text > " " || (event.text === " " && win.typeAhead)) && event.key !== Qt.Key_Delete) {
+                win.typeSelect(event.text); event.accepted = true; return
+            }
+            if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) { win.goUp(); event.accepted = true; return }
+            if (event.key === Qt.Key_Down && event.modifiers & Qt.ControlModifier) { win.openSelection(); event.accepted = true; return }
+            if (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier) { win.trashSelected(); event.accepted = true; return }
             if (event.key === Qt.Key_Left && event.modifiers & Qt.AltModifier) win.goBack()
             else if (event.key === Qt.Key_Right && event.modifiers & Qt.AltModifier) win.goForward()
             else if (event.key === Qt.Key_Up && event.modifiers & Qt.AltModifier) win.goUp()
@@ -790,13 +851,18 @@ Window {
             Row {
                 x: 40 * win.u; height: parent.height
                 Repeater {
-                    model: [["Name", list.width - 430 * win.u], ["Date Modified", 180 * win.u], ["Size", 90 * win.u], ["Kind", 110 * win.u]]
+                    // Click a column to sort by it; click again to reverse.
+                    model: [["Name", list.width - 430 * win.u, FolderListModel.Name], ["Date Modified", 180 * win.u, FolderListModel.Time],
+                            ["Size", 90 * win.u, FolderListModel.Size], ["Kind", 110 * win.u, FolderListModel.Type]]
                     Text {
                         required property var modelData
+                        readonly property bool active: win.sortField === modelData[2]
                         width: modelData[1]
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData[0]; color: "white"; opacity: .45
+                        text: modelData[0] + (active ? (win.sortReversed ? "  ▾" : "  ▴") : "")
+                        color: "white"; opacity: active ? .85 : .45
                         font.family: win.fontFamily; font.pixelSize: 11 * win.tu; font.weight: Font.DemiBold
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.sortBy(parent.modelData[2]) }
                     }
                 }
             }
@@ -922,6 +988,18 @@ Window {
         onValueChanged: win.wheelValue = value
     }
 
+    QuickLook {
+        anchors.fill: parent
+        z: 20
+        visible: win.quickLook !== ""
+        path: win.quickLook
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        assetFor: win.asset
+        onCloseRequested: { win.quickLook = ""; keys.forceActiveFocus() }
+        onOpenRequested: p => { win.quickLook = ""; Fm.open(p) }
+    }
+    Component { id: infoComponent; InfoWindow {} }
+
     // Resize handles along the edges (the window has no KWin frame).
     Repeater {
         model: [
@@ -995,7 +1073,13 @@ Window {
         P.MenuItem { text: "Open"; onTriggered: { for (const p of win.paths()) win.activate(p, folder.get(folder.indexOf("file://" + p), "fileIsDir")) } }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.paths()[0]) }
         P.MenuSeparator {}
+        P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
+        P.MenuItem { text: "Quick Look"; onTriggered: win.toggleQuickLook() }
+        P.MenuSeparator {}
         P.MenuItem { text: "Rename…"; enabled: win.paths().length === 1; onTriggered: win.renaming = win.paths()[0] }
+        P.MenuItem { text: "Duplicate"; onTriggered: win.duplicateSelected() }
+        P.MenuItem { text: "Make Alias"; onTriggered: win.aliasSelected() }
+        P.MenuItem { text: "Show Original"; visible: win.paths().length === 1 && Fm.showOriginal(win.paths()[0]) !== ""; onTriggered: win.showOriginal() }
         P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
         P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
         P.Menu {
@@ -1020,6 +1104,14 @@ Window {
         P.MenuItem { text: "New Folder"; onTriggered: win.newFolder() }
         P.MenuItem { text: "Paste"; onTriggered: Fm.paste(win.dir) }
         P.MenuItem { text: "Add Current Folder to Favorites"; onTriggered: win.placeAdd(0, win.dir) }
+        P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
+        P.Menu {
+            title: "Sort By"
+            P.MenuItem { text: "Name"; checkable: true; checked: win.sortField === FolderListModel.Name; onTriggered: win.sortBy(FolderListModel.Name) }
+            P.MenuItem { text: "Kind"; checkable: true; checked: win.sortField === FolderListModel.Type; onTriggered: win.sortBy(FolderListModel.Type) }
+            P.MenuItem { text: "Date Modified"; checkable: true; checked: win.sortField === FolderListModel.Time; onTriggered: win.sortBy(FolderListModel.Time) }
+            P.MenuItem { text: "Size"; checkable: true; checked: win.sortField === FolderListModel.Size; onTriggered: win.sortBy(FolderListModel.Size) }
+        }
         P.MenuSeparator {}
         P.MenuItem { text: "Open Terminal Here"; onTriggered: Fm.openTerminal(win.dir) }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
@@ -1047,6 +1139,14 @@ Window {
             title: "File"
             P.MenuItem { text: "New Window\tCtrl+N"; onTriggered: Fm.newWindow(win.dir) }
             P.MenuItem { text: "New Folder\tCtrl+Shift+N"; onTriggered: win.newFolder() }
+            P.MenuItem { text: "Open\tCtrl+O"; onTriggered: win.openSelection() }
+            P.MenuSeparator {}
+            P.MenuItem { text: "Get Info\tCtrl+I"; onTriggered: win.getInfo() }
+            P.MenuItem { text: "Quick Look\tSpace"; onTriggered: win.toggleQuickLook() }
+            P.MenuItem { text: "Duplicate\tCtrl+D"; onTriggered: win.duplicateSelected() }
+            P.MenuItem { text: "Make Alias"; onTriggered: win.aliasSelected() }
+            P.MenuItem { text: "Show Original\tCtrl+R"; onTriggered: win.showOriginal() }
+            P.MenuSeparator {}
             P.MenuItem { text: "Open Terminal Here"; onTriggered: Fm.openTerminal(win.dir) }
             P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
             P.MenuSeparator {}
@@ -1056,11 +1156,14 @@ Window {
         }
         P.Menu {
             title: "Edit"
+            P.MenuItem { text: (Fm.undoText || "Undo") + "\tCtrl+Z"; enabled: Fm.canUndo; onTriggered: Fm.undo() }
+            P.MenuSeparator {}
             P.MenuItem { text: "Copy\tCtrl+C"; onTriggered: Fm.copyToClipboard(win.paths()) }
             P.MenuItem { text: "Paste\tCtrl+V"; onTriggered: Fm.paste(win.dir) }
+            P.MenuItem { text: "Move Item Here\tCtrl+Alt+V"; onTriggered: Fm.pasteMove(win.dir) }
             P.MenuItem { text: "Select All\tCtrl+A"; onTriggered: win.selectAll() }
             P.MenuItem { text: "Rename…\tF2"; onTriggered: if (win.paths().length === 1) win.renaming = win.paths()[0] }
-            P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().length ? win.paths().join("\n") : win.dir) }
+            P.MenuItem { text: "Copy Path\tCtrl+Alt+C"; onTriggered: Fm.copyPathText(win.paths().length ? win.paths().join("\n") : win.dir) }
         }
         P.Menu {
             title: "View"
@@ -1068,25 +1171,36 @@ Window {
             P.MenuItem { text: "as List\tCtrl+2"; checkable: true; checked: win.viewMode === 1; onTriggered: win.viewMode = 1 }
             P.MenuItem { text: "as Previews\tCtrl+3"; checkable: true; checked: win.viewMode === 2; onTriggered: win.viewMode = 2 }
             P.MenuSeparator {}
+            P.Menu {
+                title: "Sort By"
+                P.MenuItem { text: "Name"; checkable: true; checked: win.sortField === FolderListModel.Name; onTriggered: win.sortBy(FolderListModel.Name) }
+                P.MenuItem { text: "Kind"; checkable: true; checked: win.sortField === FolderListModel.Type; onTriggered: win.sortBy(FolderListModel.Type) }
+                P.MenuItem { text: "Date Modified"; checkable: true; checked: win.sortField === FolderListModel.Time; onTriggered: win.sortBy(FolderListModel.Time) }
+                P.MenuItem { text: "Size"; checkable: true; checked: win.sortField === FolderListModel.Size; onTriggered: win.sortBy(FolderListModel.Size) }
+                P.MenuSeparator {}
+                P.MenuItem { text: "Reverse Order"; checkable: true; checked: win.sortReversed; onTriggered: win.sortReversed = !win.sortReversed }
+            }
+            P.MenuSeparator {}
             P.MenuItem { text: "Bigger Icons\tCtrl++"; onTriggered: wheelCtl.nudge(.08) }
             P.MenuItem { text: "Smaller Icons\tCtrl+-"; onTriggered: wheelCtl.nudge(-.08) }
             P.MenuSeparator {}
-            P.MenuItem { text: "Show Hidden Files\tCtrl+H"; checkable: true; checked: win.showHidden; onTriggered: win.showHidden = !win.showHidden }
+            P.MenuItem { text: "Show Hidden Files\tCtrl+Shift+."; checkable: true; checked: win.showHidden; onTriggered: win.showHidden = !win.showHidden }
         }
         P.Menu {
             title: "Go"
-            P.MenuItem { text: "Back\tAlt+Left"; onTriggered: win.goBack() }
-            P.MenuItem { text: "Forward\tAlt+Right"; onTriggered: win.goForward() }
-            P.MenuItem { text: "Enclosing Folder\tAlt+Up"; onTriggered: win.goUp() }
+            P.MenuItem { text: "Back\tCtrl+["; onTriggered: win.goBack() }
+            P.MenuItem { text: "Forward\tCtrl+]"; onTriggered: win.goForward() }
+            P.MenuItem { text: "Enclosing Folder\tCtrl+Up"; onTriggered: win.goUp() }
             P.MenuItem { text: "Go to Folder…\tCtrl+Shift+G"; onTriggered: win.editPath() }
             P.MenuSeparator {}
             P.MenuItem { text: "Home\tCtrl+Shift+H"; onTriggered: win.go(Fm.home) }
-            P.MenuItem { text: "Desktop"; onTriggered: win.go(Fm.home + "/Desktop") }
-            P.MenuItem { text: "Documents"; onTriggered: win.go(Fm.home + "/Documents") }
-            P.MenuItem { text: "Downloads"; onTriggered: win.go(Fm.home + "/Downloads") }
-            P.MenuItem { text: "Applications"; onTriggered: win.go(Fm.home + "/Applications") }
+            P.MenuItem { text: "Desktop\tCtrl+Shift+D"; onTriggered: win.go(Fm.home + "/Desktop") }
+            P.MenuItem { text: "Documents\tCtrl+Shift+O"; onTriggered: win.go(Fm.home + "/Documents") }
+            P.MenuItem { text: "Downloads\tCtrl+Alt+L"; onTriggered: win.go(Fm.home + "/Downloads") }
+            P.MenuItem { text: "Applications\tCtrl+Shift+A"; onTriggered: win.go(Fm.home + "/Applications") }
             P.MenuItem { text: "Icon Catalog"; onTriggered: win.go("/usr/share/applications") }
-            P.MenuItem { text: "Computer"; onTriggered: win.go("/") }
+            P.MenuItem { text: "Computer\tCtrl+Shift+C"; onTriggered: win.go("/") }
+            P.MenuItem { text: "Network\tCtrl+Shift+K"; onTriggered: Fm.openInDolphin("remote:/") }
         }
         P.Menu {
             title: "Window"
@@ -1109,7 +1223,22 @@ Window {
     Shortcut { sequences: [StandardKey.SelectAll]; enabled: !search.activeFocus && !win.renaming; onActivated: win.selectAll() }
     Shortcut { sequence: "Ctrl+F"; onActivated: search.forceActiveFocus() }
     Shortcut { sequences: ["Ctrl+L", "Ctrl+Shift+G"]; onActivated: win.editPath() }
-    Shortcut { sequence: "Ctrl+H"; onActivated: win.showHidden = !win.showHidden }
+    Shortcut { sequences: ["Ctrl+H", "Ctrl+Shift+>", "Ctrl+Shift+."]; onActivated: win.showHidden = !win.showHidden }
+    Shortcut { sequence: "Ctrl+O"; onActivated: win.openSelection() }
+    Shortcut { sequence: "Ctrl+I"; onActivated: win.getInfo() }
+    Shortcut { sequence: "Ctrl+D"; enabled: !search.activeFocus && !win.editingPath; onActivated: win.duplicateSelected() }
+    Shortcut { sequence: "Ctrl+R"; onActivated: win.showOriginal() }
+    Shortcut { sequence: "Ctrl+Z"; enabled: !search.activeFocus && !win.editingPath && !win.renaming; onActivated: Fm.undo() }
+    Shortcut { sequence: "Ctrl+Alt+V"; onActivated: Fm.pasteMove(win.dir) }
+    Shortcut { sequence: "Ctrl+Alt+C"; onActivated: Fm.copyPathText(win.paths().length ? win.paths().join("\n") : win.dir) }
+    Shortcut { sequence: "Ctrl+["; onActivated: win.goBack() }
+    Shortcut { sequence: "Ctrl+]"; onActivated: win.goForward() }
+    Shortcut { sequence: "Ctrl+Shift+D"; onActivated: win.go(Fm.home + "/Desktop") }
+    Shortcut { sequence: "Ctrl+Shift+O"; onActivated: win.go(Fm.home + "/Documents") }
+    Shortcut { sequence: "Ctrl+Alt+L"; onActivated: win.go(Fm.home + "/Downloads") }
+    Shortcut { sequence: "Ctrl+Shift+A"; onActivated: win.go(Fm.home + "/Applications") }
+    Shortcut { sequence: "Ctrl+Shift+C"; onActivated: win.go("/") }
+    Shortcut { sequence: "Ctrl+Shift+K"; onActivated: Fm.openInDolphin("remote:/") }
     Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.go(Fm.home) }
     Shortcut { sequence: "Ctrl+1"; onActivated: win.viewMode = 0 }
     Shortcut { sequence: "Ctrl+2"; onActivated: win.viewMode = 1 }

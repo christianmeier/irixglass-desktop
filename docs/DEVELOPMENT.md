@@ -100,10 +100,29 @@ header rows carry the 30-unit gap above them so the baselines match the mockup. 
 follow `placesJson`). The list is non-interactive and scrolls with the same `win.scroll()` as the
 file views.
 
+### Finder commands
+
+See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation notes:
+
+- **Quick Look** (`qml/QuickLook.qml`) is an overlay inside the window, not a separate window, so the
+  file view keeps the keyboard: arrow keys move the selection and `onSelectionChanged` points
+  `win.quickLook` at the focused item. The kind comes from `Fm::info()` (MIME type); text previews
+  read at most 256 KB and are skipped for binary files.
+- **Get Info** (`qml/InfoWindow.qml`) is a real window per item, like Finder; it takes the keyboard
+  while open. Folder sizes come from `Fm::folderSize()` → `folderSizeReady`.
+- **Undo** uses `KIO::FileUndoManager`: every copy/move/trash/rename/duplicate/alias job goes
+  through `undoable()` (a `CopyJob`) and mkdir is recorded with `recordJob`. Aliases use
+  `KIO::linkAs` (a CopyJob) because a `symlink` job recorded by hand isn't undone. There is no redo
+  in KIO.
+- **New items get selected** through `win.selectWhenReady(paths)`: the folder model fills in
+  asynchronously, so the selection is applied once every path has an index.
+- **Type to select** collects letters for 1 s (`typeAhead`); a space only continues a name while
+  typing, otherwise it opens Quick Look.
+
 ### Settings
 
 `QtCore.Settings` in category `fm` → `~/.config/irixfm/irixfm.conf`: icon size (thumbwheel value),
-view mode, hidden files, window size, sidebar (`places`, JSON). All running fm windows share and overwrite it.
+view mode, hidden files, window size, sidebar (`places`, JSON), sort field and order. All running fm windows share and overwrite it.
 
 ## Workflow
 
@@ -144,6 +163,11 @@ wallpaper to judge it, e.g.
   with an optional parameter isn't found when called with none. Tests press keys instead.
 - **Off-screen tests need an active window** for keyboard focus (`requestActivate()` +
   `QTest::qWaitForWindowActive`), and `QTest::keyClicks` only takes widgets.
+- **Key combinations in tests must go through `QTest::keyClick`**: a `QKeyEvent` sent straight to the
+  window reaches `Keys` handlers but not QML `Shortcut`s.
+- **A Get Info window takes the keyboard**; tests close it and re-activate the main window.
+- **`FolderListModel.SortField` starts at `Unsorted` = 0** (Name 1, Time 2, Size 3, Type 4); use the
+  enum names in QML and these numbers from C++.
 - **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
 - **Repo images** must not contain copyrighted wallpapers; `docs/bg.jpg` is a generated gradient.
 

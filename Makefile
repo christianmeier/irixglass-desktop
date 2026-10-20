@@ -1,7 +1,7 @@
 # fm (irixfm): build with plain g++ + pkg-config. No cmake needed.
 #   make            build ./build/irixfm
 #   make run        run from the source tree
-#   make test       scroll, path bar and sidebar tests on an off-screen window
+#   make test       scroll, path bar, sidebar and Finder-feature tests on an off-screen window
 #   make install    install into ~/.local (PREFIX=... to change)
 #   make uninstall
 PREFIX   ?= $(HOME)/.local
@@ -40,8 +40,11 @@ $(BUILD)/path_test: tests/path_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
 $(BUILD)/sidebar_test: tests/sidebar_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/sidebar_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
 
+$(BUILD)/finder_test: tests/finder_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/finder_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test
 test: $(TESTS)
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc

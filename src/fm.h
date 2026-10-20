@@ -17,12 +17,16 @@ class Fm : public QObject
     Q_PROPERTY(QString home READ home CONSTANT)
     Q_PROPERTY(QString userName READ userName CONSTANT)
     Q_PROPERTY(QString assetDir MEMBER m_assetDir CONSTANT)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
+    Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
 
 public:
     Fm(const QString &startDir, const QString &assetDir, QObject *parent = nullptr);
 
     QString home() const;
     QString userName() const;
+    bool canUndo() const;
+    QString undoText() const;
 
     // Blur behind + input mask in the window's rounded shape, plus a compositor-drawn shadow.
     Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow);
@@ -54,7 +58,24 @@ public:
     Q_INVOKABLE QString makeFolder(const QString &dir);
     Q_INVOKABLE void rename(const QString &path, const QString &newName);
 
+    // Finder file commands. They return the new paths so the view can select them once they exist.
+    Q_INVOKABLE QStringList duplicate(const QStringList &paths);    // "name copy", "name copy 2", …
+    Q_INVOKABLE QStringList makeAlias(const QStringList &paths);    // symlink "name alias"
+    Q_INVOKABLE QString showOriginal(const QString &path) const;    // target of a symlink, or ""
+    Q_INVOKABLE void pasteMove(const QString &dir);                 // move the clipboard items here
+    Q_INVOKABLE void undo();
+
+    // Get Info and Quick Look.
+    Q_INVOKABLE QVariantMap info(const QString &path) const;
+    Q_INVOKABLE void folderSize(const QString &path);               // answers with folderSizeReady
+    Q_INVOKABLE QString textPreview(const QString &path, int maxBytes = 262144) const;  // "" for binary files
+
+Q_SIGNALS:
+    void undoChanged();
+    void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
+
 private:
+    static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
     QString m_assetDir;
     QPointer<KWindowShadow> m_shadow;

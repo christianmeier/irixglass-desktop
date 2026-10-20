@@ -16,7 +16,11 @@
 #include <QStorageInfo>
 
 #include <KDesktopFile>
+#include <KApplicationTrader>
+#include <KFileItem>
 #include <KIO/CopyJob>
+#include <KIO/DirectorySizeJob>
+#include <KIO/FileUndoManager>
 #include <KIO/JobUiDelegateFactory>
 #include <KIO/MkdirJob>
 #include <KIO/OpenUrlJob>
@@ -55,6 +59,14 @@ void track(KJob *job)
 {
     job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
     KIO::getJobTracker()->registerJob(job);
+}
+
+// Copy/move/trash/rename jobs are recorded so Edit ▸ Undo can reverse them.
+KIO::CopyJob *undoable(KIO::CopyJob *job)
+{
+    KIO::FileUndoManager::self()->recordCopyJob(job);
+    track(job);
+    return job;
 }
 
 // Rounded rectangle as a region, built row by row so corners follow the curve.
@@ -118,6 +130,133 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent)
     , m_startDir(startDir)
     , m_assetDir(assetDir)
 {
+    connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Fm::undoChanged);
+    connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoTextChanged, this, &Fm::undoChanged);
+}
+
+bool Fm::canUndo() const
+{
+    return KIO::FileUndoManager::self()->isUndoAvailable();
+}
+
+QString Fm::undoText() const
+{
+    return KIO::FileUndoManager::self()->undoText();
+}
+
+void Fm::undo()
+{
+    KIO::FileUndoManager::self()->undo();
+}
+
+// First free "<base><suffix>", "<base> 2<suffix>", … in dir.
+QString Fm::freeName(const QString &dir, const QString &base, const QString &suffix)
+{
+    QString name = base + suffix;
+    for (int i = 2; QFileInfo::exists(dir + QLatin1Char('/') + name) || QFileInfo(dir + QLatin1Char('/') + name).isSymLink(); ++i)
+        name = QStringLiteral("%1 %2%3").arg(base).arg(i).arg(suffix);
+    return dir + QLatin1Char('/') + name;
+}
+
+QStringList Fm::duplicate(const QStringList &paths)
+{
+    QStringList out;
+    for (const QString &p : paths) {
+        const QFileInfo fi(p);
+        // "photo.jpg" -> "photo copy.jpg"; folders and dotfiles keep their whole name as the base.
+        const bool split = !fi.isDir() && !fi.completeSuffix().isEmpty() && !fi.baseName().isEmpty();
+        const QString base = (split ? fi.completeBaseName() : fi.fileName()) + QStringLiteral(" copy");
+        const QString dest = freeName(fi.absolutePath(), base, split ? QLatin1Char('.') + fi.suffix() : QString());
+        undoable(KIO::copyAs(QUrl::fromLocalFile(p), QUrl::fromLocalFile(dest), KIO::HideProgressInfo));
+        out << dest;
+    }
+    return out;
+}
+
+QStringList Fm::makeAlias(const QStringList &paths)
+{
+    QStringList out;
+    for (const QString &p : paths) {
+        const QFileInfo fi(p);
+        const QString dest = freeName(fi.absolutePath(), fi.fileName() + QStringLiteral(" alias"), QString());
+        // linkAs is a CopyJob, so the undo manager knows exactly which link to remove.
+        undoable(KIO::linkAs(QUrl::fromLocalFile(p), QUrl::fromLocalFile(dest), KIO::HideProgressInfo));
+        out << dest;
+    }
+    return out;
+}
+
+QString Fm::showOriginal(const QString &path) const
+{
+    const QFileInfo fi(path);
+    return fi.isSymLink() ? fi.symLinkTarget() : QString();
+}
+
+void Fm::pasteMove(const QString &dir)
+{
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    if (mime && mime->hasUrls())
+        undoable(KIO::move(mime->urls(), QUrl::fromLocalFile(dir)));
+}
+
+QVariantMap Fm::info(const QString &path) const
+{
+    const QFileInfo fi(path);
+    const QMimeType mime = QMimeDatabase().mimeTypeForFile(fi);
+    QVariantMap m;
+    m[QStringLiteral("name")] = fi.fileName().isEmpty() ? QStringLiteral("/") : fi.fileName();
+    m[QStringLiteral("path")] = fi.absoluteFilePath();
+    m[QStringLiteral("where")] = fi.absolutePath();
+    m[QStringLiteral("exists")] = fi.exists() || fi.isSymLink();
+    m[QStringLiteral("isDir")] = fi.isDir();
+    m[QStringLiteral("isLink")] = fi.isSymLink();
+    m[QStringLiteral("target")] = fi.isSymLink() ? fi.symLinkTarget() : QString();
+    m[QStringLiteral("mime")] = fi.isDir() ? QStringLiteral("inode/directory") : mime.name();
+    m[QStringLiteral("kindText")] = fi.isDir() ? QStringLiteral("Folder") : mime.comment();
+    m[QStringLiteral("size")] = fi.isDir() ? -1 : fi.size();
+    m[QStringLiteral("sizeText")] = fi.isDir() ? QString() : humanSize(fi.size()) + QStringLiteral(" (%L1 bytes)").arg(fi.size());
+    const QLocale loc;
+    // Finder style: "Tuesday, 20 October 2026 at 21:52".
+    auto date = [&](const QDateTime &d) {
+        return d.isValid() ? loc.toString(d, QStringLiteral("dddd, d MMMM yyyy 'at' ") + loc.timeFormat(QLocale::ShortFormat)) : QStringLiteral("--");
+    };
+    m[QStringLiteral("created")] = date(fi.birthTime());
+    m[QStringLiteral("modified")] = date(fi.lastModified());
+    m[QStringLiteral("accessed")] = date(fi.lastRead());
+    m[QStringLiteral("owner")] = fi.owner();
+    m[QStringLiteral("group")] = fi.group();
+    auto access = [&](QFile::Permission r, QFile::Permission w) {
+        const bool cr = fi.permissions() & r, cw = fi.permissions() & w;
+        return cr && cw ? QStringLiteral("Read & Write") : cr ? QStringLiteral("Read only") : cw ? QStringLiteral("Write only")
+                                                                                              : QStringLiteral("No access");
+    };
+    m[QStringLiteral("permOwner")] = access(QFile::ReadOwner, QFile::WriteOwner);
+    m[QStringLiteral("permGroup")] = access(QFile::ReadGroup, QFile::WriteGroup);
+    m[QStringLiteral("permOther")] = access(QFile::ReadOther, QFile::WriteOther);
+    m[QStringLiteral("executable")] = !fi.isDir() && fi.isExecutable();
+    const KService::Ptr app = fi.isDir() ? KService::Ptr() : KApplicationTrader::preferredService(mime.name());
+    m[QStringLiteral("openWith")] = app ? app->name() : QString();
+    m[QStringLiteral("openWithIcon")] = app ? app->icon() : QString();
+    return m;
+}
+
+void Fm::folderSize(const QString &path)
+{
+    auto *job = KIO::directorySize(QUrl::fromLocalFile(path));
+    connect(job, &KJob::result, this, [this, job, path] {
+        Q_EMIT folderSizeReady(path, job->error() ? -1 : qint64(job->totalSize()), qint64(job->totalFiles()), qint64(job->totalSubdirs()));
+    });
+}
+
+QString Fm::textPreview(const QString &path, int maxBytes) const
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+    const QByteArray data = f.read(maxBytes);
+    if (data.contains('\0'))
+        return {};
+    return QString::fromUtf8(data);
 }
 
 QString Fm::home() const
@@ -289,7 +428,7 @@ void Fm::overview()
 void Fm::trash(const QStringList &paths)
 {
     if (!paths.isEmpty())
-        track(KIO::trash(toUrls(paths)));
+        undoable(KIO::trash(toUrls(paths)));
 }
 
 void Fm::copyToClipboard(const QStringList &paths)
@@ -314,7 +453,7 @@ void Fm::paste(const QString &dir)
 {
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
     if (mime && mime->hasUrls())
-        track(KIO::copy(mime->urls(), QUrl::fromLocalFile(dir)));
+        undoable(KIO::copy(mime->urls(), QUrl::fromLocalFile(dir)));
 }
 
 void Fm::drop(const QList<QUrl> &urls, const QString &dir, bool move)
@@ -330,7 +469,7 @@ void Fm::drop(const QList<QUrl> &urls, const QString &dir, bool move)
     if (todo.isEmpty())
         return;
     const QUrl dest = QUrl::fromLocalFile(dir);
-    track(move ? static_cast<KJob *>(KIO::move(todo, dest)) : static_cast<KJob *>(KIO::copy(todo, dest)));
+    undoable(move ? KIO::move(todo, dest) : KIO::copy(todo, dest));
 }
 
 QString Fm::makeFolder(const QString &dir)
@@ -339,7 +478,9 @@ QString Fm::makeFolder(const QString &dir)
     for (int i = 2; QFileInfo::exists(dir + QLatin1Char('/') + name); ++i)
         name = QStringLiteral("New Folder %1").arg(i);
     const QString path = dir + QLatin1Char('/') + name;
-    track(KIO::mkdir(QUrl::fromLocalFile(path)));
+    KIO::SimpleJob *job = KIO::mkdir(QUrl::fromLocalFile(path));
+    KIO::FileUndoManager::self()->recordJob(KIO::FileUndoManager::Mkdir, {}, QUrl::fromLocalFile(path), job);
+    track(job);
     return path;
 }
 
@@ -348,6 +489,6 @@ void Fm::rename(const QString &path, const QString &newName)
     const QFileInfo fi(path);
     if (newName.isEmpty() || newName.contains(QLatin1Char('/')) || newName == fi.fileName())
         return;
-    track(KIO::moveAs(QUrl::fromLocalFile(path), QUrl::fromLocalFile(fi.absolutePath() + QLatin1Char('/') + newName),
-                      KIO::HideProgressInfo));
+    undoable(KIO::moveAs(QUrl::fromLocalFile(path), QUrl::fromLocalFile(fi.absolutePath() + QLatin1Char('/') + newName),
+                         KIO::HideProgressInfo));
 }

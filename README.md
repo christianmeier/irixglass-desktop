@@ -33,6 +33,10 @@ manager icon; the IRIX icons are only inside the window.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.
+- Finder commands: Quick Look (Space: pictures, PDFs, video/audio, text, folders), Get Info (Ctrl+I),
+  Duplicate (Ctrl+D), Make Alias, Show Original (Ctrl+R), Move Item Here (Ctrl+Alt+V), Undo (Ctrl+Z),
+  type to select, Sort By (click a list column or View ▸ Sort By). Plan and status of every Finder
+  feature: [docs/FINDER-FEATURES.md](docs/FINDER-FEATURES.md).
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
@@ -56,7 +60,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar and sidebar tests, off-screen
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (66 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -79,16 +83,24 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 
 | Key | Action |
 |---|---|
-| Enter / double-click | Open |
-| Backspace, Alt+↑ | Enclosing folder |
-| Alt+← / Alt+→ | Back / forward |
+| Enter / double-click, Ctrl+O, Ctrl+↓ | Open |
+| Space | Quick Look (arrows step through items, Esc closes) |
+| Type letters | Select the item whose name starts with them |
+| Backspace, Ctrl+↑, Alt+↑ | Enclosing folder |
+| Ctrl+[ / Ctrl+], Alt+← / Alt+→ | Back / forward |
+| Ctrl+I | Get Info |
 | F2 | Rename |
-| Del | Move to Trash |
-| Ctrl+C / Ctrl+V / Ctrl+A | Copy / paste / select all |
+| Ctrl+D | Duplicate |
+| Ctrl+R | Show Original (of an alias) |
+| Del, Ctrl+Backspace | Move to Trash |
+| Ctrl+Z | Undo |
+| Ctrl+C / Ctrl+V / Ctrl+Alt+V / Ctrl+A | Copy / paste / move here / select all |
+| Ctrl+Alt+C | Copy path |
+| Ctrl+Shift+D / O / A / C / H, Ctrl+Alt+L | Desktop / Documents / Applications / Computer / Home, Downloads |
 | Ctrl+Shift+N | New folder |
 | Ctrl+F | Search |
 | Ctrl+L, Ctrl+Shift+G, `/`, `~` | Type a path (Tab completes, Esc cancels) |
-| Ctrl+H | Show hidden files |
+| Ctrl+Shift+., Ctrl+H | Show hidden files |
 | Ctrl+1 / 2 / 3 | Icons / list / previews |
 | Ctrl++ / Ctrl+- / Ctrl+wheel | Bigger / smaller icons (or roll the thumbwheel: drag, scroll or swipe over it) |
 | Ctrl+N / Ctrl+W | New window / close window |
@@ -100,9 +112,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected) and glyphs
-tests/          scroll_test, path_test, sidebar_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 
