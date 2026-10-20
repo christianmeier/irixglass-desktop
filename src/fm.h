@@ -33,6 +33,12 @@ public:
     Q_INVOKABLE QString humanSize(qint64 bytes) const;
     Q_INVOKABLE QString uriList(const QStringList &paths) const;
 
+    // Typed path -> {ok, dir, file}. Accepts absolute paths, ~, paths relative to `base` and file:// URLs.
+    // A file resolves to its folder plus the file to select.
+    Q_INVOKABLE QVariantMap resolvePath(const QString &text, const QString &base) const;
+    // Tab completion of the last path component against folder names (case-insensitive).
+    Q_INVOKABLE QString completePath(const QString &text, const QString &base) const;
+
     Q_INVOKABLE void open(const QString &path);
     Q_INVOKABLE void openInDolphin(const QString &path);
     Q_INVOKABLE void openTerminal(const QString &dir);

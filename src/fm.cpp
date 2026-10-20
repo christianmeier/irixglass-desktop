@@ -36,6 +36,21 @@ QList<QUrl> toUrls(const QStringList &paths)
     return urls;
 }
 
+// "~", "~/x", "file:///x", "rel/x" -> absolute, cleaned path (not checked for existence).
+QString expandPath(QString text, const QString &base)
+{
+    text = text.trimmed();
+    if (text.startsWith(QLatin1String("file:")))
+        text = QUrl(text).toLocalFile();
+    if (text == QLatin1String("~") || text.startsWith(QLatin1String("~/")))
+        text = QDir::homePath() + text.mid(1);
+    if (text.isEmpty())
+        text = base;
+    if (!QDir::isAbsolutePath(text))
+        text = base + QLatin1Char('/') + text;
+    return QDir::cleanPath(text);
+}
+
 void track(KJob *job)
 {
     job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
@@ -198,6 +213,47 @@ QString Fm::uriList(const QStringList &paths) const
     for (const QUrl &u : toUrls(paths))
         lines << QString::fromUtf8(u.toEncoded());
     return lines.join(QStringLiteral("\r\n"));
+}
+
+QVariantMap Fm::resolvePath(const QString &text, const QString &base) const
+{
+    const QFileInfo fi(expandPath(text, base));
+    if (fi.isDir())
+        return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), fi.absoluteFilePath()}};
+    if (fi.exists())
+        return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), fi.absolutePath()}, {QStringLiteral("file"), fi.absoluteFilePath()}};
+    return {{QStringLiteral("ok"), false}};
+}
+
+QString Fm::completePath(const QString &text, const QString &base) const
+{
+    // Split what was typed into the folder part (kept as typed, e.g. "~/Do") and the name prefix.
+    const int slash = text.lastIndexOf(QLatin1Char('/'));
+    const QString head = text.left(slash + 1);
+    const QString prefix = text.mid(slash + 1);
+    const QString dir = head.isEmpty() ? base : expandPath(head, base);
+
+    QDir::Filters filters = QDir::Dirs | QDir::NoDotAndDotDot;
+    if (prefix.startsWith(QLatin1Char('.')))
+        filters |= QDir::Hidden;
+    QStringList matches;
+    for (const QString &name : QDir(dir).entryList(filters, QDir::Name | QDir::IgnoreCase))
+        if (name.startsWith(prefix, Qt::CaseInsensitive))
+            matches << name;
+    if (matches.isEmpty())
+        return text;
+    if (matches.size() == 1)
+        return head + matches.first() + QLatin1Char('/');
+
+    // Several matches: extend to their longest common prefix.
+    QString common = matches.first();
+    for (const QString &m : std::as_const(matches)) {
+        int i = 0;
+        while (i < common.size() && i < m.size() && common[i].toLower() == m[i].toLower())
+            ++i;
+        common.truncate(i);
+    }
+    return common.size() > prefix.size() ? head + common : text;
 }
 
 void Fm::open(const QString &path)

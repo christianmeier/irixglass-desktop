@@ -1,7 +1,7 @@
 # fm (irixfm): build with plain g++ + pkg-config. No cmake needed.
 #   make            build ./build/irixfm
 #   make run        run from the source tree
-#   make test       scroll test (touchpad + mouse) on an off-screen window
+#   make test       scroll, path bar and sidebar tests on an off-screen window
 #   make install    install into ~/.local (PREFIX=... to change)
 #   make uninstall
 PREFIX   ?= $(HOME)/.local
@@ -9,7 +9,7 @@ CXX      ?= g++
 BUILD    := build
 MOC      := $(shell pkg-config --variable=libexecdir Qt6Core 2>/dev/null || echo /usr/lib/qt6)/moc
 
-PKGS     := Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 KF6WindowSystem KF6CoreAddons
+PKGS     := Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Test KF6WindowSystem KF6CoreAddons
 KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \
@@ -34,9 +34,17 @@ $(BUILD):
 $(BUILD)/scroll_test: tests/scroll_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/scroll_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
 
+$(BUILD)/path_test: tests/path_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/path_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+
+$(BUILD)/sidebar_test: tests/sidebar_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/sidebar_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-test: $(BUILD)/scroll_test
-	@tmp=$$(mktemp -d) && XDG_CONFIG_HOME=$$tmp QT_QPA_PLATFORM=offscreen $(BUILD)/scroll_test 2>/dev/null; rc=$$?; rm -rf $$tmp; exit $$rc
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test
+test: $(TESTS)
+	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
+	  XDG_CONFIG_HOME=$$tmp QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc
 
 icons:
 	python3 tools/make_icons.py

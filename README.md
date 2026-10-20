@@ -24,6 +24,12 @@ manager icon; the IRIX icons are only inside the window.
 
 - Icon, list and preview views (preview mode shows the real picture on the icon).
 - Back/forward history, clickable path, history menu (⌄), search-as-you-type filter.
+- Editable path bar ("Go to Folder"): click the path (or press Ctrl+L / Ctrl+Shift+G, or type `/` or `~`),
+  type a path (`~`, relative, `file://`), Tab completes folder names (the rest shows greyed out),
+  Enter goes there; a file opens its folder and selects it; a wrong path flashes red.
+- Editable sidebar: add folders to Favorites, Indigo Magic or Locations (the + on a section title,
+  drag a folder onto it, right-click → Add to Sidebar, or Add Folder…), rename, move up/down, move
+  to another section, remove, Reset Sidebar. It scrolls when the window is short.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.
@@ -50,7 +56,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll test (touchpad + mouse), off-screen
+make test         # scroll, path bar and sidebar tests, off-screen
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -81,6 +87,7 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+C / Ctrl+V / Ctrl+A | Copy / paste / select all |
 | Ctrl+Shift+N | New folder |
 | Ctrl+F | Search |
+| Ctrl+L, Ctrl+Shift+G, `/`, `~` | Type a path (Tab completes, Esc cancels) |
 | Ctrl+H | Show hidden files |
 | Ctrl+1 / 2 / 3 | Icons / list / previews |
 | Ctrl++ / Ctrl+- / Ctrl+wheel | Bigger / smaller icons (or roll the thumbwheel: drag, scroll or swipe over it) |
@@ -93,9 +100,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename
+qml/*.qml       glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected) and glyphs
-tests/          scroll_test.cpp (make test)
+tests/          scroll_test, path_test, sidebar_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

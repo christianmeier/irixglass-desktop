@@ -1,13 +1,16 @@
 import QtQuick
 
-// Inline rename field (F2). Enter applies, Esc or losing focus cancels.
+// Inline rename field. With `path` set it renames that file (F2); without, it only emits `committed`
+// (used for sidebar labels). Enter applies, Esc or losing focus cancels.
 Loader {
     id: rename
     property string path
     property string name
     property real u: 1
     property string fontFamily
+    property int align: TextInput.AlignHCenter
     signal done()
+    signal committed(string text)
     active: false
     height: 22 * u
     sourceComponent: Rectangle {
@@ -18,7 +21,7 @@ Loader {
             id: input
             anchors.fill: parent; anchors.margins: 4 * rename.u
             verticalAlignment: TextInput.AlignVCenter
-            horizontalAlignment: TextInput.AlignHCenter
+            horizontalAlignment: rename.align
             text: rename.name
             color: "black"; selectionColor: "#0a84ff"; selectedTextColor: "white"
             font.family: rename.fontFamily; font.pixelSize: 13 * rename.u
@@ -28,8 +31,13 @@ Loader {
                 const dot = rename.name.lastIndexOf(".")
                 select(0, dot > 0 ? dot : rename.name.length)
             }
-            Keys.onReturnPressed: { Fm.rename(rename.path, text); rename.done() }
-            Keys.onEnterPressed: { Fm.rename(rename.path, text); rename.done() }
+            function apply() {
+                if (rename.path) Fm.rename(rename.path, text)
+                rename.committed(text)
+                rename.done()
+            }
+            Keys.onReturnPressed: apply()
+            Keys.onEnterPressed: apply()
             Keys.onEscapePressed: rename.done()
             onActiveFocusChanged: if (!activeFocus) rename.done()
         }

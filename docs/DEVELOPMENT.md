@@ -81,10 +81,29 @@ Because the grid is non-interactive, Qt's own wheel handling is off, so `WheelHa
 
 `make test` checks all of this with simulated touchpad and mouse events on an off-screen window.
 
+### Path bar
+
+`pathPill` shows clickable crumbs; clicking the current folder or the empty part, Ctrl+L, Ctrl+Shift+G
+or typing `/`/`~` in the file view swaps them for `pathInput` (`win.editPath()`). `Fm::resolvePath()`
+turns the text into `{ok, dir, file}` (absolute, `~`, relative to the current folder, `file://`);
+`Fm::completePath()` completes the last component against folder names (case-insensitive, hidden
+ones after a dot). The greyed-out rest of the completion is a `Text` placed at the end of the
+input. A file path selects the file once the folder model has loaded (`selectAfterLoad`).
+
+### Sidebar
+
+The sidebar is data: `win.places` = sections `{title, color, items: [{label, path | action}]}`,
+saved as JSON in the settings (`placesJson`; empty = `defaultPlaces()`). Paths under home are
+stored as `~/…`. `placeRows` flattens it into header / item / empty-hint rows for a `ListView`;
+header rows carry the 30-unit gap above them so the baselines match the mockup. Edits go through
+`placeAdd/Remove/Rename/Move/MoveTo/resetPlaces`, which always write a new JSON string (bindings
+follow `placesJson`). The list is non-interactive and scrolls with the same `win.scroll()` as the
+file views.
+
 ### Settings
 
 `QtCore.Settings` in category `fm` → `~/.config/irixfm/irixfm.conf`: icon size (thumbwheel value),
-view mode, hidden files, window size. All running fm windows share and overwrite it.
+view mode, hidden files, window size, sidebar (`places`, JSON). All running fm windows share and overwrite it.
 
 ## Workflow
 
@@ -95,10 +114,11 @@ make test install && pkill -x irixfm; irixfm ~ &
 QML is loaded from disk at start (no resources compiled in), so QML-only changes need `make install`
 and a restart, not a rebuild. `make run` uses the source tree directly (`IRIXFM_ASSETS`).
 
-Check the look without opening a window on someone's screen:
+Check the look without opening a window on someone's screen (`offscreen` matters: a real window
+can get clicks or keys from the user during the 2.5 s before the snapshot):
 
 ```
-XDG_CONFIG_HOME=$(mktemp -d) IRIXFM_SNAPSHOT=/tmp/fm.png irixfm ~/Pictures
+XDG_CONFIG_HOME=$(mktemp -d) QT_QPA_PLATFORM=offscreen IRIXFM_SNAPSHOT=/tmp/fm.png irixfm ~/Pictures
 ```
 
 The snapshot has transparent glass (the blur comes from KWin), so composite it over a blurred
@@ -118,9 +138,19 @@ wallpaper to judge it, e.g.
   `sequences: [StandardKey.Copy]`.
 - **Test settings leak**: anything that runs fm saves its settings. Tests and snapshots use a
   throwaway `XDG_CONFIG_HOME`, or a saved list view will hide the icon grid in the next run.
+- **Item already has `top`** (an anchor line, FINAL): a delegate property called `top` makes the
+  whole file fail to load. Same for ids that shadow window properties (`id: places` hid `win.places`).
+- **`QMetaObject::invokeMethod` must pass every declared argument** of a QML function; a function
+  with an optional parameter isn't found when called with none. Tests press keys instead.
+- **Off-screen tests need an active window** for keyboard focus (`requestActivate()` +
+  `QTest::qWaitForWindowActive`), and `QTest::keyClicks` only takes widgets.
+- **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
 - **Repo images** must not contain copyrighted wallpapers; `docs/bg.jpg` is a generated gradient.
 
 ## Ideas not done
+
+See also [FINDER-FEATURES.md](FINDER-FEATURES.md) for the Finder feature plan.
+
 
 - Answer `org.freedesktop.FileManager1` on D-Bus, so "show in folder" in other apps opens fm
   instead of Dolphin.

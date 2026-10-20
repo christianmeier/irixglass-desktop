@@ -27,6 +27,13 @@ Window {
     property var selection: ({})                // path -> true
     property int anchorIndex: -1
     property string renaming: ""
+    property bool editingPath: false
+    property string selectAfterLoad: ""         // file to select once the folder has loaded (typed file paths)
+    // Sidebar: sections of places, saved as JSON in the settings. Paths may start with "~".
+    // Items have a path (a folder) or an action (overview, find, network).
+    property string placesJson: ""
+    readonly property var places: placesJson ? JSON.parse(placesJson) : defaultPlaces()
+    property string renamingPlace: ""           // "si/ii" of the sidebar entry being renamed
     property real wheelValue: .352              // thumbwheel 0..1
     readonly property real iconScale: .55 + wheelValue * 1.05
     readonly property real k: u * iconScale     // px per icon unit (icons are drawn in a 100-unit box)
@@ -50,6 +57,7 @@ Window {
         property alias wheelValue: win.wheelValue
         property alias viewMode: win.viewMode
         property alias showHidden: win.showHidden
+        property alias places: win.placesJson
         property alias width: win.width
         property alias height: win.height
     }
@@ -75,6 +83,35 @@ Window {
     function goForward() { if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
     function activate(path, isDir) { isDir ? go(path) : Fm.open(path) }
+
+    // Editable path bar (click the path, Ctrl+L, Ctrl+Shift+G, or type / or ~ in the file view).
+    function editPath(initial) {
+        const typed = typeof initial === "string"
+        editingPath = true
+        pathInput.text = typed ? initial : (dir === "/" ? "/" : dir + "/")
+        pathInput.forceActiveFocus()
+        if (!typed) pathInput.selectAll()
+        else pathInput.cursorPosition = pathInput.text.length
+    }
+    function cancelPath() { editingPath = false; keys.forceActiveFocus() }
+    // Returns false (and flashes the bar) when the path doesn't exist; the field stays open then.
+    function submitPath(text) {
+        const r = Fm.resolvePath(text, dir)
+        if (!r.ok) { pathError.restart(); return false }
+        editingPath = false
+        keys.forceActiveFocus()
+        go(r.dir)
+        if (r.file) { selectAfterLoad = r.file; selectPending() }
+        return true
+    }
+    function selectPending() {
+        if (!selectAfterLoad) return
+        const i = folder.indexOf("file://" + selectAfterLoad)
+        if (i < 0) return
+        selectAfterLoad = ""
+        select(i, folder.get(i, "filePath"), 0)
+        view().positionViewAtIndex(i, ListView.Contain)
+    }
 
     // ---- selection -----------------------------------------------------------
     function view() { return viewMode === 1 ? list : grid }
@@ -107,6 +144,65 @@ Window {
         const bottom = Math.max(top, v.originY + v.contentHeight + v.bottomMargin - v.height)
         v.contentY = Math.max(top, Math.min(bottom, v.contentY - dy))
     }
+    // ---- sidebar places ----------------------------------------------------------
+    function defaultPlaces() {
+        return [
+            { title: "Favorites", color: "#0a84ff", items: [
+                { label: "", path: "~" }, { label: "Desktop", path: "~/Desktop" }, { label: "Documents", path: "~/Documents" },
+                { label: "Downloads", path: "~/Downloads" }, { label: "Applications", path: "~/Applications" }] },
+            { title: "Indigo Magic", color: "#bf5af2", items: [
+                { label: "Icon Catalog", path: "/usr/share/applications" }, { label: "Desks Overview", action: "overview" },
+                { label: "File QuickFind", action: "find" }] },
+            { title: "Locations", color: "#98989d", items: [
+                { label: "cachyOS", path: "/" }, { label: "Network", action: "network" }] }
+        ]
+    }
+    function expand(p) { return p === "~" ? Fm.home : p.startsWith("~/") ? Fm.home + p.substring(1) : p }
+    function shorten(p) { return p === Fm.home ? "~" : p.startsWith(Fm.home + "/") ? "~" + p.substring(Fm.home.length) : p }
+    function placeLabel(item) { return item.label || (item.path === "~" ? Fm.userName : item.path.split("/").pop() || "/") }
+    function setPlaces(p) { placesJson = JSON.stringify(p) }
+    function copyPlaces() { return JSON.parse(JSON.stringify(places)) }
+    // Adds folder `path` to section `si` at position `at` (default: end). Returns false for duplicates.
+    function placeAdd(si, path, at) {
+        const p = copyPlaces(), short = shorten(path)
+        if (p[si].items.some(it => it.path && expand(it.path) === path)) return false
+        const item = { label: "", path: short }
+        p[si].items.splice(at === undefined || at < 0 ? p[si].items.length : at, 0, item)
+        setPlaces(p)
+        return true
+    }
+    function placeRemove(si, ii) { const p = copyPlaces(); p[si].items.splice(ii, 1); setPlaces(p) }
+    function placeRename(si, ii, label) { const p = copyPlaces(); p[si].items[ii].label = label.trim(); setPlaces(p) }
+    function placeMove(si, ii, delta) {
+        const p = copyPlaces(), items = p[si].items, j = ii + delta
+        if (j < 0 || j >= items.length) return
+        const [it] = items.splice(ii, 1); items.splice(j, 0, it); setPlaces(p)
+    }
+    function placeMoveTo(si, ii, sj) { const p = copyPlaces(); const [it] = p[si].items.splice(ii, 1); p[sj].items.push(it); setPlaces(p) }
+    function resetPlaces() { placesJson = "" }
+    function activatePlace(item) {
+        if (item.path) go(expand(item.path))
+        else if (item.action === "overview") Fm.overview()
+        else if (item.action === "find") search.forceActiveFocus()
+        else if (item.action === "network") Fm.openInDolphin("remote:/")
+    }
+    function dropOnPlaces(urls, si, at) {
+        let pos = at
+        for (const u of urls) {
+            const path = decodeURIComponent(u.toString().replace(/^file:\/\//, ""))
+            if (Fm.kind(path) === "folder" && placeAdd(si, path, pos) && pos !== undefined && pos >= 0) ++pos
+        }
+    }
+    // Rows for the sidebar list: a header per section, its items, or a drop hint when it's empty.
+    readonly property var placeRows: {
+        const rows = []
+        places.forEach((sec, si) => {
+            rows.push({ kind: "head", si: si, title: sec.title, first: si === 0 })
+            sec.items.forEach((it, ii) => rows.push({ kind: "item", si: si, ii: ii, item: it, color: sec.color }))
+            if (!sec.items.length) rows.push({ kind: "empty", si: si })
+        })
+        return rows
+    }
     function trashSelected() { Fm.trash(paths()); selection = ({}) }
     function newFolder() { const p = Fm.makeFolder(dir); const s = ({}); s[p] = true; selection = s; renaming = p }
 
@@ -119,6 +215,8 @@ Window {
         caseSensitive: false
         sortCaseSensitive: false
         nameFilters: search.text ? ["*" + search.text + "*"] : []
+        onCountChanged: win.selectPending()
+        onStatusChanged: win.selectPending()
     }
 
     // ---- glass ---------------------------------------------------------------
@@ -158,58 +256,96 @@ Window {
 
         TrafficLights { window: win; x: 17.5 * win.u; y: 26 * win.u - height / 2 }
 
-        readonly property string h: Fm.home
-        readonly property var entries: [
-            { b: 72, head: "Favorites" },
-            { b: 100, label: Fm.userName, path: h, c: "#0a84ff" },
-            { b: 130, label: "Desktop", path: h + "/Desktop", c: "#0a84ff" },
-            { b: 160, label: "Documents", path: h + "/Documents", c: "#0a84ff" },
-            { b: 190, label: "Downloads", path: h + "/Downloads", c: "#0a84ff" },
-            { b: 220, label: "Applications", path: h + "/Applications", c: "#0a84ff" },
-            { b: 280, head: "Indigo Magic" },
-            { b: 308, label: "Icon Catalog", path: "/usr/share/applications", c: "#bf5af2" },
-            { b: 338, label: "Desks Overview", action: "overview", c: "#bf5af2" },
-            { b: 368, label: "File QuickFind", action: "find", c: "#bf5af2" },
-            { b: 428, head: "Locations" },
-            { b: 456, label: "cachyOS", path: "/", c: "#98989d" },
-            { b: 486, label: "Network", action: "network", c: "#98989d" }
-        ]
-        Repeater {
-            model: sidebar.entries
-            Item {
-                id: entry
+        // Places list: scrolls (scroll bar, touchpad, wheel) when the window is too short for it.
+        ListView {
+            id: placesView
+            objectName: "places"
+            x: 0; y: 10 * win.u + 41 * win.tu
+            width: parent.width; height: parent.height - y - 10 * win.u
+            clip: true
+            interactive: false
+            boundsBehavior: Flickable.StopAtBounds
+            model: win.placeRows
+            ScrollBar.vertical: GlassScrollBar { u: win.u }
+            WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: event => win.scroll(placesView, event)
+            }
+            delegate: Item {
+                id: row
                 required property var modelData
-                readonly property bool current: modelData.path !== undefined && modelData.path === win.dir
-                x: 0; y: 10 * win.u + (modelData.b - 31) * win.tu; width: sidebar.width; height: 30 * win.tu
+                required property int index
+                readonly property bool head: modelData.kind === "head"
+                readonly property bool item: modelData.kind === "item"
+                readonly property bool current: item && !!modelData.item.path && win.expand(modelData.item.path) === win.dir
+                readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
+                // Header rows carry the gap above them, so baselines match the mockup.
+                readonly property real gap: head && !modelData.first ? 30 * win.tu : 0
+                width: placesView.width
+                height: gap + (head ? 28 : 30) * win.tu
+
                 Rectangle {
-                    visible: entry.current || (hov.hovered && !entry.modelData.head)
+                    visible: row.item && (row.current || hov.hovered || drop.containsDrag)
                     x: 14 * win.u; y: 4 * win.tu; width: 196 * win.u; height: 26 * win.tu; radius: 8 * win.tu
-                    color: Qt.rgba(1, 1, 1, entry.current ? .16 : .07)
+                    color: Qt.rgba(1, 1, 1, row.current || drop.containsDrag ? .16 : .07)
+                }
+                Rectangle {   // drop target line for headers / empty sections
+                    visible: !row.item && drop.containsDrag
+                    x: 14 * win.u; y: row.height - 3 * win.tu; width: 196 * win.u; height: 2 * win.tu; radius: 1
+                    color: "#0a84ff"
                 }
                 Rectangle {
-                    visible: !entry.modelData.head
+                    visible: row.item
                     x: 22 * win.u; y: 9 * win.tu; width: 15 * win.tu; height: 13 * win.tu; radius: 3 * win.tu
-                    color: "transparent"; border.color: entry.modelData.c || "transparent"; border.width: 1.6 * win.u
+                    color: "transparent"; border.color: row.modelData.color || "transparent"; border.width: 1.6 * win.u
                 }
                 Text {
-                    x: (entry.modelData.head ? 16 : 48) * win.u
-                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu
-                    text: entry.modelData.head || entry.modelData.label
-                    color: "white"; opacity: entry.modelData.head ? .45 : 1
+                    visible: !(row.item && win.renamingPlace === row.key)
+                    x: (row.head ? 16 : row.item ? 48 : 22) * win.u
+                    width: (row.head ? 170 : 160) * win.u
+                    elide: Text.ElideRight
+                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
+                    text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item) : "Drop folders here"
+                    color: "white"; opacity: row.head ? .45 : row.item ? 1 : .3
                     font.family: win.fontFamily
-                    font.pixelSize: (entry.modelData.head ? 11 : 13.5) * win.tu
-                    font.weight: entry.modelData.head ? Font.DemiBold : Font.Normal
+                    font.pixelSize: (row.head ? 11 : row.item ? 13.5 : 12) * win.tu
+                    font.weight: row.head ? Font.DemiBold : Font.Normal
+                }
+                Rename {
+                    active: row.item && win.renamingPlace === row.key
+                    x: 44 * win.u; width: 160 * win.u; y: 4 * win.tu
+                    name: row.item ? win.placeLabel(row.modelData.item) : ""
+                    u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
+                    onCommitted: text => win.placeRename(row.modelData.si, row.modelData.ii, text)
+                    onDone: { win.renamingPlace = ""; keys.forceActiveFocus() }
+                }
+                Text {   // "+" on a hovered header: add the current folder to this section
+                    visible: row.head && hov.hovered
+                    anchors.right: parent.right; anchors.rightMargin: 18 * win.u
+                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
+                    text: "+"; color: "white"; opacity: plusHover.hovered ? .9 : .5
+                    font.family: win.fontFamily; font.pixelSize: 15 * win.tu; font.weight: Font.DemiBold
+                    HoverHandler { id: plusHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: win.placeAdd(row.modelData.si, win.dir) }
                 }
                 HoverHandler { id: hov }
-                TapHandler {
-                    enabled: !entry.modelData.head
-                    onTapped: {
-                        const e = entry.modelData
-                        if (e.path) win.go(e.path)
-                        else if (e.action === "overview") Fm.overview()
-                        else if (e.action === "find") search.forceActiveFocus()
-                        else if (e.action === "network") Fm.openInDolphin("remote:/")
+                MouseArea {
+                    anchors.fill: parent; anchors.rightMargin: row.head ? 36 * win.u : 0
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: m => {
+                        keys.forceActiveFocus()
+                        placeMenu.si = row.modelData.si
+                        placeMenu.ii = row.item ? row.modelData.ii : -1
+                        if (m.button === Qt.RightButton) (row.item ? placeMenu : sectionMenu).open()
+                        else if (row.item) win.activatePlace(row.modelData.item)
                     }
+                }
+                DropArea {
+                    id: drop
+                    anchors.fill: parent
+                    keys: ["text/uri-list"]
+                    // Dropping on an entry inserts after it; on a header, at the top of the section.
+                    onDropped: d => { win.dropOnPlaces(d.urls, row.modelData.si, row.item ? row.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
                 }
             }
         }
@@ -235,6 +371,7 @@ Window {
     Pill {
         id: pathPill
         x: 350 * u; y: 18 * u; height: 36 * u
+        transform: Translate { id: pathShake }
         width: viewPill.x - 15 * u - x
         // Drop pocket: the current directory as a draggable IRIX icon.
         Rectangle {
@@ -256,9 +393,15 @@ Window {
         }
         Item {
             id: crumbsClip
+            visible: !win.editingPath
             x: 54 * win.u; y: 0; height: parent.height
             width: parent.width - x - 44 * win.u
             clip: true
+            MouseArea {   // empty part of the path bar: start typing a path
+                anchors.fill: parent
+                cursorShape: Qt.IBeamCursor
+                onClicked: win.editPath()
+            }
             Row {
                 id: crumbs
                 x: Math.min(0, crumbsClip.width - width)
@@ -282,8 +425,11 @@ Window {
                             text: crumb.modelData.label; color: "white"; opacity: crumb.last ? 1 : .7
                             font.family: win.fontFamily; font.pixelSize: 13.5 * win.tu
                             font.weight: crumb.last ? Font.DemiBold : Font.Normal
-                            TapHandler { onTapped: win.go(crumb.modelData.path) }
-                            HoverHandler { cursorShape: Qt.PointingHandCursor }
+                            MouseArea {   // a parent folder: go there; the current folder: edit the path
+                                anchors.fill: parent
+                                cursorShape: crumb.last ? Qt.IBeamCursor : Qt.PointingHandCursor
+                                onClicked: crumb.last ? win.editPath() : win.go(crumb.modelData.path)
+                            }
                         }
                         Text {
                             visible: !crumb.last
@@ -293,6 +439,50 @@ Window {
                         }
                     }
                 }
+            }
+        }
+        TextInput {
+            id: pathInput
+            objectName: "pathInput"
+            visible: win.editingPath
+            x: 54 * win.u; width: parent.width - x - 44 * win.u
+            anchors.verticalCenter: parent.verticalCenter
+            color: "white"; selectionColor: "#0a84ff"; selectedTextColor: "white"
+            font.family: win.fontFamily; font.pixelSize: 13.5 * win.tu
+            clip: true
+            // What Tab would complete to, shown greyed out after the cursor.
+            readonly property string completion: activeFocus && cursorPosition === length && length > 0
+                                                 ? Fm.completePath(text, win.dir) : ""
+            readonly property string ghost: completion.toLowerCase().startsWith(text.toLowerCase()) ? completion.substring(length) : ""
+            Text {
+                visible: pathInput.ghost.length > 0 && pathInput.selectedText.length === 0
+                x: pathInput.positionToRectangle(pathInput.length).x
+                anchors.verticalCenter: parent.verticalCenter
+                text: pathInput.ghost; color: "white"; opacity: .35
+                font: pathInput.font
+            }
+            Keys.onReturnPressed: win.submitPath(text)
+            Keys.onEnterPressed: win.submitPath(text)
+            Keys.onEscapePressed: win.cancelPath()
+            Keys.onTabPressed: event => { text = Fm.completePath(text, win.dir); cursorPosition = length; event.accepted = true }
+            onActiveFocusChanged: if (!activeFocus && win.editingPath) win.editingPath = false
+        }
+        Rectangle {   // focus ring while typing; flashes red for a path that doesn't exist
+            id: pathRing
+            visible: win.editingPath
+            anchors.fill: parent; anchors.margins: -1.5
+            radius: height / 2
+            color: "transparent"
+            border.width: 2; border.color: Qt.rgba(10 / 255, 132 / 255, 1, .85)
+            SequentialAnimation {
+                id: pathError
+                ColorAnimation { target: pathRing; property: "border.color"; to: "#ff453a"; duration: 60 }
+                NumberAnimation { target: pathShake; property: "x"; from: 0; to: -6; duration: 50 }
+                NumberAnimation { target: pathShake; property: "x"; to: 6; duration: 70 }
+                NumberAnimation { target: pathShake; property: "x"; to: -3; duration: 60 }
+                NumberAnimation { target: pathShake; property: "x"; to: 0; duration: 50 }
+                PauseAnimation { duration: 350 }
+                ColorAnimation { target: pathRing; property: "border.color"; to: Qt.rgba(10 / 255, 132 / 255, 1, .85); duration: 200 }
             }
         }
         Text {
@@ -380,6 +570,9 @@ Window {
             const cols = Math.max(1, Math.floor(grid.width / grid.cellWidth))
             const vertical = win.viewMode === 1 ? 1 : cols
             if (win.renaming) return
+            if ((event.text === "/" || event.text === "~") && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+                win.editPath(event.text); event.accepted = true; return
+            }
             if (event.key === Qt.Key_Left && event.modifiers & Qt.AltModifier) win.goBack()
             else if (event.key === Qt.Key_Right && event.modifiers & Qt.AltModifier) win.goForward()
             else if (event.key === Qt.Key_Up && event.modifiers & Qt.AltModifier) win.goUp()
@@ -418,7 +611,7 @@ Window {
         model: folder
         interactive: false
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: GlassScrollBar { u: win.u }
         // The grid is non-interactive (so a left drag draws a rubber band), so scrolling is done here.
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -590,7 +783,7 @@ Window {
         clip: true
         model: folder
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: GlassScrollBar { u: win.u }
         headerPositioning: ListView.OverlayHeader
         header: Item {
             z: 2; width: list.width; height: 26 * win.tu
@@ -758,6 +951,45 @@ Window {
     }
 
     // ---- menus -----------------------------------------------------------------
+    // Sidebar menus: `si`/`ii` say which section/entry was right-clicked (ii = -1 for a header).
+    P.Menu {
+        id: placeMenu
+        property int si: 0
+        property int ii: -1
+        readonly property var entry: ii >= 0 && win.places[si] ? win.places[si].items[ii] : null
+        P.MenuItem { text: "Open in New Window"; visible: !!(placeMenu.entry && placeMenu.entry.path); onTriggered: Fm.newWindow(win.expand(placeMenu.entry.path)) }
+        P.MenuItem { text: "Rename…"; onTriggered: win.renamingPlace = placeMenu.si + "/" + placeMenu.ii }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Move Up"; enabled: placeMenu.ii > 0; onTriggered: win.placeMove(placeMenu.si, placeMenu.ii, -1) }
+        P.MenuItem { text: "Move Down"; enabled: !!win.places[placeMenu.si] && placeMenu.ii < win.places[placeMenu.si].items.length - 1; onTriggered: win.placeMove(placeMenu.si, placeMenu.ii, 1) }
+        Instantiator {
+            model: win.places.length
+            delegate: P.MenuItem {
+                required property int index
+                visible: index !== placeMenu.si
+                text: "Move to " + (win.places[index] ? win.places[index].title : "")
+                onTriggered: win.placeMoveTo(placeMenu.si, placeMenu.ii, index)
+            }
+            onObjectAdded: (i, o) => placeMenu.insertItem(5 + i, o)
+            onObjectRemoved: (i, o) => placeMenu.removeItem(o)
+        }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Remove from Sidebar"; onTriggered: win.placeRemove(placeMenu.si, placeMenu.ii) }
+    }
+    P.Menu {
+        id: sectionMenu
+        P.MenuItem { text: "Add Current Folder"; onTriggered: win.placeAdd(placeMenu.si, win.dir) }
+        P.MenuItem { text: "Add Folder…"; onTriggered: { folderPicker.si = placeMenu.si; folderPicker.folder = "file://" + win.dir; folderPicker.open() } }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Reset Sidebar"; onTriggered: win.resetPlaces() }
+    }
+    P.FolderDialog {
+        id: folderPicker
+        property int si: 0
+        title: "Add Folder to " + (win.places[si] ? win.places[si].title : "Sidebar")
+        onAccepted: win.placeAdd(si, decodeURIComponent(folder.toString().replace(/^file:\/\//, "")))
+    }
+
     P.Menu {
         id: itemMenu
         P.MenuItem { text: "Open"; onTriggered: { for (const p of win.paths()) win.activate(p, folder.get(folder.indexOf("file://" + p), "fileIsDir")) } }
@@ -766,6 +998,20 @@ Window {
         P.MenuItem { text: "Rename…"; enabled: win.paths().length === 1; onTriggered: win.renaming = win.paths()[0] }
         P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
         P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
+        P.Menu {
+            id: addToSidebar
+            title: "Add to Sidebar"
+            Instantiator {
+                model: win.places.length
+                delegate: P.MenuItem {
+                    required property int index
+                    text: win.places[index] ? win.places[index].title : ""
+                    onTriggered: { for (const p of win.paths()) if (Fm.kind(p) === "folder") win.placeAdd(index, p) }
+                }
+                onObjectAdded: (i, o) => addToSidebar.insertItem(i, o)
+                onObjectRemoved: (i, o) => addToSidebar.removeItem(o)
+            }
+        }
         P.MenuSeparator {}
         P.MenuItem { text: "Move to Trash"; onTriggered: win.trashSelected() }
     }
@@ -773,6 +1019,7 @@ Window {
         id: bgMenu
         P.MenuItem { text: "New Folder"; onTriggered: win.newFolder() }
         P.MenuItem { text: "Paste"; onTriggered: Fm.paste(win.dir) }
+        P.MenuItem { text: "Add Current Folder to Favorites"; onTriggered: win.placeAdd(0, win.dir) }
         P.MenuSeparator {}
         P.MenuItem { text: "Open Terminal Here"; onTriggered: Fm.openTerminal(win.dir) }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
@@ -831,6 +1078,7 @@ Window {
             P.MenuItem { text: "Back\tAlt+Left"; onTriggered: win.goBack() }
             P.MenuItem { text: "Forward\tAlt+Right"; onTriggered: win.goForward() }
             P.MenuItem { text: "Enclosing Folder\tAlt+Up"; onTriggered: win.goUp() }
+            P.MenuItem { text: "Go to Folder…\tCtrl+Shift+G"; onTriggered: win.editPath() }
             P.MenuSeparator {}
             P.MenuItem { text: "Home\tCtrl+Shift+H"; onTriggered: win.go(Fm.home) }
             P.MenuItem { text: "Desktop"; onTriggered: win.go(Fm.home + "/Desktop") }
@@ -860,6 +1108,7 @@ Window {
     Shortcut { sequences: [StandardKey.Paste]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.paste(win.dir) }
     Shortcut { sequences: [StandardKey.SelectAll]; enabled: !search.activeFocus && !win.renaming; onActivated: win.selectAll() }
     Shortcut { sequence: "Ctrl+F"; onActivated: search.forceActiveFocus() }
+    Shortcut { sequences: ["Ctrl+L", "Ctrl+Shift+G"]; onActivated: win.editPath() }
     Shortcut { sequence: "Ctrl+H"; onActivated: win.showHidden = !win.showHidden }
     Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.go(Fm.home) }
     Shortcut { sequence: "Ctrl+1"; onActivated: win.viewMode = 0 }
