@@ -1,6 +1,8 @@
 #include "fm.h"
 
 #include <QApplication>
+#include <KSignalHandler>
+#include <csignal>
 #include <QIcon>
 #include <QDir>
 #include <QFileInfo>
@@ -20,6 +22,10 @@ int main(int argc, char *argv[])
     // The dock and window switcher show the icon theme's normal file manager icon, not the IRIX one.
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("system-file-manager")));
     QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
+    // Quit cleanly on SIGTERM/SIGINT (pkill, logout) so the settings (sidebar, sizes, …) get saved.
+    KSignalHandler::self()->watchSignal(SIGTERM);
+    KSignalHandler::self()->watchSignal(SIGINT);
+    QObject::connect(KSignalHandler::self(), &KSignalHandler::signalReceived, &app, [] { QCoreApplication::quit(); });
 
     // QML and icons live next to the binary in development, in ~/.local/share/irixfm when installed.
     QString assets = qEnvironmentVariable("IRIXFM_ASSETS");

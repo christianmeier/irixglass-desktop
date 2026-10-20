@@ -132,8 +132,8 @@ int main(int argc, char *argv[])
         const int locs = labels(win, 2).size();
         call(win, "placeRemove", {2, locs - 1});
         check(labels(win, 2).size() == locs - 1, QStringLiteral("remove an entry"), labels(win, 2).join(", "));
-        call(win, "placeRemove", {2, 0});
-        call(win, "placeRemove", {2, 0});
+        while (!labels(win, 2).isEmpty())   // cachyOS, Network, Trash
+            call(win, "placeRemove", {2, 0});
         QQuickItem *empty = nullptr;
         QTest::qWait(100);
         // Delegates are visual children of the list's content item.
@@ -153,7 +153,8 @@ int main(int argc, char *argv[])
         // --- saved, and reset
         check(!win->property("placesJson").toString().isEmpty(), QStringLiteral("changes are kept in the settings"));
         call(win, "resetPlaces", {});
-        check(labels(win, 2).size() == 2 && labels(win, 1).size() == 3, QStringLiteral("Reset Sidebar restores the defaults"));
+        check(labels(win, 2).size() == 3 && labels(win, 2).last() == QStringLiteral("Trash") && labels(win, 1).size() == 3,
+              QStringLiteral("Reset Sidebar restores the defaults (with Trash)"), labels(win, 2).join(", "));
         app.exit(failures ? 1 : 0);
     });
     return app.exec();

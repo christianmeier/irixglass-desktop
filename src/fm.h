@@ -1,6 +1,8 @@
 // fm: IRIX-style file manager themed like macOS Tahoe. C++ side: window effects and KIO file actions.
 #pragma once
 
+#include <QAtomicInt>
+#include <QHash>
 #include <QObject>
 #include <QPointer>
 #include <QStringList>
@@ -19,6 +21,8 @@ class Fm : public QObject
     Q_PROPERTY(QString assetDir MEMBER m_assetDir CONSTANT)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
+    Q_PROPERTY(QString trashDir READ trashDir CONSTANT)
+    Q_PROPERTY(QVariantList volumes READ volumes NOTIFY volumesChanged)
 
 public:
     Fm(const QString &startDir, const QString &assetDir, QObject *parent = nullptr);
@@ -27,6 +31,8 @@ public:
     QString userName() const;
     bool canUndo() const;
     QString undoText() const;
+    QString trashDir() const;
+    QVariantList volumes() const;
 
     // Blur behind + input mask in the window's rounded shape, plus a compositor-drawn shadow.
     Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow);
@@ -70,13 +76,49 @@ public:
     Q_INVOKABLE void folderSize(const QString &path);               // answers with folderSizeReady
     Q_INVOKABLE QString textPreview(const QString &path, int maxBytes = 262144) const;  // "" for binary files
 
+    // Trash: the home trash is listed directly (trashDir); Put Back and Empty go through KIO.
+    Q_INVOKABLE void restoreFromTrash(const QStringList &paths);
+    Q_INVOKABLE void emptyTrash();
+    Q_INVOKABLE void deletePermanently(const QStringList &paths);
+    Q_INVOKABLE int trashCount() const;
+
+    // Open With: apps for the item's type (default first); an empty id shows KDE's "Open With" dialog.
+    Q_INVOKABLE QVariantList appsFor(const QString &path) const;
+    Q_INVOKABLE void openWith(const QStringList &paths, const QString &appId);
+
+    // Removable drives (Solid): mount on click, eject.
+    Q_INVOKABLE void mountVolume(const QString &udi);
+    Q_INVOKABLE void ejectVolume(const QString &udi);
+
+    // Search by name in a background thread (in root only, or with all subfolders); results
+    // arrive in batches as searchBatch, then searchDone.
+    Q_INVOKABLE void startSearch(const QString &root, const QString &text, bool hidden, bool recursive);
+    Q_INVOKABLE void stopSearch();
+
+    // Compress (zip) and expand archives in a background thread; answers with archiveDone.
+    Q_INVOKABLE bool isArchive(const QString &path) const;
+    Q_INVOKABLE QString compress(const QStringList &paths);
+    Q_INVOKABLE QString expand(const QString &path);
+
 Q_SIGNALS:
     void undoChanged();
     void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
+    void volumesChanged();
+    void volumeMounted(const QString &udi, const QString &path);
+    void volumeError(const QString &message);
+    void searchBatch(const QVariantList &items);
+    void searchDone(int count, bool truncated);
+    void archiveDone(const QString &path, bool ok);
 
 private:
+    void refreshVolumes();
+    void startNextSize();
     static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
     QString m_assetDir;
     QPointer<KWindowShadow> m_shadow;
+    QVariantList m_volumes;
+    QStringList m_sizeQueue;    // folder-size requests waiting; at most kMaxSizeJobs run at once
+    int m_sizeRunning = 0;
+    QAtomicInt m_searchGen;     // bumped to cancel the running search
 };

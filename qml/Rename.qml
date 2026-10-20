@@ -12,6 +12,7 @@ Loader {
     signal done()
     signal committed(string text)
     active: false
+    visible: active      // takes no room in a Row (the list view's columns) unless it's in use
     height: 22 * u
     sourceComponent: Rectangle {
         radius: 5 * rename.u

@@ -23,7 +23,7 @@ Window {
     property string dir: Fm.startDir
     property var backStack: []
     property var fwdStack: []
-    property var recent: []
+    property var recent: []                     // Recent Folders (loaded from recentJson at start)
     property var selection: ({})                // path -> true
     property int anchorIndex: -1
     property string renaming: ""
@@ -38,6 +38,29 @@ Window {
     property string quickLook: ""               // path shown in Quick Look ("" = closed)
     property var pendingSelect: []              // paths to select once they appear (duplicate, alias, typed file)
     property string typeAhead: ""               // type-to-select buffer
+    // Phase 2
+    property bool sidebarShown: true
+    property bool previewShown: false
+    property bool calcSizes: true               // folder sizes in the list view
+    property var folderSizes: ({})              // path -> size text, filled by Fm.folderSizeReady
+    property string recentJson: "[]"            // Recent Folders, saved
+    property int searchScope: 1                 // 0 this folder, 1 with subfolders, 2 home
+    property bool trashAdded: false             // one-time: Trash added to the saved sidebar
+    property var searchResults: []              // [{name, path, where, isDir, modified, size}]
+    property bool searching: false
+    property bool searchTruncated: false
+    property int resultIndex: -1
+    property var volumes: Fm.volumes            // removable drives (Solid); a property so tests can fake one
+    readonly property bool searchActive: search.text.length > 0
+    readonly property bool inTrash: dir === Fm.trashDir || dir.startsWith(Fm.trashDir + "/")
+    // Layout: the sidebar slides away (sideShift) and the preview pane takes room on the right.
+    readonly property int springDelay: 900      // ms hovering with a drag before a folder opens
+    readonly property real hiddenShift: 98 * u   // how far the toolbar/content move left without the sidebar
+    property real sideShift: sidebarShown ? 0 : hiddenShift
+    Behavior on sideShift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    property real previewW: previewShown ? 280 * u : 0
+    Behavior on previewW { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    readonly property real scopeH: searchActive ? 34 * tu : 0
     property real wheelValue: .352              // thumbwheel 0..1
     readonly property real iconScale: .55 + wheelValue * 1.05
     readonly property real k: u * iconScale     // px per icon unit (icons are drawn in a 100-unit box)
@@ -57,6 +80,7 @@ Window {
     title: (dir === "/" ? "/" : dir.split("/").pop()) + " — fm"
 
     Settings {
+        id: settings
         category: "fm"
         property alias wheelValue: win.wheelValue
         property alias viewMode: win.viewMode
@@ -64,6 +88,12 @@ Window {
         property alias places: win.placesJson
         property alias sortField: win.sortField
         property alias sortReversed: win.sortReversed
+        property alias sidebarShown: win.sidebarShown
+        property alias previewShown: win.previewShown
+        property alias calcSizes: win.calcSizes
+        property alias recent: win.recentJson
+        property alias searchScope: win.searchScope
+        property alias trashAdded: win.trashAdded
         property alias width: win.width
         property alias height: win.height
     }
@@ -73,7 +103,18 @@ Window {
     onWidthChanged: shape()
     onHeightChanged: shape()
     onVisibilityChanged: shape()
-    Component.onCompleted: Qt.callLater(shape)
+    Component.onCompleted: {
+        Qt.callLater(shape)
+        // Older saved sidebars don't have Trash yet: add it once to Locations.
+        if (!trashAdded) {
+            const p = copyPlaces(), li = Math.max(0, p.findIndex(sec => sec.title === "Locations"))
+            if (!p.some(sec => sec.items.some(it => it.action === "trash"))) { p[li].items.push({ label: "Trash", action: "trash" }); setPlaces(p) }
+            trashAdded = true
+        }
+    }
+
+    onRecentJsonChanged: if (!recent.length) { try { recent = JSON.parse(recentJson) } catch (e) { recent = [] } }
+    function clearRecent() { recent = []; recentJson = "[]" }
 
     // ---- navigation ----------------------------------------------------------
     function go(path, fromHistory) {
@@ -82,7 +123,9 @@ Window {
         dir = path
         selection = ({}); anchorIndex = -1; renaming = ""
         search.text = ""
+        folderSizes = ({})
         recent = [path].concat(recent.filter(p => p !== path)).slice(0, 12)
+        recentJson = JSON.stringify(recent)
         view().positionViewAtBeginning()
     }
     function goBack() { if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
@@ -166,13 +209,13 @@ Window {
                 { label: "Icon Catalog", path: "/usr/share/applications" }, { label: "Desks Overview", action: "overview" },
                 { label: "File QuickFind", action: "find" }] },
             { title: "Locations", color: "#98989d", items: [
-                { label: "cachyOS", path: "/" }, { label: "Network", action: "network" }] }
+                { label: "cachyOS", path: "/" }, { label: "Network", action: "network" }, { label: "Trash", action: "trash" }] }
         ]
     }
     function expand(p) { return p === "~" ? Fm.home : p.startsWith("~/") ? Fm.home + p.substring(1) : p }
     function shorten(p) { return p === Fm.home ? "~" : p.startsWith(Fm.home + "/") ? "~" + p.substring(Fm.home.length) : p }
     function placeLabel(item) { return item.label || (item.path === "~" ? Fm.userName : item.path.split("/").pop() || "/") }
-    function setPlaces(p) { placesJson = JSON.stringify(p) }
+    function setPlaces(p) { placesJson = JSON.stringify(p); settings.sync() }   // saved right away
     function copyPlaces() { return JSON.parse(JSON.stringify(places)) }
     // Adds folder `path` to section `si` at position `at` (default: end). Returns false for duplicates.
     function placeAdd(si, path, at) {
@@ -191,8 +234,10 @@ Window {
         const [it] = items.splice(ii, 1); items.splice(j, 0, it); setPlaces(p)
     }
     function placeMoveTo(si, ii, sj) { const p = copyPlaces(); const [it] = p[si].items.splice(ii, 1); p[sj].items.push(it); setPlaces(p) }
-    function resetPlaces() { placesJson = "" }
+    function resetPlaces() { placesJson = ""; settings.sync() }
     function activatePlace(item) {
+        if (item.udi !== undefined) { item.mounted ? go(item.path) : Fm.mountVolume(item.udi); return }
+        if (item.action === "trash") { go(Fm.trashDir); return }
         if (item.path) go(expand(item.path))
         else if (item.action === "overview") Fm.overview()
         else if (item.action === "find") search.forceActiveFocus()
@@ -212,8 +257,23 @@ Window {
             rows.push({ kind: "head", si: si, title: sec.title, first: si === 0 })
             sec.items.forEach((it, ii) => rows.push({ kind: "item", si: si, ii: ii, item: it, color: sec.color }))
             if (!sec.items.length) rows.push({ kind: "empty", si: si })
+            // Removable drives appear at the end of Locations (not saved; they come and go).
+            if (sec.title === "Locations" || (si === places.length - 1 && !places.some(x => x.title === "Locations")))
+                volumes.forEach(v => rows.push({ kind: "volume", si: si, item: v, color: sec.color }))
         })
         return rows
+    }
+    Connections {
+        target: Fm
+        function onVolumeMounted(udi, path) { win.go(path) }
+        function onFolderSizeReady(p, bytes, files, folders) {
+            const s = Object.assign({}, win.folderSizes)
+            s[p] = bytes < 0 ? "--" : Fm.humanSize(bytes)
+            win.folderSizes = s
+        }
+        function onSearchBatch(items) { win.searchResults = win.searchResults.concat(items) }
+        function onSearchDone(count, truncated) { win.searching = false; win.searchTruncated = truncated }
+        function onArchiveDone(path, ok) { if (ok) win.selectWhenReady([path]) }
     }
     // ---- Finder commands -----------------------------------------------------------
     function sortBy(field) {
@@ -233,6 +293,7 @@ Window {
     }
     // Quick Look shows the focused item (the last one clicked or reached with the keys).
     function focusedPath() {
+        if (searchActive) return resultIndex >= 0 && searchResults[resultIndex] ? searchResults[resultIndex].path : (paths()[0] || "")
         const p = anchorIndex >= 0 ? folder.get(anchorIndex, "filePath") : ""
         return p && selection[p] ? p : (paths()[0] || "")
     }
@@ -252,7 +313,36 @@ Window {
     // Quick Look follows the selection while it's open.
     onSelectionChanged: if (quickLook && paths().length) quickLook = focusedPath()
 
-    function trashSelected() { Fm.trash(paths()); selection = ({}) }
+    function trashSelected() {
+        if (inTrash) { deleteDialog.open(); return }    // in the Trash, Delete means "Delete Immediately"
+        Fm.trash(paths()); selection = ({})
+    }
+    function putBack() { Fm.restoreFromTrash(paths()); selection = ({}) }
+    function emptyTrashNow() { Fm.emptyTrash(); selection = ({}) }
+    function deleteNow() { Fm.deletePermanently(paths()); selection = ({}) }
+    function compressSelected() { if (paths().length) Fm.compress(paths()) }
+    function expandSelected() { for (const p of paths()) if (Fm.isArchive(p)) Fm.expand(p) }
+    // Search: results come from a background scan (Fm.startSearch); the scope bar picks where.
+    function runSearch() {
+        searchResults = []; resultIndex = -1; searchTruncated = false
+        if (!search.text) { Fm.stopSearch(); searching = false; return }
+        searching = true
+        Fm.startSearch(searchScope === 2 ? Fm.home : dir, search.text, showHidden, searchScope !== 0)
+    }
+    Timer { id: searchDelay; interval: 200; onTriggered: win.runSearch() }
+    onSearchScopeChanged: if (searchActive) runSearch()
+    function selectResult(i) {
+        if (i < 0 || i >= searchResults.length) return
+        resultIndex = i
+        const s = ({}); s[searchResults[i].path] = true; selection = s
+        results.positionViewAtIndex(i, ListView.Contain)
+    }
+    function openResult(i) {
+        const r = searchResults[i]
+        if (!r) return
+        if (r.isDir) go(r.path); else Fm.open(r.path)
+    }
+    function showInFolder(path) { const where = path.substring(0, path.lastIndexOf("/")) || "/"; go(where); selectWhenReady([path]) }
     function newFolder() { const p = Fm.makeFolder(dir); const s = ({}); s[p] = true; selection = s; renaming = p }
 
     FolderListModel {
@@ -265,7 +355,6 @@ Window {
         sortCaseSensitive: false
         sortField: win.sortField
         sortReversed: win.sortReversed
-        nameFilters: search.text ? ["*" + search.text + "*"] : []
         onCountChanged: win.selectPending()
         onStatusChanged: win.selectPending()
     }
@@ -281,7 +370,8 @@ Window {
             strokeColor: "transparent"
             fillRule: ShapePath.OddEvenFill
             PathRectangle { x: 0; y: 0; width: win.width; height: win.height; radius: win.r }
-            PathRectangle { x: sidebar.x; y: sidebar.y; width: sidebar.width; height: sidebar.height; radius: 18 * win.u }
+            PathRectangle { x: sidebar.x; y: sidebar.y; width: sidebar.visible ? sidebar.width : 0; height: sidebar.height; radius: 18 * win.u }
+            PathRectangle { x: preview.x; y: preview.y; width: preview.visible ? preview.width : 0; height: preview.height; radius: 18 * win.u }
             PathRectangle { x: navPill.x; y: navPill.y; width: navPill.width; height: navPill.height; radius: navPill.height / 2 }
             PathRectangle { x: pathPill.x; y: pathPill.y; width: pathPill.width; height: pathPill.height; radius: pathPill.height / 2 }
             PathRectangle { x: viewPill.x; y: viewPill.y; width: viewPill.width; height: viewPill.height; radius: viewPill.height / 2 }
@@ -292,7 +382,7 @@ Window {
 
     // Window dragging: empty toolbar strip and sidebar background.
     Item {
-        x: 240 * u; y: 0; width: parent.width - x; height: 72 * u
+        x: 240 * u - win.sideShift; y: 0; width: parent.width - x; height: 72 * u
         DragHandler { target: null; onActiveChanged: if (active) win.startSystemMove() }
         TapHandler { onDoubleTapped: win.maximized ? win.showNormal() : win.showMaximized() }
     }
@@ -300,12 +390,13 @@ Window {
     // ---- sidebar -------------------------------------------------------------
     Item {
         id: sidebar
-        x: 10 * u; y: 10 * u; width: 220 * u; height: parent.height - 20 * u
+        x: 10 * u - win.sideShift * .3; y: 10 * u; width: 220 * u; height: parent.height - 20 * u
+        opacity: 1 - win.sideShift / win.hiddenShift
+        visible: opacity > .01
         Rectangle { anchors.fill: parent; radius: 18 * win.u; color: win.sidebarTint }
         EdgeRing { anchors.fill: parent; radius: 18 * win.u }
         DragHandler { target: null; onActiveChanged: if (active) win.startSystemMove() }
 
-        TrafficLights { window: win; x: 17.5 * win.u; y: 26 * win.u - height / 2 }
 
         // Places list: scrolls (scroll bar, touchpad, wheel) when the window is too short for it.
         ListView {
@@ -327,8 +418,10 @@ Window {
                 required property var modelData
                 required property int index
                 readonly property bool head: modelData.kind === "head"
-                readonly property bool item: modelData.kind === "item"
-                readonly property bool current: item && !!modelData.item.path && win.expand(modelData.item.path) === win.dir
+                readonly property bool vol: modelData.kind === "volume"
+                readonly property bool item: modelData.kind === "item" || vol
+                readonly property bool current: item && (modelData.item.action === "trash" ? win.inTrash
+                                                         : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
                 readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
                 // Header rows carry the gap above them, so baselines match the mockup.
                 readonly property real gap: head && !modelData.first ? 30 * win.tu : 0
@@ -363,7 +456,7 @@ Window {
                     font.weight: row.head ? Font.DemiBold : Font.Normal
                 }
                 Rename {
-                    active: row.item && win.renamingPlace === row.key
+                    active: row.item && !row.vol && win.renamingPlace === row.key
                     x: 44 * win.u; width: 160 * win.u; y: 4 * win.tu
                     name: row.item ? win.placeLabel(row.modelData.item) : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
@@ -379,33 +472,87 @@ Window {
                     HoverHandler { id: plusHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: win.placeAdd(row.modelData.si, win.dir) }
                 }
+                Rectangle {   // ⊖ on a hovered entry: remove it from the sidebar
+                    id: removeButton
+                    objectName: "removeButton"
+                    visible: row.item && !row.vol && hov.hovered && win.renamingPlace !== row.key
+                    anchors.right: parent.right; anchors.rightMargin: 20 * win.u
+                    y: 8.5 * win.tu; width: 14 * win.tu; height: width; radius: width / 2
+                    color: removeHover.hovered ? "#ff453a" : Qt.rgba(1, 1, 1, .25)
+                    Rectangle { anchors.centerIn: parent; width: parent.width * .5; height: 1.6 * win.u; color: "white" }
+                    HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: win.placeRemove(row.modelData.si, row.modelData.ii) }
+                }
+                Text {   // ⏏ on mounted drives
+                    visible: row.vol && row.modelData.item.mounted
+                    anchors.right: parent.right; anchors.rightMargin: 18 * win.u
+                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu
+                    text: "⏏"; color: "white"; opacity: ejectHover.hovered ? .95 : .55
+                    font.pixelSize: 13 * win.tu
+                    HoverHandler { id: ejectHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: Fm.ejectVolume(row.modelData.item.udi) }
+                }
                 HoverHandler { id: hov }
                 MouseArea {
-                    anchors.fill: parent; anchors.rightMargin: row.head ? 36 * win.u : 0
+                    anchors.fill: parent; anchors.rightMargin: row.head || (row.vol && row.modelData.item.mounted) || removeButton.visible ? 36 * win.u : 0
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: m => {
                         keys.forceActiveFocus()
                         placeMenu.si = row.modelData.si
                         placeMenu.ii = row.item ? row.modelData.ii : -1
-                        if (m.button === Qt.RightButton) (row.item ? placeMenu : sectionMenu).open()
+                        if (m.button === Qt.RightButton && row.vol) { volumeMenu.vol = row.modelData.item; volumeMenu.open() }
+                        else if (m.button === Qt.RightButton && row.modelData.item && row.modelData.item.action === "trash") trashMenu.open()
+                        else if (m.button === Qt.RightButton) (row.item ? placeMenu : sectionMenu).open()
                         else if (row.item) win.activatePlace(row.modelData.item)
                     }
+                    onDoubleClicked: m => { if (row.item && !row.vol && m.button === Qt.LeftButton) win.renamingPlace = row.key }
                 }
                 DropArea {
                     id: drop
                     anchors.fill: parent
                     keys: ["text/uri-list"]
-                    // Dropping on an entry inserts after it; on a header, at the top of the section.
-                    onDropped: d => { win.dropOnPlaces(d.urls, row.modelData.si, row.item ? row.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
+                    // Dropping on an entry inserts after it; on a header, at the top of the section. Onto a
+                    // drive copies there; onto Trash moves to the Trash. Hovering opens it (spring-loaded).
+                    onEntered: if (row.item && (row.modelData.item.path || row.modelData.item.action === "trash")) spring.restart()
+                    onExited: spring.stop()
+                    onDropped: d => {
+                        spring.stop()
+                        const it = row.modelData.item
+                        if (row.vol && it.mounted) { Fm.drop(d.urls, it.path, false); d.accept(Qt.CopyAction) }
+                        else if (it && it.action === "trash") { Fm.trash(d.urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, "")))); d.accept(Qt.MoveAction) }
+                        else if (!row.vol) { win.dropOnPlaces(d.urls, row.modelData.si, row.item ? row.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
+                    }
+                }
+                Timer {
+                    id: spring
+                    interval: win.springDelay
+                    onTriggered: win.activatePlace(row.modelData.item)
                 }
             }
         }
     }
 
+    // Traffic lights stay put when the sidebar hides; the sidebar button moves next to them.
+    TrafficLights { z: 5; window: win; x: 27.5 * win.u; y: 36 * win.u - height / 2 }
+    Item {
+        id: sidebarButton
+        objectName: "sidebarButton"
+        z: 5
+        x: 194 * u - win.sideShift * (78 / 98); y: 36 * u - height / 2
+        width: 22 * u; height: 18 * u
+        Rectangle {   // a window with a sidebar
+            anchors.fill: parent; radius: 4 * win.u; color: "transparent"
+            border.color: Qt.rgba(1, 1, 1, sbHover.hovered ? .9 : .55); border.width: 1.5 * win.u
+            Rectangle { x: 6 * win.u; y: 2; width: 1.5 * win.u; height: parent.height - 4; color: parent.border.color }
+        }
+        HoverHandler { id: sbHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: win.sidebarShown = !win.sidebarShown }
+    }
+
     // ---- toolbar -------------------------------------------------------------
     Pill {
         id: navPill
-        x: 250 * u; y: 18 * u; width: 86 * u; height: 36 * u
+        x: 250 * u - win.sideShift; y: 18 * u; width: 86 * u; height: 36 * u
         Text {
             x: 24 * win.u - width / 2; anchors.baseline: parent.top; anchors.baselineOffset: 24 * win.u
             text: "‹"; color: "white"; opacity: win.backStack.length ? 1 : .4
@@ -421,7 +568,7 @@ Window {
 
     Pill {
         id: pathPill
-        x: 350 * u; y: 18 * u; height: 36 * u
+        x: 350 * u - win.sideShift; y: 18 * u; height: 36 * u
         transform: Translate { id: pathShake }
         width: viewPill.x - 15 * u - x
         // Drop pocket: the current directory as a draggable IRIX icon.
@@ -459,6 +606,12 @@ Window {
                 height: parent.height
                 Repeater {
                     model: {
+                        if (win.inTrash) {
+                            const out = [{ label: "Trash", path: Fm.trashDir }]
+                            let acc = Fm.trashDir
+                            for (const p of win.dir.substring(Fm.trashDir.length).split("/").filter(p => p.length)) { acc += "/" + p; out.push({ label: p, path: acc }) }
+                            return out
+                        }
                         const parts = win.dir.split("/").filter(p => p.length)
                         const out = [{ label: "/", path: "/" }]
                         let acc = ""
@@ -598,13 +751,16 @@ Window {
         }
         TextInput {
             id: search
+            objectName: "search"
             x: 36 * win.u; width: parent.width - x - 14 * win.u
             anchors.baseline: parent.top; anchors.baselineOffset: 23 * win.u
             color: "white"; selectionColor: "#0a84ff"
             font.family: win.fontFamily; font.pixelSize: 13.5 * win.tu
             clip: true
+            onTextChanged: searchDelay.restart()
             Keys.onEscapePressed: { text = ""; keys.forceActiveFocus() }
-            Keys.onDownPressed: keys.forceActiveFocus()
+            Keys.onDownPressed: { keys.forceActiveFocus(); if (win.searchActive) win.selectResult(0) }
+            Keys.onReturnPressed: { keys.forceActiveFocus(); if (win.searchActive) win.selectResult(0) }
             Text {
                 visible: !search.text
                 text: "Search"; color: "white"; opacity: .5
@@ -631,9 +787,17 @@ Window {
             if (plain && event.text.length === 1 && (event.text > " " || (event.text === " " && win.typeAhead)) && event.key !== Qt.Key_Delete) {
                 win.typeSelect(event.text); event.accepted = true; return
             }
+            if (win.searchActive) {   // the results list has its own cursor
+                if (event.key === Qt.Key_Down) { win.selectResult(Math.min(win.searchResults.length - 1, win.resultIndex + 1)); event.accepted = true; return }
+                if (event.key === Qt.Key_Up) { win.selectResult(Math.max(0, win.resultIndex - 1)); event.accepted = true; return }
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { win.openResult(win.resultIndex); event.accepted = true; return }
+                if (event.key === Qt.Key_Escape && !win.quickLook) { search.text = ""; event.accepted = true; return }
+            }
             if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) { win.goUp(); event.accepted = true; return }
             if (event.key === Qt.Key_Down && event.modifiers & Qt.ControlModifier) { win.openSelection(); event.accepted = true; return }
-            if (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier) { win.trashSelected(); event.accepted = true; return }
+            if (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier) {   // in the Trash: Put Back, as in Finder
+                win.inTrash ? win.putBack() : win.trashSelected(); event.accepted = true; return
+            }
             if (event.key === Qt.Key_Left && event.modifiers & Qt.AltModifier) win.goBack()
             else if (event.key === Qt.Key_Right && event.modifiers & Qt.AltModifier) win.goForward()
             else if (event.key === Qt.Key_Up && event.modifiers & Qt.AltModifier) win.goUp()
@@ -655,16 +819,16 @@ Window {
 
     // Drops onto empty space go into the current folder.
     DropArea {
-        x: 240 * u; y: 72 * u; width: parent.width - x; height: parent.height - y - 52 * u
-        onDropped: drop => { Fm.drop(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
+        x: 240 * u - win.sideShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - 52 * u
+        onDropped: drop => { if (!win.inTrash) Fm.drop(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
 
     GridView {
         id: grid
         objectName: "grid"
-        visible: win.viewMode !== 1
-        x: 262 * u; y: 92 * u - 10 * win.k
-        width: parent.width - x - 20 * u
+        visible: win.viewMode !== 1 && !win.searchActive
+        x: 262 * u - win.sideShift; y: 92 * u - 10 * win.k + win.scopeH
+        width: parent.width - x - 20 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
         cellWidth: 168 * u * win.iconScale / .92
@@ -825,21 +989,25 @@ Window {
                 id: drop
                 enabled: cell.fileIsDir
                 anchors.fill: mouse
-                onDropped: d => { Fm.drop(d.urls, cell.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+                // Spring-loaded: hovering with a drag opens the folder.
+                onEntered: cellSpring.restart()
+                onExited: cellSpring.stop()
+                onDropped: d => { cellSpring.stop(); Fm.drop(d.urls, cell.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
+            Timer { id: cellSpring; interval: win.springDelay; onTriggered: win.go(cell.filePath) }
         }
     }
 
     ListView {
         id: list
         objectName: "list"
-        visible: win.viewMode === 1
+        visible: win.viewMode === 1 && !win.searchActive
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
         }
-        x: 252 * u; y: 80 * u
-        width: parent.width - x - 14 * u
+        x: 252 * u - win.sideShift; y: 80 * u + win.scopeH
+        width: parent.width - x - 14 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
         model: folder
@@ -920,7 +1088,7 @@ Window {
                 Repeater {
                     model: [
                         [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), 180],
-                        [row.fileIsDir ? "--" : Fm.humanSize(row.fileSize), 90],
+                        [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || "…") : "--") : Fm.humanSize(row.fileSize), 90],
                         [row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document", 110]
                     ]
                     Text {
@@ -956,23 +1124,150 @@ Window {
                 id: rowDrop
                 enabled: row.fileIsDir
                 anchors.fill: parent
-                onDropped: d => { Fm.drop(d.urls, row.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+                onEntered: rowSpring.restart()
+                onExited: rowSpring.stop()
+                onDropped: d => { rowSpring.stop(); Fm.drop(d.urls, row.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+            }
+            Timer { id: rowSpring; interval: win.springDelay; onTriggered: win.go(row.filePath) }
+            // Folder sizes are counted in the background (View ▸ Calculate All Sizes).
+            Component.onCompleted: if (fileIsDir && win.calcSizes && win.folderSizes[filePath] === undefined) Fm.folderSize(filePath)
+        }
+    }
+
+    // ---- search: scope bar + results ------------------------------------------------
+    Row {
+        id: scopeBar
+        objectName: "scopeBar"
+        visible: win.searchActive
+        x: 262 * u - win.sideShift; y: 66 * u
+        height: 28 * win.tu
+        spacing: 6 * u
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Search:  "; color: "white"; opacity: .55
+            font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+        }
+        Repeater {
+            model: [win.dir === "/" ? "/" : "“" + win.dir.split("/").pop() + "”", "Subfolders", "Home"]
+            Rectangle {
+                required property string modelData
+                required property int index
+                anchors.verticalCenter: parent.verticalCenter
+                height: 22 * win.tu; width: scopeLabel.implicitWidth + 22 * win.u; radius: height / 2
+                color: win.searchScope === index ? Qt.rgba(1, 1, 1, .2) : scopeHover.hovered ? Qt.rgba(1, 1, 1, .08) : "transparent"
+                Text {
+                    id: scopeLabel
+                    anchors.centerIn: parent
+                    text: modelData; color: "white"
+                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+                    font.weight: win.searchScope === index ? Font.DemiBold : Font.Normal
+                }
+                HoverHandler { id: scopeHover }
+                TapHandler { onTapped: win.searchScope = index }
             }
         }
+    }
+    ListView {
+        id: results
+        objectName: "results"
+        visible: win.searchActive
+        x: 252 * u - win.sideShift; y: 72 * u + win.scopeH
+        width: parent.width - x - 14 * u - win.previewW
+        height: parent.height - 52 * u - y
+        clip: true
+        model: win.searchResults
+        interactive: false
+        ScrollBar.vertical: GlassScrollBar { u: win.u }
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: event => win.scroll(results, event)
+        }
+        delegate: Item {
+            id: hit
+            required property var modelData
+            required property int index
+            readonly property bool sel: win.resultIndex === index
+            width: results.width; height: 30 * win.tu
+            Rectangle {
+                anchors.fill: parent; radius: 6 * win.u
+                color: hit.sel ? "#0a84ff" : hit.index % 2 ? Qt.rgba(1, 1, 1, .035) : "transparent"
+            }
+            Image {
+                x: 8 * win.u; anchors.verticalCenter: parent.verticalCenter
+                width: 26 * win.u; height: width
+                source: win.asset(hit.modelData.isDir ? "folder" : Fm.kind(hit.modelData.path) === "app" ? "doc" : Fm.kind(hit.modelData.path))
+                sourceSize: Qt.size(64, 64)
+            }
+            Text {
+                x: 40 * win.u; width: parent.width * .38; anchors.verticalCenter: parent.verticalCenter
+                text: hit.modelData.name; elide: Text.ElideMiddle; color: "white"
+                font.family: win.fontFamily; font.pixelSize: 13 * win.tu
+            }
+            Text {   // where it is, relative to home
+                x: 48 * win.u + parent.width * .38; width: parent.width * .62 - 60 * win.u; anchors.verticalCenter: parent.verticalCenter
+                text: win.shorten(hit.modelData.where); elide: Text.ElideLeft; color: "white"; opacity: hit.sel ? .9 : .5
+                font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+            }
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onPressed: m => { keys.forceActiveFocus(); win.selectResult(hit.index); if (m.button === Qt.RightButton) resultMenu.open() }
+                onDoubleClicked: win.openResult(hit.index)
+            }
+        }
+        Text {
+            visible: !win.searching && win.searchResults.length === 0
+            anchors.centerIn: parent
+            text: "No results"; color: "white"; opacity: .4
+            font.family: win.fontFamily; font.pixelSize: 15 * win.tu
+        }
+    }
+
+    // ---- preview pane (Ctrl+Shift+P) ----------------------------------------------------
+    PreviewPane {
+        id: preview
+        objectName: "previewPane"
+        visible: win.previewW > 1
+        x: parent.width - win.previewW; y: 72 * u
+        width: 270 * u; height: parent.height - 72 * u - 60 * u
+        clip: true
+        path: win.focusedPath() || win.dir
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        assetFor: win.asset
+        sizes: win.folderSizes
+        onOpenRequested: p => Fm.open(p)
+        onInfoRequested: win.getInfo()
     }
 
     // ---- status bar ------------------------------------------------------------
     Rectangle {
-        x: 240 * u; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
+        x: 240 * u - win.sideShift; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
     Text {
-        x: 262 * u; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
+        id: statusText
+        objectName: "status"
+        x: 262 * u - win.sideShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
         readonly property int n: win.paths().length
-        text: (n ? n + " of " + folder.count + " selected" : folder.count + (folder.count === 1 ? " item" : " items"))
-              + " · " + (folder.count >= 0 ? Fm.freeSpace(win.dir) : "")
+        text: win.searchActive
+              ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
+                + (win.searchTruncated ? " (first " + win.searchResults.length + ")" : "")
+              : (n ? n + " of " + folder.count + " selected" : folder.count + (folder.count === 1 ? " item" : " items"))
+                + (win.inTrash ? " in Trash" : " · " + (folder.count >= 0 ? Fm.freeSpace(win.dir) : ""))
         color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
+    }
+    Pill {   // the Trash's "Empty" button, as in Finder
+        visible: win.inTrash && folder.count > 0 && !win.searchActive
+        x: statusText.x + statusText.width + 14 * u; y: parent.height - 41 * u
+        height: 22 * u; width: emptyLabel.implicitWidth + 24 * u
+        Text {
+            id: emptyLabel
+            anchors.centerIn: parent
+            text: "Empty"; color: "white"
+            font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+        }
+        TapHandler { onTapped: emptyDialog.open() }
     }
     Text {
         anchors.right: parent.right; anchors.rightMargin: 230 * u
@@ -1071,14 +1366,39 @@ Window {
     P.Menu {
         id: itemMenu
         P.MenuItem { text: "Open"; onTriggered: { for (const p of win.paths()) win.activate(p, folder.get(folder.indexOf("file://" + p), "fileIsDir")) } }
+        P.Menu {
+            id: openWithMenu
+            title: "Open With"
+            Instantiator {
+                model: win.paths().length ? Fm.appsFor(win.focusedPath()) : []
+                delegate: P.MenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    icon.name: modelData.icon
+                    onTriggered: Fm.openWith(win.paths(), modelData.id)
+                }
+                onObjectAdded: (i, o) => openWithMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => openWithMenu.removeItem(o)
+            }
+            P.MenuSeparator {}
+            P.MenuItem { text: "Other…"; onTriggered: Fm.openWith(win.paths(), "") }
+        }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.paths()[0]) }
         P.MenuSeparator {}
+        P.MenuItem { text: "Put Back"; visible: win.inTrash; onTriggered: win.putBack() }
+        P.MenuItem { text: "Delete Immediately…"; visible: win.inTrash; onTriggered: deleteDialog.open() }
+        P.MenuSeparator { visible: win.inTrash }
         P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
         P.MenuItem { text: "Quick Look"; onTriggered: win.toggleQuickLook() }
         P.MenuSeparator {}
         P.MenuItem { text: "Rename…"; enabled: win.paths().length === 1; onTriggered: win.renaming = win.paths()[0] }
         P.MenuItem { text: "Duplicate"; onTriggered: win.duplicateSelected() }
         P.MenuItem { text: "Make Alias"; onTriggered: win.aliasSelected() }
+        P.MenuItem {
+            text: win.paths().length === 1 ? "Compress “" + win.paths()[0].split("/").pop() + "”" : "Compress " + win.paths().length + " Items"
+            onTriggered: win.compressSelected()
+        }
+        P.MenuItem { text: "Expand Here"; visible: win.paths().length > 0 && win.paths().every(p => Fm.isArchive(p)); onTriggered: win.expandSelected() }
         P.MenuItem { text: "Show Original"; visible: win.paths().length === 1 && Fm.showOriginal(win.paths()[0]) !== ""; onTriggered: win.showOriginal() }
         P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
         P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
@@ -1097,7 +1417,7 @@ Window {
             }
         }
         P.MenuSeparator {}
-        P.MenuItem { text: "Move to Trash"; onTriggered: win.trashSelected() }
+        P.MenuItem { text: "Move to Trash"; visible: !win.inTrash; onTriggered: win.trashSelected() }
     }
     P.Menu {
         id: bgMenu
@@ -1117,6 +1437,48 @@ Window {
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
         P.MenuSeparator {}
         P.MenuItem { text: "Show Hidden Files"; checkable: true; checked: win.showHidden; onTriggered: win.showHidden = !win.showHidden }
+    }
+    P.Menu {
+        id: resultMenu
+        P.MenuItem { text: "Open"; onTriggered: win.openResult(win.resultIndex) }
+        P.MenuItem { text: "Show in Enclosing Folder"; onTriggered: { const p = win.focusedPath(); search.text = ""; win.showInFolder(p) } }
+        P.MenuItem { text: "Quick Look"; onTriggered: win.toggleQuickLook() }
+        P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
+        P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Move to Trash"; onTriggered: { Fm.trash(win.paths()); win.runSearch() } }
+    }
+    P.Menu {
+        id: trashMenu
+        P.MenuItem { text: "Open"; onTriggered: win.go(Fm.trashDir) }
+        P.MenuItem { text: "Empty Trash…"; onTriggered: emptyDialog.open() }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Remove from Sidebar"; onTriggered: win.placeRemove(placeMenu.si, placeMenu.ii) }
+    }
+    P.Menu {
+        id: volumeMenu
+        property var vol: null
+        P.MenuItem { text: "Open"; onTriggered: win.activatePlace(volumeMenu.vol) }
+        P.MenuItem { text: "Eject “" + (volumeMenu.vol ? volumeMenu.vol.label : "") + "”"; enabled: !!(volumeMenu.vol && volumeMenu.vol.mounted); onTriggered: Fm.ejectVolume(volumeMenu.vol.udi) }
+        P.MenuItem { text: "Get Info"; enabled: !!(volumeMenu.vol && volumeMenu.vol.mounted); onTriggered: infoComponent.createObject(null, { path: volumeMenu.vol.path, tu: win.tu, fontFamily: win.fontFamily, assetFor: win.asset }) }
+    }
+    P.MessageDialog {
+        id: emptyDialog
+        title: "Empty Trash"
+        text: "Are you sure you want to permanently erase the items in the Trash?"
+        informativeText: "You can't undo this action."
+        buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
+        onOkClicked: win.emptyTrashNow()
+    }
+    P.MessageDialog {
+        id: deleteDialog
+        title: "Delete Immediately"
+        text: "Are you sure you want to delete " + (win.paths().length === 1 ? "“" + win.paths()[0].split("/").pop() + "”" : win.paths().length + " items") + " immediately?"
+        informativeText: "You can't undo this action."
+        buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
+        onOkClicked: win.deleteNow()
     }
     P.Menu {
         id: historyMenu
@@ -1150,7 +1512,12 @@ Window {
             P.MenuItem { text: "Open Terminal Here"; onTriggered: Fm.openTerminal(win.dir) }
             P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
             P.MenuSeparator {}
+            P.MenuItem { text: "Compress\tCtrl+Alt+Z"; onTriggered: win.compressSelected() }
+            P.MenuItem { text: "Expand Here"; onTriggered: win.expandSelected() }
+            P.MenuSeparator {}
             P.MenuItem { text: "Move to Trash\tDel"; onTriggered: win.trashSelected() }
+            P.MenuItem { text: "Put Back"; enabled: win.inTrash; onTriggered: win.putBack() }
+            P.MenuItem { text: "Empty Trash…\tCtrl+Shift+Del"; onTriggered: emptyDialog.open() }
             P.MenuSeparator {}
             P.MenuItem { text: "Close Window\tCtrl+W"; onTriggered: win.close() }
         }
@@ -1185,6 +1552,10 @@ Window {
             P.MenuItem { text: "Smaller Icons\tCtrl+-"; onTriggered: wheelCtl.nudge(-.08) }
             P.MenuSeparator {}
             P.MenuItem { text: "Show Hidden Files\tCtrl+Shift+."; checkable: true; checked: win.showHidden; onTriggered: win.showHidden = !win.showHidden }
+            P.MenuItem { text: "Calculate All Sizes"; checkable: true; checked: win.calcSizes; onTriggered: win.calcSizes = !win.calcSizes }
+            P.MenuSeparator {}
+            P.MenuItem { text: (win.sidebarShown ? "Hide" : "Show") + " Sidebar\tCtrl+Alt+S"; onTriggered: win.sidebarShown = !win.sidebarShown }
+            P.MenuItem { text: (win.previewShown ? "Hide" : "Show") + " Preview\tCtrl+Shift+P"; onTriggered: win.previewShown = !win.previewShown }
         }
         P.Menu {
             title: "Go"
@@ -1192,6 +1563,22 @@ Window {
             P.MenuItem { text: "Forward\tCtrl+]"; onTriggered: win.goForward() }
             P.MenuItem { text: "Enclosing Folder\tCtrl+Up"; onTriggered: win.goUp() }
             P.MenuItem { text: "Go to Folder…\tCtrl+Shift+G"; onTriggered: win.editPath() }
+            P.Menu {
+                id: recentMenu
+                title: "Recent Folders"
+                Instantiator {
+                    model: win.recent
+                    delegate: P.MenuItem {
+                        required property string modelData
+                        text: win.shorten(modelData)
+                        onTriggered: win.go(modelData)
+                    }
+                    onObjectAdded: (i, o) => recentMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => recentMenu.removeItem(o)
+                }
+                P.MenuSeparator {}
+                P.MenuItem { text: "Clear Menu"; onTriggered: win.clearRecent() }
+            }
             P.MenuSeparator {}
             P.MenuItem { text: "Home\tCtrl+Shift+H"; onTriggered: win.go(Fm.home) }
             P.MenuItem { text: "Desktop\tCtrl+Shift+D"; onTriggered: win.go(Fm.home + "/Desktop") }
@@ -1201,6 +1588,7 @@ Window {
             P.MenuItem { text: "Icon Catalog"; onTriggered: win.go("/usr/share/applications") }
             P.MenuItem { text: "Computer\tCtrl+Shift+C"; onTriggered: win.go("/") }
             P.MenuItem { text: "Network\tCtrl+Shift+K"; onTriggered: Fm.openInDolphin("remote:/") }
+            P.MenuItem { text: "Trash"; onTriggered: win.go(Fm.trashDir) }
         }
         P.Menu {
             title: "Window"
@@ -1239,6 +1627,10 @@ Window {
     Shortcut { sequence: "Ctrl+Shift+A"; onActivated: win.go(Fm.home + "/Applications") }
     Shortcut { sequence: "Ctrl+Shift+C"; onActivated: win.go("/") }
     Shortcut { sequence: "Ctrl+Shift+K"; onActivated: Fm.openInDolphin("remote:/") }
+    Shortcut { sequence: "Ctrl+Alt+S"; onActivated: win.sidebarShown = !win.sidebarShown }
+    Shortcut { sequence: "Ctrl+Shift+P"; onActivated: win.previewShown = !win.previewShown }
+    Shortcut { sequence: "Ctrl+Shift+Del"; onActivated: emptyDialog.open() }
+    Shortcut { sequence: "Ctrl+Alt+Z"; onActivated: win.compressSelected() }
     Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.go(Fm.home) }
     Shortcut { sequence: "Ctrl+1"; onActivated: win.viewMode = 0 }
     Shortcut { sequence: "Ctrl+2"; onActivated: win.viewMode = 1 }

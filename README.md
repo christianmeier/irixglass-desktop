@@ -28,8 +28,9 @@ manager icon; the IRIX icons are only inside the window.
   type a path (`~`, relative, `file://`), Tab completes folder names (the rest shows greyed out),
   Enter goes there; a file opens its folder and selects it; a wrong path flashes red.
 - Editable sidebar: add folders to Favorites, Indigo Magic or Locations (the + on a section title,
-  drag a folder onto it, right-click → Add to Sidebar, or Add Folder…), rename, move up/down, move
-  to another section, remove, Reset Sidebar. It scrolls when the window is short.
+  drag a folder onto it, right-click → Add to Sidebar, or Add Folder…), remove with the ⊖ that shows
+  on hover, rename by double-clicking, and right-click for move up/down, move to another section,
+  remove and Reset Sidebar. It scrolls when the window is short.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.
@@ -37,6 +38,10 @@ manager icon; the IRIX icons are only inside the window.
   Duplicate (Ctrl+D), Make Alias, Show Original (Ctrl+R), Move Item Here (Ctrl+Alt+V), Undo (Ctrl+Z),
   type to select, Sort By (click a list column or View ▸ Sort By). Plan and status of every Finder
   feature: [docs/FINDER-FEATURES.md](docs/FINDER-FEATURES.md).
+- More Finder: Trash in the sidebar (Put Back, Empty, Delete Immediately), Open With, USB drives with
+  Eject, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
+  through subfolders (scope bar: this folder / subfolders / Home), folder sizes in the list,
+  Compress / Expand, Recent Folders.
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
@@ -48,7 +53,7 @@ KDE Plasma 6 on Wayland (KWin draws the blur and the shadow), Qt 6.8 or newer, K
 On Arch / CachyOS:
 
 ```
-sudo pacman -S --needed base-devel qt6-declarative kio kwindowsystem kirigami plasma-integration
+sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid plasma-integration
 ```
 
 The text uses **SF Pro Text** if it's installed and falls back to the system font otherwise.
@@ -60,7 +65,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (66 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (100 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -101,6 +106,9 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+F | Search |
 | Ctrl+L, Ctrl+Shift+G, `/`, `~` | Type a path (Tab completes, Esc cancels) |
 | Ctrl+Shift+., Ctrl+H | Show hidden files |
+| Ctrl+Alt+S / Ctrl+Shift+P | Hide sidebar / show preview pane |
+| Ctrl+Alt+Z | Compress |
+| Ctrl+Shift+Del | Empty Trash |
 | Ctrl+1 / 2 / 3 | Icons / list / previews |
 | Ctrl++ / Ctrl+- / Ctrl+wheel | Bigger / smaller icons (or roll the thumbwheel: drag, scroll or swipe over it) |
 | Ctrl+N / Ctrl+W | New window / close window |
@@ -112,9 +120,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, preview pane, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected) and glyphs
-tests/          scroll_test, path_test, sidebar_test, finder_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

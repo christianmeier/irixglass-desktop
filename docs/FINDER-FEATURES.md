@@ -14,12 +14,12 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Enclosing folder (⌘↑), open selection (⌘↓) | ✅ Ctrl+↑ / Ctrl+↓ | | |
 | Go menu: Recents, Documents, Desktop, Downloads, Home, Computer, Network, Applications, Utilities (⇧⌘ shortcuts) | ✅ Ctrl+Shift+D/O/A/C/H/K, Ctrl+Alt+L (no Recents/Utilities yet) | | |
 | Go to Folder (⇧⌘G) with completion | ✅ | | path bar |
-| Recent folders (Go ▸ Recent Folders) | 🟡 history menu (⌄) | 2 | persist recents |
+| Recent folders (Go ▸ Recent Folders) | ✅ Go ▸ Recent Folders + ⌄ menu, saved, Clear Menu | | |
 | Path bar, proxy icon drag (title bar) | ✅ crumbs + drop pocket | | |
 | New window (⌘N), close (⌘W) | ✅ | | |
 | Tabs (⌘T, ⇧⌘[ ], drag tabs out, Merge All Windows) | ⬜ | 3 | tab strip under the toolbar; one model per tab |
 | Open folder in new tab/window (⌘-double-click) | ⬜ | 3 | after tabs |
-| Spring-loaded folders (hover while dragging opens) | ⬜ | 2 | DropArea + timer |
+| Spring-loaded folders (hover while dragging opens) | ✅ icons, list rows and sidebar (0.9 s) | | DropArea + timer |
 | New window opens at… (Settings) | ⬜ | 3 | settings window |
 
 ## Sidebar
@@ -27,10 +27,10 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Finder | fm | Phase | How |
 |---|---|---|---|
 | Favorites / Locations, add / remove / reorder | ✅ (plus Indigo Magic) | | editable `places` |
-| Show / hide sidebar (⌃⌘S) | ⬜ | 2 | collapse the sidebar column, content slides left |
+| Show / hide sidebar (⌃⌘S) | ✅ Ctrl+Alt+S and the sidebar button, saved | | content slides left |
 | Recents | ⬜ | 3 | `~/.local/share/recently-used.xbel` |
-| Trash with Empty Trash / Put Back | ⬜ | 2 | list `~/.local/share/Trash/files`, `.trashinfo` for Put Back, `KIO::emptyTrash()` |
-| Removable drives and mounted volumes, Eject | ⬜ | 2 | Solid (`Solid::Device`, `StorageAccess`) |
+| Trash with Empty Trash / Put Back | ✅ sidebar, Empty (button, menu, Ctrl+Shift+Del), Put Back, Delete Immediately | | home trash folder + KIO restore / emptyTrash |
+| Removable drives and mounted volumes, Eject | ✅ in Locations, mount on click, ⏏ | | Solid |
 | Network / servers (Connect to Server ⌘K) | 🟡 opens Dolphin | 3 | needs a KIO-based model (`KDirModel`) |
 | Tags section | ⬜ | 3 | `user.xdg.tags` xattr (Baloo-compatible) |
 | iCloud, AirDrop, Shared | ➖ | | (KDE Connect could stand in for AirDrop) |
@@ -48,10 +48,10 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Gallery view (⌘4) | 🟡 "previews" | 3 | big preview + thumbnail strip + metadata |
 | Group By / Use Stacks | ⬜ | 3 | sections in the view |
 | Show View Options (⌘J): text size, grid spacing, label position, item info | ⬜ | 3 | panel; icon size already on the thumbwheel |
-| Calculate all sizes (folder sizes in list) | ⬜ | 2 | `KIO::DirectorySizeJob` per row |
+| Calculate all sizes (folder sizes in list) | ✅ View ▸ Calculate All Sizes (on by default) | | `KIO::DirectorySizeJob`, 3 at a time |
 | Show hidden files (⇧⌘.) | ✅ Ctrl+Shift+. and Ctrl+H | | |
 | Show / hide toolbar, status bar, path bar | 🟡 always on | 3 | |
-| Preview pane (⇧⌘P) with metadata and quick actions | ⬜ | 2 | reuse the Quick Look view in a side column |
+| Preview pane (⇧⌘P) with metadata and quick actions | ✅ Ctrl+Shift+P: picture / PDF page / text / icon, details, Open, Get Info | | |
 
 ## Selecting and opening
 
@@ -61,7 +61,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Arrow keys | ✅ | | |
 | Type to select (type a name to jump to it) | ✅ | | prefix buffer with a 1 s timeout; Space continues a name |
 | Open (⌘O / ⌘↓ / double-click) | ✅ | | KIO `OpenUrlJob` |
-| Open With ▸ (apps for the type, Other…) | ⬜ | 2 | `KApplicationTrader::queryByMimeType` + `ApplicationLauncherJob` |
+| Open With ▸ (apps for the type, Other…) | ✅ | | `KApplicationTrader` + `ApplicationLauncherJob` |
 | Quick Look (Space): images, text, PDF, audio/video, arrows to step, full screen | ✅ (no full screen yet) | | glass overlay: Image / text / Qt PDF / Qt Multimedia / folder size |
 | Show Original of an alias (⌘R) | ✅ Ctrl+R | | follow the symlink, select the target |
 
@@ -70,30 +70,30 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Finder | fm | Phase | How |
 |---|---|---|---|
 | New Folder (⇧⌘N) | ✅ | | |
-| New Folder with Selection (⌃⌘N) | ⬜ | 2 | mkdir + move |
+| New Folder with Selection (⌃⌘N) | ⬜ | 3 | mkdir + move |
 | Rename (Return in Finder, F2 here) | ✅ | | |
 | Rename several items (find & replace, add text, numbering) | ⬜ | 3 | dialog + `KIO::moveAs` per item |
 | Duplicate (⌘D) | ✅ Ctrl+D | | `KIO::copyAs` to "name copy", "name copy 2" |
 | Make Alias | ✅ menu (Ctrl+L stays the path bar, as in Dolphin) | | `KIO::linkAs` to "name alias" |
 | Copy / Paste (⌘C / ⌘V), Move (⌥⌘V) | ✅ Ctrl+C / Ctrl+V / Ctrl+Alt+V | | |
-| Drag: move / copy (⌥) / alias (⌥⌘) | 🟡 copy, Shift moves | 2 | Finder semantics: same disk moves |
+| Drag: move / copy (⌥) / alias (⌥⌘) | 🟡 copy, Shift moves | 3 | Finder semantics: same disk moves |
 | Move to Trash (⌘⌫) | ✅ Del, Ctrl+Backspace | | |
 | Undo / Redo (⌘Z / ⇧⌘Z) for move, copy, rename, trash, new folder | 🟡 Undo (Ctrl+Z); no Redo | 3 | `KIO::FileUndoManager` (it has no redo) |
 | Get Info (⌘I): kind, size (folders counted), where, dates, permissions, Open with | ✅ Ctrl+I, one window per item (read-only for now) | 2 | editing name/permissions/Open with later |
-| Compress (zip) | ⬜ | 2 | `ark --batch --add-to` / KArchive |
+| Compress (zip) | ✅ "name.zip" / "Archive.zip", plus Expand Here (zip, tar.*, 7z) | | KArchive in a background thread |
 | Copy path (⌥⌘C) | ✅ Ctrl+Alt+C | | |
 | Share ▸ | ⬜ | 3 | KDE Purpose |
 | Quick Actions (rotate, markup, PDF) | ⬜ | 3 | |
 | Tags (colour dots on items, tag menu) | ⬜ | 3 | xattr |
 | Open in Terminal (service) | ✅ | | |
-| Eject, Burn | ➖ / ⬜ | 2 | with Solid volumes |
+| Eject, Burn | ✅ Eject / ➖ Burn | | |
 
 ## Search
 
 | Finder | fm | Phase | How |
 |---|---|---|---|
 | Filter the current folder as you type | ✅ | | |
-| Search "This Mac" / current folder recursively, scope bar | ⬜ | 2 | Baloo (`baloosearch`) / recursive `find`, result list with paths |
+| Search "This Mac" / current folder recursively, scope bar | ✅ scope bar: this folder / with subfolders / Home; results with their folder | 3 | Baloo for content search later |
 | Search tokens (Kind:, Date:, Tags:) | ⬜ | 3 | |
 | Saved searches / Smart Folders | ⬜ | 3 | |
 
@@ -109,8 +109,13 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 
 All of it is checked by `tests/finder_test.cpp` in `make test` (21 checks, real key presses).
 
-## Phase 2 (next)
+## Phase 2 (branch `finder-phase2`): done
 
-Trash (sidebar, Empty Trash, Put Back), Open With ▸, removable drives with Eject, spring-loaded
-folders, show/hide sidebar, preview pane, recursive search, folder sizes in the list, Compress,
-New Folder with Selection, Recent Folders.
+Trash, Open With, removable drives with Eject, spring-loaded folders, hide sidebar, preview pane,
+search through subfolders (this also fixed search: folders are filtered now), folder sizes in the
+list, Compress / Expand, Recent Folders. Checked by `tests/phase2_test.cpp` (34 checks).
+
+## Phase 3 (later)
+
+Tabs, column view, gallery view, Group By, tags, Recents (files), New Folder with Selection,
+Finder drag semantics, batch rename, Get Info editing, Share, content search (Baloo), settings window.

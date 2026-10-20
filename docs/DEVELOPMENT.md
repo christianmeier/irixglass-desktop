@@ -119,10 +119,33 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
 - **Type to select** collects letters for 1 s (`typeAhead`); a space only continues a name while
   typing, otherwise it opens Quick Look.
 
+### Phase 2
+
+- **Search** no longer filters the folder model (`FolderListModel.nameFilters` never hides
+  folders, which made search look broken). Typing shows a results list fed by `Fm::startSearch()`, a
+  `QDirIterator` scan in a worker thread that sends batches (`searchBatch`) and stops at 2000 hits;
+  a generation counter cancels an older scan. The scope bar picks this folder / with subfolders /
+  Home (`searchScope`, saved). `focusedPath()` follows the result cursor, so Quick Look, Get Info and
+  copy work on results.
+- **Trash** is the home trash folder (`Fm.trashDir`, `$XDG_DATA_HOME/Trash/files`) listed like any
+  folder; Put Back uses `KIO::restoreFromTrash` on `trash:/0-<name>`, Empty uses `KIO::emptyTrash`.
+  Older saved sidebars get a Trash entry once (`trashAdded`). KIO won't trash files on tmpfs
+  (`/tmp`); it asks to delete them instead.
+- **Drives** come from Solid (`Fm.volumes`): hot-pluggable or removable storage only. They're
+  appended to Locations at run time, not saved.
+- **Layout**: `sideShift` (sidebar hidden) and `previewW` (preview pane) are animated and every
+  content x/width subtracts them; the glass tint has holes for the sidebar and the preview pane.
+- **Folder sizes** go through a queue in `Fm` (3 `DirectorySizeJob`s at a time) into
+  `win.folderSizes`.
+- **Compress / Expand** use KArchive in a worker thread (`archiveDone` selects the result).
+- **Settings are saved immediately** for the sidebar (`settings.sync()`), and `main.cpp` quits
+  cleanly on SIGTERM/SIGINT (KSignalHandler), so `pkill irixfm` no longer loses changes.
+
 ### Settings
 
 `QtCore.Settings` in category `fm` → `~/.config/irixfm/irixfm.conf`: icon size (thumbwheel value),
-view mode, hidden files, window size, sidebar (`places`, JSON), sort field and order. All running fm windows share and overwrite it.
+view mode, hidden files, window size, sidebar (`places`, JSON), sort field and order, sidebar
+and preview visibility, Calculate All Sizes, Recent Folders, search scope. All running fm windows share and overwrite it.
 
 ## Workflow
 
@@ -168,6 +191,12 @@ wallpaper to judge it, e.g.
 - **A Get Info window takes the keyboard**; tests close it and re-activate the main window.
 - **`FolderListModel.SortField` starts at `Unsorted` = 0** (Name 1, Time 2, Size 3, Type 4); use the
   enum names in QML and these numbers from C++.
+- **An inactive `Loader` still takes room in a `Row`** unless it's `visible: false` — that pushed the
+  list view's Size/Date/Kind values off-screen.
+- **Tests that trash files must live on the home disk** and use a private `XDG_DATA_HOME`;
+  `IRIXFM_NO_DIALOGS=1` makes job errors print instead of opening (blocking) dialogs.
+- **`stdout` is buffered when piped**: tests call `setvbuf(stdout, nullptr, _IONBF, 0)` so a hang
+  still shows how far they got.
 - **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
 - **Repo images** must not contain copyrighted wallpapers; `docs/bg.jpg` is a generated gradient.
 

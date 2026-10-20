@@ -13,7 +13,24 @@
 #include <QProcess>
 #include <QQuickWindow>
 #include <QRegion>
+#include <QDirIterator>
+#include <QStandardPaths>
 #include <QStorageInfo>
+#include <QtConcurrent/QtConcurrentRun>
+
+#include <K7Zip>
+#include <KTar>
+#include <KZip>
+#include <KIO/ApplicationLauncherJob>
+#include <KIO/DeleteJob>
+#include <KIO/EmptyTrashJob>
+#include <KIO/RestoreJob>
+#include <Solid/Device>
+#include <Solid/DeviceNotifier>
+#include <Solid/OpticalDrive>
+#include <Solid/StorageAccess>
+#include <Solid/StorageDrive>
+#include <Solid/StorageVolume>
 
 #include <KDesktopFile>
 #include <KApplicationTrader>
@@ -55,8 +72,16 @@ QString expandPath(QString text, const QString &base)
     return QDir::cleanPath(text);
 }
 
+// IRIXFM_NO_DIALOGS (tests): report job errors on stderr instead of opening dialogs, which would
+// block an off-screen run.
+const bool kNoDialogs = qEnvironmentVariableIsSet("IRIXFM_NO_DIALOGS");
+
 void track(KJob *job)
 {
+    if (kNoDialogs) {
+        QObject::connect(job, &KJob::result, job, [job] { if (job->error()) qWarning("irixfm job error: %s", qPrintable(job->errorString())); });
+        return;
+    }
     job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
     KIO::getJobTracker()->registerJob(job);
 }
@@ -132,6 +157,264 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent)
 {
     connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Fm::undoChanged);
     connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoTextChanged, this, &Fm::undoChanged);
+    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceAdded, this, &Fm::refreshVolumes);
+    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceRemoved, this, &Fm::refreshVolumes);
+    refreshVolumes();
+}
+
+// ---- Trash ---------------------------------------------------------------------------
+
+QString Fm::trashDir() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/Trash/files");
+}
+
+void Fm::restoreFromTrash(const QStringList &paths)
+{
+    // Items in the home trash are trash:/0-<name> to KIO; it reads the .trashinfo for the original place.
+    QList<QUrl> urls;
+    for (const QString &p : paths)
+        urls << QUrl(QStringLiteral("trash:/0-") + QFileInfo(p).fileName());
+    if (!urls.isEmpty())
+        track(KIO::restoreFromTrash(urls));
+}
+
+void Fm::emptyTrash()
+{
+    track(KIO::emptyTrash());
+}
+
+void Fm::deletePermanently(const QStringList &paths)
+{
+    if (!paths.isEmpty())
+        track(KIO::del(toUrls(paths)));
+}
+
+int Fm::trashCount() const
+{
+    return QDir(trashDir()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System).size();
+}
+
+// ---- Open With ---------------------------------------------------------------------------
+
+QVariantList Fm::appsFor(const QString &path) const
+{
+    const QString mime = QMimeDatabase().mimeTypeForFile(path).name();
+    QVariantList out;
+    for (const KService::Ptr &app : KApplicationTrader::queryByMimeType(mime)) {
+        out << QVariantMap{{QStringLiteral("id"), app->storageId()}, {QStringLiteral("name"), app->name()}, {QStringLiteral("icon"), app->icon()}};
+        if (out.size() >= 12)
+            break;
+    }
+    return out;
+}
+
+void Fm::openWith(const QStringList &paths, const QString &appId)
+{
+    const KService::Ptr app = appId.isEmpty() ? KService::Ptr() : KService::serviceByStorageId(appId);
+    // Without a service, ApplicationLauncherJob asks with KDE's "Open With" dialog.
+    auto *job = app ? new KIO::ApplicationLauncherJob(app) : new KIO::ApplicationLauncherJob();
+    job->setUrls(toUrls(paths));
+    job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
+    job->start();
+}
+
+// ---- Removable drives ------------------------------------------------------------------
+
+QVariantList Fm::volumes() const
+{
+    return m_volumes;
+}
+
+void Fm::refreshVolumes()
+{
+    QVariantList list;
+    for (const Solid::Device &dev : Solid::Device::listFromType(Solid::DeviceInterface::StorageAccess)) {
+        const auto *vol = dev.as<Solid::StorageVolume>();
+        const auto *access = dev.as<Solid::StorageAccess>();
+        if (!access || (vol && vol->isIgnored()))
+            continue;
+        // Only hot-pluggable or removable media (USB sticks, SD cards, discs), like Finder's Locations.
+        Solid::Device drive = dev;
+        while (drive.isValid() && !drive.is<Solid::StorageDrive>())
+            drive = drive.parent();
+        const auto *sd = drive.isValid() ? drive.as<Solid::StorageDrive>() : nullptr;
+        if (!sd || !(sd->isHotpluggable() || sd->isRemovable()))
+            continue;
+        list << QVariantMap{{QStringLiteral("udi"), dev.udi()},
+                            {QStringLiteral("label"), dev.description()},
+                            {QStringLiteral("icon"), dev.icon()},
+                            {QStringLiteral("mounted"), access->isAccessible()},
+                            {QStringLiteral("path"), access->filePath()}};
+        // Keep the list current when it gets mounted or unmounted elsewhere.
+        connect(access, &Solid::StorageAccess::accessibilityChanged, this, &Fm::refreshVolumes, Qt::UniqueConnection);
+    }
+    if (list != m_volumes) {
+        m_volumes = list;
+        Q_EMIT volumesChanged();
+    }
+}
+
+void Fm::mountVolume(const QString &udi)
+{
+    Solid::Device dev(udi);
+    auto *access = dev.as<Solid::StorageAccess>();
+    if (!access)
+        return;
+    if (access->isAccessible()) {
+        Q_EMIT volumeMounted(udi, access->filePath());
+        return;
+    }
+    connect(access, &Solid::StorageAccess::setupDone, this, [this, udi](Solid::ErrorType error, const QVariant &details) {
+        Solid::Device d(udi);
+        if (error == Solid::NoError)
+            Q_EMIT volumeMounted(udi, d.as<Solid::StorageAccess>()->filePath());
+        else
+            Q_EMIT volumeError(details.toString());
+        refreshVolumes();
+    }, Qt::SingleShotConnection);
+    access->setup();
+}
+
+void Fm::ejectVolume(const QString &udi)
+{
+    Solid::Device dev(udi);
+    auto *access = dev.as<Solid::StorageAccess>();
+    if (!access)
+        return;
+    connect(access, &Solid::StorageAccess::teardownDone, this, [this, udi](Solid::ErrorType error, const QVariant &details) {
+        if (error != Solid::NoError) {
+            Q_EMIT volumeError(details.toString());
+            return;
+        }
+        // Discs come out of the drive; USB drives are just unmounted (safe to unplug).
+        Solid::Device d(udi);
+        for (Solid::Device p = d; p.isValid(); p = p.parent())
+            if (auto *optical = p.as<Solid::OpticalDrive>()) {
+                optical->eject();
+                break;
+            }
+        refreshVolumes();
+    }, Qt::SingleShotConnection);
+    access->teardown();
+}
+
+// ---- Search through subfolders -------------------------------------------------------------
+
+void Fm::startSearch(const QString &root, const QString &text, bool hidden, bool recursive)
+{
+    const int gen = ++m_searchGen;
+    if (text.trimmed().isEmpty())
+        return;
+    QPointer<Fm> self(this);
+    (void)QtConcurrent::run([self, gen, root, needle = text.trimmed(), hidden, recursive] {
+        constexpr int kMax = 2000, kBatch = 50;
+        QVariantList batch;
+        int count = 0;
+        bool truncated = false;
+        auto flush = [&] {
+            if (!batch.isEmpty() && self)
+                QMetaObject::invokeMethod(self, [self, gen, b = batch] { if (self && self->m_searchGen == gen) Q_EMIT self->searchBatch(b); });
+            batch.clear();
+        };
+        QDir::Filters filters = QDir::AllEntries | QDir::NoDotAndDotDot | QDir::NoSymLinks;
+        if (hidden)
+            filters |= QDir::Hidden;
+        QDirIterator it(root, filters, recursive ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags);
+        while (it.hasNext()) {
+            if (!self || self->m_searchGen != gen)
+                return;
+            it.next();
+            const QFileInfo fi = it.fileInfo();
+            if (!fi.fileName().contains(needle, Qt::CaseInsensitive))
+                continue;
+            batch << QVariantMap{{QStringLiteral("name"), fi.fileName()}, {QStringLiteral("path"), fi.absoluteFilePath()},
+                                 {QStringLiteral("where"), fi.absolutePath()}, {QStringLiteral("isDir"), fi.isDir()},
+                                 {QStringLiteral("modified"), fi.lastModified()}, {QStringLiteral("size"), fi.isDir() ? -1 : fi.size()}};
+            if (++count >= kMax) {
+                truncated = true;
+                break;
+            }
+            if (batch.size() >= kBatch)
+                flush();
+        }
+        flush();
+        if (self)
+            QMetaObject::invokeMethod(self, [self, gen, count, truncated] { if (self && self->m_searchGen == gen) Q_EMIT self->searchDone(count, truncated); });
+    });
+}
+
+void Fm::stopSearch()
+{
+    ++m_searchGen;
+}
+
+// ---- Compress / expand ----------------------------------------------------------------------
+
+namespace
+{
+std::unique_ptr<KArchive> archiveFor(const QString &path)
+{
+    const QMimeType mime = QMimeDatabase().mimeTypeForFile(path);
+    if (mime.inherits(QStringLiteral("application/zip")))
+        return std::make_unique<KZip>(path);
+    if (mime.inherits(QStringLiteral("application/x-7z-compressed")))
+        return std::make_unique<K7Zip>(path);
+    if (mime.inherits(QStringLiteral("application/x-tar")) || mime.inherits(QStringLiteral("application/x-compressed-tar"))
+        || mime.inherits(QStringLiteral("application/x-bzip-compressed-tar")) || mime.inherits(QStringLiteral("application/x-xz-compressed-tar"))
+        || mime.inherits(QStringLiteral("application/x-zstd-compressed-tar")))
+        return std::make_unique<KTar>(path);
+    return nullptr;
+}
+} // namespace
+
+bool Fm::isArchive(const QString &path) const
+{
+    return QFileInfo(path).isFile() && archiveFor(path) != nullptr;
+}
+
+QString Fm::compress(const QStringList &paths)
+{
+    if (paths.isEmpty())
+        return {};
+    // Finder: "name.zip" for one item, "Archive.zip" (Archive 2.zip, …) for several.
+    const QFileInfo first(paths.first());
+    const QString dir = first.absolutePath();
+    const QString dest = freeName(dir, paths.size() == 1 ? first.fileName() : QStringLiteral("Archive"), QStringLiteral(".zip"));
+    QPointer<Fm> self(this);
+    (void)QtConcurrent::run([self, paths, dest] {
+        KZip zip(dest);
+        bool ok = zip.open(QIODevice::WriteOnly);
+        for (const QString &p : paths) {
+            const QFileInfo fi(p);
+            ok = ok && (fi.isDir() ? zip.addLocalDirectory(p, fi.fileName()) : zip.addLocalFile(p, fi.fileName()));
+        }
+        ok = zip.close() && ok;
+        if (self)
+            QMetaObject::invokeMethod(self, [self, dest, ok] { if (self) Q_EMIT self->archiveDone(dest, ok); });
+    });
+    return dest;
+}
+
+QString Fm::expand(const QString &path)
+{
+    // Into a folder named after the archive, next to it (Finder's Archive Utility does the same).
+    const QFileInfo fi(path);
+    QString base = fi.fileName();
+    for (const char *ext : {".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".zip", ".7z", ".tar"})
+        if (base.endsWith(QLatin1String(ext), Qt::CaseInsensitive)) {
+            base.chop(int(qstrlen(ext)));
+            break;
+        }
+    const QString dest = freeName(fi.absolutePath(), base, QString());
+    QPointer<Fm> self(this);
+    (void)QtConcurrent::run([self, path, dest] {
+        std::unique_ptr<KArchive> archive = archiveFor(path);
+        bool ok = archive && archive->open(QIODevice::ReadOnly) && QDir().mkpath(dest) && archive->directory()->copyTo(dest, true);
+        if (self)
+            QMetaObject::invokeMethod(self, [self, dest, ok] { if (self) Q_EMIT self->archiveDone(dest, ok); });
+    });
+    return dest;
 }
 
 bool Fm::canUndo() const
@@ -242,10 +525,25 @@ QVariantMap Fm::info(const QString &path) const
 
 void Fm::folderSize(const QString &path)
 {
-    auto *job = KIO::directorySize(QUrl::fromLocalFile(path));
-    connect(job, &KJob::result, this, [this, job, path] {
-        Q_EMIT folderSizeReady(path, job->error() ? -1 : qint64(job->totalSize()), qint64(job->totalFiles()), qint64(job->totalSubdirs()));
-    });
+    // Queued: a list view of a big folder asks for many sizes at once.
+    if (!m_sizeQueue.contains(path))
+        m_sizeQueue << path;
+    startNextSize();
+}
+
+void Fm::startNextSize()
+{
+    constexpr int kMaxSizeJobs = 3;
+    while (m_sizeRunning < kMaxSizeJobs && !m_sizeQueue.isEmpty()) {
+        const QString path = m_sizeQueue.takeFirst();
+        ++m_sizeRunning;
+        auto *job = KIO::directorySize(QUrl::fromLocalFile(path));
+        connect(job, &KJob::result, this, [this, job, path] {
+            --m_sizeRunning;
+            Q_EMIT folderSizeReady(path, job->error() ? -1 : qint64(job->totalSize()), qint64(job->totalFiles()), qint64(job->totalSubdirs()));
+            startNextSize();
+        });
+    }
 }
 
 QString Fm::textPreview(const QString &path, int maxBytes) const
