@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=fm
+GenericName=File Manager
+Comment=IRIX Indigo Magic file manager with a macOS Tahoe glass look
+Exec=irixfm %u
+Icon=system-file-manager
+Terminal=false
+Categories=Qt;KDE;System;FileTools;FileManager;
+MimeType=inode/directory;
+Keywords=files;folders;irix;sgi;finder;
+StartupWMClass=irixfm

@@ -1,0 +1,36 @@
+import QtQuick
+
+Row {
+    id: lights
+    // Same size as the KWin decoration buttons on the other windows (WhiteSur):
+    // 13.3 px circles, 26 px apart centre to centre.
+    property real diameter: 40 / 3
+    property var window
+    spacing: 38 / 3
+    HoverHandler { id: hover }
+    Repeater {
+        model: [{ c: "#ff5f57", g: "×" }, { c: "#febc2e", g: "−" }, { c: "#28c840", g: "+" }]
+        Rectangle {
+            required property var modelData
+            required property int index
+            width: lights.diameter; height: width; radius: width / 2
+            color: modelData.c
+            border.color: Qt.rgba(0, 0, 0, .25); border.width: .5
+            Text {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: -.5
+                visible: hover.hovered
+                text: modelData.g
+                color: Qt.rgba(0, 0, 0, .6)
+                font.pixelSize: lights.diameter * .8; font.bold: true
+            }
+            TapHandler {
+                onTapped: {
+                    if (index === 0) lights.window.close()
+                    else if (index === 1) lights.window.showMinimized()
+                    else lights.window.visibility === Window.Maximized ? lights.window.showNormal() : lights.window.showMaximized()
+                }
+            }
+        }
+    }
+}

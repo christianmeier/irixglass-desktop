@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="-10 -10 120 120"><defs>
+  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+  <linearGradient id="carpet" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#8a6cff"/><stop offset="1" stop-color="#3fa0ff"/></linearGradient>
+  <linearGradient id="carpetSel" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#5ef0ff"/><stop offset="1" stop-color="#2a8cff"/></linearGradient>
+  <linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffe18f"/><stop offset="1" stop-color="#e7b54c"/></linearGradient>
+  <linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#d9a347"/><stop offset="1" stop-color="#b17a22"/></linearGradient>
+  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2d6bd8"/><stop offset="1" stop-color="#9fd0ff"/></linearGradient>
+</defs><path d="M28,12 L64,18 L76,30 L72,82 L24,75 Z" fill="#fdfdfd" stroke="#1d1d1d" stroke-width="1.5" stroke-linejoin="round"/><polygon points="64,18 62,32 76,30" fill="#cfcfd4" stroke="#1d1d1d" stroke-linejoin="round"/><polygon points="31,34 70,41 68,70 29,64" fill="url(#sky)"/><path d="M29,64 L40,52 L50,60 L58,50 L68,62 L68,70 Z" fill="#2f9e55"/><circle cx="60" cy="46" r="4" fill="#ffe27a"/></svg>
