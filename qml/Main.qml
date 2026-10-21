@@ -73,7 +73,7 @@ Window {
     readonly property bool compactList: list.width < 640 * u   // narrow list (split view): no Date column
     // While split, the main side gets the same header as the split side (‹ ↑ path + marker line),
     // so the two sides look the same; its views start that much lower.
-    readonly property real splitHeaderH: splitView ? 28 * tu - 8 * u : 0
+    readonly property real splitHeaderH: splitView ? 26 * tu - 8 * u : 0   // = split side's header (4u + 26tu + 2u) - 6u
     Behavior on splitW { enabled: !win.draggingSplit; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     property var closedTabs: []                 // for Reopen Closed Tab
     property real pendingScrollY: -1

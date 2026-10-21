@@ -84,7 +84,8 @@ Item {
     }
     Item {
         id: columns
-        x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 22 * pane.tu
+        // the same height as the main side's list header, so rows line up across the sides
+        x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 26 * pane.tu
         Text {
             x: pane.iconSize + 12 * pane.u; anchors.verticalCenter: parent.verticalCenter
             text: "Name"; color: "white"; opacity: .45
@@ -102,7 +103,7 @@ Item {
     ListView {
         id: rows
         objectName: "splitList"
-        x: 6 * pane.u; y: columns.y + columns.height + 4 * pane.u
+        x: 6 * pane.u; y: columns.y + columns.height
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
         model: model
