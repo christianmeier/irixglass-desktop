@@ -228,17 +228,31 @@ void TerminalView::paste()
 
 // ---- screen state from libvterm -------------------------------------------------------------
 
-int TerminalView::onDamage(VTermRect)
+// Repaint only the cells that changed (QQuickPaintedItem clips the painter to the dirty area):
+// typing then repaints a cell or two, not the whole screen. Scrolled back, rows are shifted, so
+// everything.
+void TerminalView::updateCells(int startRow, int startCol, int endRow, int endCol)
 {
-    update();
+    if (m_scrollOffset > 0) {
+        update();
+        return;
+    }
+    const QRectF r(4 + startCol * m_cellW, 3 + startRow * m_cellH, (endCol - startCol) * m_cellW, (endRow - startRow) * m_cellH);
+    update(r.toAlignedRect().adjusted(-1, -1, 1, 1));
+}
+
+int TerminalView::onDamage(VTermRect r)
+{
+    updateCells(r.start_row, r.start_col, r.end_row, r.end_col);
     return 1;
 }
 
-int TerminalView::onMoveCursor(VTermPos pos, VTermPos, int visible)
+int TerminalView::onMoveCursor(VTermPos pos, VTermPos old, int visible)
 {
     m_cursor = pos;
     m_cursorVisible = visible;
-    update();
+    updateCells(old.row, old.col, old.row + 1, old.col + 1);
+    updateCells(pos.row, pos.col, pos.row + 1, pos.col + 1);
     return 1;
 }
 
@@ -254,18 +268,19 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *val)
             m_title = QString::fromUtf8(buffer);
             Q_EMIT titleChanged();
         }
-        break;
+        return 1;   // nothing on screen changes (the prompt sets it every time)
     }
     case VTERM_PROP_CURSORVISIBLE:
         m_cursorVisible = val->boolean;
-        break;
+        updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);
+        return 1;
     case VTERM_PROP_ALTSCREEN:
         m_altScreen = val->boolean;
         m_scrollOffset = 0;
         break;
     case VTERM_PROP_MOUSE:
         m_mouseMode = val->number;
-        break;
+        return 1;
     default:
         break;
     }
@@ -559,8 +574,9 @@ void TerminalView::paint(QPainter *p)
     const VTermPos selA = before(m_selA, m_selB) ? m_selA : m_selB, selB = before(m_selA, m_selB) ? m_selB : m_selA;
     // Only the rows in the damaged part (update(rect) clips the painter to it).
     const QRectF clip = p->hasClipping() ? p->clipBoundingRect() : boundingRect();
-    const int firstRow = std::max(0, int((clip.top() - y0) / m_cellH));
-    const int lastRow = std::min(m_rows - 1, int((clip.bottom() - y0) / m_cellH));
+    // (A row more each side, for glyphs that reach into the next row.)
+    const int firstRow = std::max(0, int((clip.top() - y0) / m_cellH) - 1);
+    const int lastRow = std::min(m_rows - 1, int((clip.bottom() - y0) / m_cellH) + 1);
     m_rowBuf.resize(size_t(m_cols));
     VTermScreenCell *cells = m_rowBuf.data();
     // All backgrounds first, then the text: one glyph run per colour and style for the whole
@@ -832,7 +848,10 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         update();
         return;
     }
-    m_scrollOffset = 0;
+    if (m_scrollOffset) {   // typing goes back to the prompt
+        m_scrollOffset = 0;
+        update();
+    }
     VTermKey key = VTERM_KEY_NONE;
     switch (e->key()) {
     case Qt::Key_Return: case Qt::Key_Enter: key = VTERM_KEY_ENTER; break;
@@ -866,7 +885,7 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         QQuickPaintedItem::keyPressEvent(e);
         return;
     }
-    update();
+    // no repaint here: the program's echo damages what changes
 }
 
 void TerminalView::inputMethodEvent(QInputMethodEvent *e)
@@ -1061,13 +1080,13 @@ void TerminalView::insertPaths(const QStringList &paths)
 void TerminalView::focusInEvent(QFocusEvent *e)
 {
     m_focused = true;
-    update();
+    updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);   // underline cursor
     QQuickPaintedItem::focusInEvent(e);
 }
 
 void TerminalView::focusOutEvent(QFocusEvent *e)
 {
     m_focused = false;
-    update();
+    updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);   // hollow box
     QQuickPaintedItem::focusOutEvent(e);
 }

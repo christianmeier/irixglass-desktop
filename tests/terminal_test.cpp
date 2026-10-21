@@ -166,6 +166,7 @@ int runBench(const QString &out)
     std::printf("bench: paint, plain text: %.0f us\n", paintAvg(t, QStringLiteral("plain")));
     run(t, QStringLiteral("clear; fastfetch --pipe false"));
     paintAvg(t, QStringLiteral("fastfetch"));
+    window.grabWindow().save(out + QStringLiteral("/window.png"));   // as rendered, with partial updates
     // scrolled back into the history (painted from the scrollback, not the screen)
     for (int i = 0; i < 20; ++i) {
         QKeyEvent k(QEvent::KeyPress, Qt::Key_PageUp, Qt::ShiftModifier);
@@ -365,6 +366,46 @@ int main(int argc, char *argv[])
             t->sendText(QStringLiteral("exit\r"));
             check(waitFor([&] { return tabs().size() == 1; }), QStringLiteral("exiting the shell closes its tab"));
             check(win->property("activeTermId").toInt() == 0, QStringLiteral("…and the folder view is back"));
+        }
+
+        // only damaged cells are repainted: what's on screen must still match a full paint
+        {
+            QQuickWindow w2;
+            w2.setColor(Qt::black);
+            w2.resize(700, 400);
+            w2.show();
+            auto *c = new TerminalView(w2.contentItem());
+            c->setSize(QSizeF(700, 400));
+            c->setProperty("program", QStringLiteral("/bin/bash"));
+            c->setProperty("arguments", QStringList{QStringLiteral("--norc"), QStringLiteral("--noprofile")});
+            c->start();
+            c->forceActiveFocus();
+            waitFor([&] { return c->screenText().contains(QStringLiteral("fm$")); });
+            c->sendText(QStringLiteral("ls --color=always -la /usr/bin | tail -n 8; printf '\\e[1;31mbold red\\e[0m\\n'\r"));
+            QTest::qWait(400);
+            for (const char *typed : {"echo ab", "\x7f\x7f", "xyz \x1b[D\x1b[D", "q"}) {   // typing, erasing, cursor moves
+                c->sendText(QString::fromLatin1(typed));
+                QTest::qWait(120);
+            }
+            QTest::qWait(200);
+            const QImage shown = w2.grabWindow().convertToFormat(QImage::Format_RGB32);
+            QImage full(shown.size(), QImage::Format_RGB32);
+            full.setDevicePixelRatio(shown.devicePixelRatio());
+            full.fill(Qt::black);
+            {
+                QPainter p(&full);
+                p.setRenderHint(QPainter::Antialiasing);
+                c->paint(&p);
+            }
+            int differ = 0;
+            for (int y = 0; y < full.height(); ++y)
+                for (int x = 0; x < full.width(); ++x)
+                    differ += qAbs(qGray(full.pixel(x, y)) - qGray(shown.pixel(x, y))) > 24;
+            check(!shown.isNull() && differ < 50, QStringLiteral("partial repaints show the same as a full paint"), QString::number(differ) + " pixels differ");
+            delete c;
+            w2.close();
+            window->requestActivate();
+            (void)QTest::qWaitForWindowActive(window);
         }
 
         // crashes from the user's core dumps
