@@ -28,6 +28,7 @@ Item {
     property real k: 1                   // icon units → px (the window's icon size)
     property real cellSize: 140
     signal activated()
+    signal zoomRequested(real delta)     // Ctrl+wheel: this side's icon size
     signal dropRequested(var urls, string target, bool proposedMove)
     signal menuRequested()
     signal openFile(string path)
@@ -233,6 +234,7 @@ Item {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: e => {
+                if (e.modifiers & Qt.ControlModifier) { pane.zoomRequested((e.pixelDelta.y !== 0 ? e.pixelDelta.y / 50 : e.angleDelta.y / 120) * .05); return }
                 const dy = e.pixelDelta.y !== 0 ? e.pixelDelta.y : e.angleDelta.y / 2
                 rows.contentY = Math.max(0, Math.min(Math.max(0, rows.contentHeight - rows.height), rows.contentY - dy))
             }
@@ -326,6 +328,7 @@ Item {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: e => {
+                if (e.modifiers & Qt.ControlModifier) { pane.zoomRequested((e.pixelDelta.y !== 0 ? e.pixelDelta.y / 50 : e.angleDelta.y / 120) * .05); return }
                 const dy = e.pixelDelta.y !== 0 ? e.pixelDelta.y : e.angleDelta.y / 2
                 grid.contentY = Math.max(0, Math.min(Math.max(0, grid.contentHeight - grid.height), grid.contentY - dy))
             }

@@ -256,6 +256,38 @@ int main(int argc, char *argv[])
             QTest::qWait(300);
             check(qAbs(win->property("splitRatio").toDouble() - .5) < .001, QStringLiteral("double-clicking the divider centres it"));
         }
+        // each side has its own icon size: Ctrl+/- and the home button act on the active side only
+        {
+            win->setProperty("activePane", 0);
+            QMetaObject::invokeMethod(win, "setActiveWheel", Q_ARG(QVariant, .352));
+            win->setProperty("activePane", 1);
+            QMetaObject::invokeMethod(win, "setActiveWheel", Q_ARG(QVariant, .352));
+            const double mainCell = win->property("k").toDouble(), paneK = pane->property("k").toDouble();
+            key(Qt::Key_Plus, Qt::ControlModifier);
+            key(Qt::Key_Plus, Qt::ControlModifier);
+            check(pane->property("k").toDouble() > paneK * 1.1 && qAbs(win->property("k").toDouble() - mainCell) < 1e-6,
+                  QStringLiteral("Ctrl++ on the split side scales only its icons"),
+                  QString::number(pane->property("k").toDouble()) + " main " + QString::number(win->property("k").toDouble()));
+            auto *wheel = win->findChild<QQuickItem *>(QStringLiteral("thumbwheel"));
+            const double splitWheel = win->property("splitWheelValue").toDouble();
+            check(qAbs(wheel->property("value").toDouble() - splitWheel) < 1e-6, QStringLiteral("…and the thumbwheel shows that side's size"));
+            win->setProperty("activePane", 0);
+            QTest::qWait(50);
+            check(qAbs(wheel->property("value").toDouble() - .352) < 1e-6 && qAbs(win->property("splitWheelValue").toDouble() - splitWheel) < 1e-6,
+                  QStringLiteral("switching sides moves the thumbwheel to the main side's size"),
+                  QString::number(wheel->property("value").toDouble()));
+            key(Qt::Key_Minus, Qt::ControlModifier);
+            check(win->property("k").toDouble() < mainCell && qAbs(win->property("splitWheelValue").toDouble() - splitWheel) < 1e-6,
+                  QStringLiteral("Ctrl+- on the main side leaves the split side alone"));
+            win->setProperty("activePane", 1);
+            auto *home = win->findChild<QQuickItem *>(QStringLiteral("homeButton"));
+            QTest::mouseClick(window, Qt::LeftButton, {}, home->mapToScene(QPointF(home->width() / 2, home->height() / 2)).toPoint());
+            QTest::qWait(100);
+            check(qAbs(pane->property("k").toDouble() - paneK) < 1e-6 && win->property("k").toDouble() < mainCell,
+                  QStringLiteral("the home button resets only the active side"));
+            win->setProperty("activePane", 0);
+            QMetaObject::invokeMethod(win, "setActiveWheel", Q_ARG(QVariant, .352));
+        }
         auto *button = win->findChild<QQuickItem *>(QStringLiteral("splitButton"));
         QTest::mouseClick(window, Qt::LeftButton, {}, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
         QTest::qWait(400);

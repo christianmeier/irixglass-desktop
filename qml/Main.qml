@@ -132,6 +132,11 @@ Window {
     readonly property real listIcon: Math.max(16, 26 * u * iconScale / .92)
     readonly property real listRowH: Math.max(28 * tu, listIcon + 6 * u)
     readonly property real listTextX: listIcon + 14 * u
+    // The split side has its own icon size; the thumbwheel, its home button and Ctrl+/- act on the active side.
+    property real splitWheelValue: defaultWheel
+    readonly property real splitIconScale: .55 + splitWheelValue * 1.05
+    readonly property real activeWheel: splitActive ? splitWheelValue : wheelValue
+    function setActiveWheel(v) { if (splitActive) splitWheelValue = v; else wheelValue = v }
     property int viewMode: 0                    // 0 icons, 1 list, 2 previews
     property bool showHidden: false
     readonly property string fontFamily: "SF Pro Text"
@@ -160,6 +165,7 @@ Window {
         category: "fm"
         property alias wheelValue: win.wheelValue
         property alias viewMode: win.viewMode
+        property alias splitWheelValue: win.splitWheelValue
         property alias showHidden: win.showHidden
         property alias places: win.placesJson
         property alias sortField: win.sortField
@@ -1431,7 +1437,7 @@ Window {
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             acceptedModifiers: Qt.ControlModifier
-            onWheel: event => wheelCtl.nudge((event.pixelDelta.y !== 0 ? event.pixelDelta.y / 50 : event.angleDelta.y / 120) * .05)
+            onWheel: event => { win.activePane = 0; wheelCtl.nudge((event.pixelDelta.y !== 0 ? event.pixelDelta.y / 50 : event.angleDelta.y / 120) * .05) }
         }
         MouseArea {   // background: clear selection, rubber band, context menu
             id: band
@@ -1868,10 +1874,11 @@ Window {
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
         active: win.activePane === 1
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
-        iconSize: win.listIcon
+        iconSize: Math.max(16, 26 * win.u * win.splitIconScale / .92)
         viewMode: win.splitViewMode
-        k: win.k
-        cellSize: 168 * win.u * win.iconScale / .92
+        k: win.u * win.splitIconScale
+        cellSize: 168 * win.u * win.splitIconScale / .92
+        onZoomRequested: d => { win.activePane = 1; wheelCtl.nudge(d) }
         assetFor: win.asset
         tagsFor: win.tagsOf
         colorFor: win.tagColor
@@ -2062,20 +2069,20 @@ Window {
         objectName: "thumbwheel"
         u: win.u
         x: parent.width - 244 * u; y: parent.height - 42 * u - win.bottomLift; width: 190 * u; height: 22 * u
-        value: win.wheelValue
-        onValueChanged: win.wheelValue = value
+        value: win.activeWheel
+        onValueChanged: win.setActiveWheel(value)
     }
     // The wheel's own value is set by dragging (which breaks a binding), so keep it in step here.
     Connections {
         target: win
-        function onWheelValueChanged() { if (Math.abs(wheelCtl.value - win.wheelValue) > 1e-6) wheelCtl.value = win.wheelValue }
+        function onActiveWheelChanged() { if (Math.abs(wheelCtl.value - win.activeWheel) > 1e-6) wheelCtl.value = win.activeWheel }
     }
     // IRIX "home button" (the small box at the end of the thumbwheel): back to the standard icon size.
     Item {
         id: homeButton
         objectName: "homeButton"
         x: parent.width - 48 * u; y: parent.height - 42 * u - win.bottomLift; width: 22 * u; height: 22 * u
-        readonly property bool atHome: Math.abs(win.wheelValue - win.defaultWheel) < .005
+        readonly property bool atHome: Math.abs(win.activeWheel - win.defaultWheel) < .005
         Rectangle { anchors.fill: parent; radius: 5 * win.u; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
         Rectangle {
             anchors.fill: parent; anchors.margins: 3 * win.u; radius: 3 * win.u
@@ -2090,7 +2097,7 @@ Window {
             }
         }
         HoverHandler { id: homeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: win.wheelValue = win.defaultWheel }
+        TapHandler { onTapped: win.setActiveWheel(win.defaultWheel) }
         ToolTip.visible: homeHover.hovered
         ToolTip.delay: 700
         ToolTip.text: "Standard icon size"
@@ -2577,7 +2584,7 @@ Window {
             P.MenuItem { text: (win.tabBarShown ? "Hide" : "Show") + " Tab Bar"; onTriggered: win.tabBarShown = !win.tabBarShown }
             P.MenuItem { text: "Split View\tF3"; checkable: true; checked: win.splitView; onTriggered: win.toggleSplit() }
             P.MenuItem { text: "Open Sidebar Places in Tabs"; checkable: true; checked: win.folderTabs; onTriggered: win.folderTabs = !win.folderTabs }
-            P.MenuItem { text: "Standard Icon Size"; onTriggered: win.wheelValue = win.defaultWheel }
+            P.MenuItem { text: "Standard Icon Size"; onTriggered: win.setActiveWheel(win.defaultWheel) }
         }
         P.Menu {
             title: "Go"

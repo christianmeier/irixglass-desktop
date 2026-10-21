@@ -60,6 +60,12 @@ manager icon; the IRIX icons are only inside the window.
   sides to move them (Ctrl while dropping copies; another disk copies, like Finder), drop onto a
   folder to put them inside, or press F5 / F6 to copy / move the active side's selection across.
   Drag the divider between the sides to resize them (remembered); double-click it to centre it.
+  Each side has its own view and its own icon size: the thumbwheel, its home button, Ctrl+/- and
+  Ctrl+wheel change only the active side (the one with the blue line).
+- Terminal tabs (F4, or the >_ button): a shell in a tab, in the folder that's open, on either side
+  of the split view. Shift+F4 opens Neovim on the selected file. It looks like the Alacritty setup
+  (Noto Sans Mono 12, Nord colours, see-through); Ctrl+Shift+C / V copy and paste, the tab closes
+  when the program exits. "Open Alacritty Window" in the >_ menu starts a real Alacritty there.
   Each side has its own view (icons / list / previews), keyboard, Quick Look and preview pane —
   click into a side (blue line) and the view buttons, Ctrl+1/2/3, arrows, Space, Enter and Delete
   act on it. Each side has its own tabs: the tab keys (Ctrl+T, Ctrl+W, Ctrl+Tab, Alt+1…9, …) and sidebar
@@ -157,17 +163,19 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+Tab, Ctrl+PgDn / Ctrl+Shift+Tab, Ctrl+PgUp | Next / previous tab |
 | Alt+1…8 / Alt+9 | Go to tab 1…8 / the last tab |
 | F3 / F5 / F6 | Split view / copy / move to the other side |
+| F4 / Shift+F4 | Terminal tab / Neovim tab (selected file) |
 
 ## Layout of the code
 
 How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ```
+src/terminal.*  C++: the terminal for tabs (libvterm on a KPty, painted in QML)
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 
