@@ -15,6 +15,7 @@
 #include <QElapsedTimer>
 #include <QQuickItem>
 #include <cstdio>
+#include <ctime>
 
 int main(int argc, char *argv[])
 {
@@ -81,6 +82,9 @@ int main(int argc, char *argv[])
             poll->stop();
             const qint64 ready = *stableSince;
             // scroll: to the end and back in 60 steps each, rendering every step
+            // the GUI thread's CPU time too: steadier than wall time on a busy machine
+            const auto cpuMs = [] { timespec t; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t); return qint64(t.tv_sec) * 1000 + t.tv_nsec / 1000000; };
+            const qint64 cpu0 = cpuMs();
             QElapsedTimer s;
             s.start();
             const double end = std::max(0.0, view->property("contentHeight").toDouble() - view->height());
@@ -89,8 +93,8 @@ int main(int argc, char *argv[])
                 view->setProperty("contentY", view->property("originY").toDouble() + end * f);
                 w->grabWindow();   // renders the frame
             }
-            std::fprintf(stderr, "bench: items=%d qml-loaded=%lldms first-frame=%lldms items-ready=%lldms scroll-121-frames=%lldms\n",
-                         count, loaded, *firstFrame, ready, s.elapsed());
+            std::fprintf(stderr, "bench: items=%d qml-loaded=%lldms first-frame=%lldms items-ready=%lldms scroll-121-frames=%lldms cpu=%lldms\n",
+                         count, loaded, *firstFrame, ready, s.elapsed(), cpuMs() - cpu0);
             app.quit();
         });
         poll->start();
