@@ -3,10 +3,13 @@
 #pragma once
 
 #include <QFont>
+#include <QHash>
+#include <QRawFont>
 #include <QPointer>
 #include <QQuickPaintedItem>
 #include <QQuickWindow>
 #include <QStringList>
+#include <array>
 #include <deque>
 #include <vector>
 
@@ -101,7 +104,11 @@ private:
     bool handleGesture(QEvent *e);
     void updateMetrics();
     void resizeTerminal();
-    QColor toColor(const VTermColor &c, bool fg) const;
+    void updateCells(int startRow, int startCol, int endRow, int endCol);
+    bool reflowLosesCursor(int newRows, int newCols) const;
+    QRgb toRgb(const VTermColor &c, bool fg) const;
+    quint32 glyphFor(int style, char32_t c) const;
+    bool rowCells(int row, VTermScreenCell *out) const;
     VTermPos cellAt(QPointF p) const;
     QString textBetween(VTermPos a, VTermPos b) const;
 
@@ -112,7 +119,19 @@ private:
     bool m_dragOver = false;                   // a drag is over this terminal (taken at the window)
     QString m_program, m_cwd, m_title;
     QStringList m_arguments;
-    QFont m_font;
+    QFont m_font, m_boldFont, m_italicFont;
+    QRawFont m_raw[3];                         // regular, bold, italic: text is drawn as glyph runs
+    mutable std::array<quint32, 128> m_ascii[3];          // glyph cache (-1: not looked up yet)
+    mutable QHash<char32_t, quint32> m_glyphs[3];
+    std::vector<VTermScreenCell> m_rowBuf;     // one row's cells while painting
+    struct TextRun                             // the glyphs of one colour and style
+    {
+        QRgb fg;
+        int style;
+        QList<quint32> glyphs;
+        QList<QPointF> positions;
+    };
+    std::vector<TextRun> m_runs;
     static inline qreal s_lastPointSize = 12;
     qreal m_pointSize = s_lastPointSize;
     QTimer *m_sizeHint = nullptr;
@@ -123,7 +142,23 @@ private:
     VTermPos m_cursor{0, 0};
     bool m_cursorVisible = true, m_focused = false, m_altScreen = false;
     int m_mouseMode = 0;                        // VTERM_PROP_MOUSE_*
-    std::deque<std::vector<VTermScreenCell>> m_scrollback;
+    // History lines, compact: 20 bytes a cell instead of VTermScreenCell's 40, trailing blank cells
+    // left out (they come back as blanks); the rare combining characters on the side.
+    struct SbCell
+    {
+        uint32_t ch;
+        VTermColor fg, bg;
+        VTermScreenCellAttrs attrs;
+        uint8_t width;
+    };
+    struct SbLine
+    {
+        std::vector<SbCell> cells;
+        std::vector<uint32_t> more;   // per cell with several characters: col, then the rest
+    };
+    void unpackLine(const SbLine &line, VTermScreenCell *out, int cols) const;
+    VTermScreenCell m_blank{};                 // an empty cell in the default colours
+    std::deque<SbLine> m_scrollback;
     int m_scrollOffset = 0;
     qreal m_wheelRest = 0;                     // wheel / touchpad movement not yet a whole line                     // lines scrolled back into the history
     bool m_selecting = false;

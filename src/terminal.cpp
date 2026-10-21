@@ -2,6 +2,7 @@
 
 #include <QClipboard>
 #include <QFontMetricsF>
+#include <QGlyphRun>
 #include <QGuiApplication>
 #include <QFileInfo>
 #include <QKeyEvent>
@@ -12,6 +13,8 @@
 #include <QTimer>
 #include <QVariantAnimation>
 
+#include <cmath>
+#include <csignal>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -132,6 +135,8 @@ TerminalView::TerminalView(QQuickItem *parent)
         vterm_color_rgb(&c, qRed(kPalette[i]), qGreen(kPalette[i]), qBlue(kPalette[i]));
         vterm_state_set_palette_color(state, i, &c);
     }
+    vterm_state_get_default_colors(state, &m_blank.fg, &m_blank.bg);   // with their "default" flags
+    m_blank.width = 1;
     vterm_state_set_bold_highbright(state, 1);   // draw_bold_text_with_bright_colors = true
     m_screen = vterm_obtain_screen(m_vt);
     vterm_screen_set_callbacks(m_screen, &kCallbacks, this);
@@ -143,11 +148,20 @@ TerminalView::TerminalView(QQuickItem *parent)
 
 TerminalView::~TerminalView()
 {
+    // End the program and delete the pty here, while everything it might call back into still
+    // exists. Left to ~QObject (a child, deleted after this), KPtyProcess waited for a still
+    // running shell itself and crashed in KPty::logout (and readyRead could reach freed vterm).
     if (m_pty) {
         m_pty->disconnect(this);
-        m_pty->terminate();
-        if (!m_pty->waitForFinished(300))
-            m_pty->kill();
+        m_pty->pty()->disconnect(this);
+        if (m_pty->state() != QProcess::NotRunning) {
+            ::kill(m_pty->processId(), SIGHUP);   // as when a terminal window closes; bash ignores SIGTERM
+            if (!m_pty->waitForFinished(300)) {
+                m_pty->kill();
+                m_pty->waitForFinished(1000);
+            }
+        }
+        delete m_pty;
     }
     if (m_vt)
         vterm_free(m_vt);
@@ -214,17 +228,31 @@ void TerminalView::paste()
 
 // ---- screen state from libvterm -------------------------------------------------------------
 
-int TerminalView::onDamage(VTermRect)
+// Repaint only the cells that changed (QQuickPaintedItem clips the painter to the dirty area):
+// typing then repaints a cell or two, not the whole screen. Scrolled back, rows are shifted, so
+// everything.
+void TerminalView::updateCells(int startRow, int startCol, int endRow, int endCol)
 {
-    update();
+    if (m_scrollOffset > 0) {
+        update();
+        return;
+    }
+    const QRectF r(4 + startCol * m_cellW, 3 + startRow * m_cellH, (endCol - startCol) * m_cellW, (endRow - startRow) * m_cellH);
+    update(r.toAlignedRect().adjusted(-1, -1, 1, 1));
+}
+
+int TerminalView::onDamage(VTermRect r)
+{
+    updateCells(r.start_row, r.start_col, r.end_row, r.end_col);
     return 1;
 }
 
-int TerminalView::onMoveCursor(VTermPos pos, VTermPos, int visible)
+int TerminalView::onMoveCursor(VTermPos pos, VTermPos old, int visible)
 {
     m_cursor = pos;
     m_cursorVisible = visible;
-    update();
+    updateCells(old.row, old.col, old.row + 1, old.col + 1);
+    updateCells(pos.row, pos.col, pos.row + 1, pos.col + 1);
     return 1;
 }
 
@@ -240,18 +268,19 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *val)
             m_title = QString::fromUtf8(buffer);
             Q_EMIT titleChanged();
         }
-        break;
+        return 1;   // nothing on screen changes (the prompt sets it every time)
     }
     case VTERM_PROP_CURSORVISIBLE:
         m_cursorVisible = val->boolean;
-        break;
+        updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);
+        return 1;
     case VTERM_PROP_ALTSCREEN:
         m_altScreen = val->boolean;
         m_scrollOffset = 0;
         break;
     case VTERM_PROP_MOUSE:
         m_mouseMode = val->number;
-        break;
+        return 1;
     default:
         break;
     }
@@ -261,25 +290,52 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *val)
 
 int TerminalView::onPushLine(int cols, const VTermScreenCell *cells)
 {
-    m_scrollback.emplace_back(cells, cells + cols);
-    if (int(m_scrollback.size()) > kScrollback)
+    int n = cols;
+    while (n > 0 && !cells[n - 1].chars[0] && VTERM_COLOR_IS_DEFAULT_BG(&cells[n - 1].bg) && !cells[n - 1].attrs.reverse
+           && !cells[n - 1].attrs.underline)
+        --n;
+    if (int(m_scrollback.size()) >= kScrollback)
         m_scrollback.pop_front();
+    SbLine &line = m_scrollback.emplace_back();
+    line.cells.reserve(size_t(n));
+    for (int i = 0; i < n; ++i) {
+        const VTermScreenCell &c = cells[i];
+        line.cells.push_back(SbCell{c.chars[0], c.fg, c.bg, c.attrs, uint8_t(c.width)});
+        if (c.chars[0] && c.chars[1]) {
+            line.more.push_back(uint32_t(i));
+            for (int k = 1; k < VTERM_MAX_CHARS_PER_CELL; ++k)
+                line.more.push_back(c.chars[k]);
+        }
+    }
     return 1;
+}
+
+void TerminalView::unpackLine(const SbLine &line, VTermScreenCell *out, int cols) const
+{
+    const int n = std::min(cols, int(line.cells.size()));
+    for (int i = 0; i < n; ++i) {
+        const SbCell &c = line.cells[size_t(i)];
+        VTermScreenCell &o = out[i];
+        o.chars[0] = c.ch;
+        std::fill(o.chars + 1, o.chars + VTERM_MAX_CHARS_PER_CELL, 0);
+        o.width = char(c.width);
+        o.attrs = c.attrs;
+        o.fg = c.fg;
+        o.bg = c.bg;
+    }
+    std::fill(out + n, out + cols, m_blank);
+    for (size_t i = 0; i < line.more.size(); i += VTERM_MAX_CHARS_PER_CELL) {
+        const int col = int(line.more[i]);
+        if (col < cols)
+            std::copy(line.more.begin() + qsizetype(i) + 1, line.more.begin() + qsizetype(i) + VTERM_MAX_CHARS_PER_CELL, out[col].chars + 1);
+    }
 }
 
 int TerminalView::onPopLine(int cols, VTermScreenCell *cells)
 {
     if (m_scrollback.empty())
         return 0;
-    const auto &line = m_scrollback.back();
-    for (int i = 0; i < cols; ++i) {
-        if (i < int(line.size())) {
-            cells[i] = line[size_t(i)];
-        } else {
-            cells[i] = VTermScreenCell{};
-            cells[i].width = 1;
-        }
-    }
+    unpackLine(m_scrollback.back(), cells, cols);
     m_scrollback.pop_back();
     return 1;
 }
@@ -288,6 +344,8 @@ int TerminalView::onPopLine(int cols, VTermScreenCell *cells)
 
 void TerminalView::setFontSize(qreal points)
 {
+    if (!std::isfinite(points))   // e.g. a QML binding mid-update
+        return;
     points = std::clamp(points, 6.0, 48.0);
     if (qAbs(points - m_pointSize) < .01)
         return;
@@ -318,7 +376,7 @@ void TerminalView::fitWidth()
         }
     }
     qreal points = 12;
-    if (longest > 0) {
+    if (longest > 0 && width() > 8 + m_cellW) {   // not while hidden (width 0)
         const qreal cellW = (width() - 8) / (longest + 1);   // +1: room for the cursor
         points = std::min(12.0, std::floor(m_pointSize * cellW / m_cellW * 10) / 10);
     }
@@ -345,6 +403,16 @@ void TerminalView::updateMetrics()
     m_font.setPointSizeF(m_pointSize);
     const QFontMetricsF fm(m_font);
     m_cellW = fm.horizontalAdvance(QLatin1Char('M'));
+    m_boldFont = m_font;
+    m_boldFont.setBold(true);
+    m_italicFont = m_font;
+    m_italicFont.setItalic(true);
+    const QFont fonts[3] = {m_font, m_boldFont, m_italicFont};
+    for (int i = 0; i < 3; ++i) {
+        m_raw[i] = QRawFont::fromFont(fonts[i]);
+        m_ascii[i].fill(quint32(-1));
+        m_glyphs[i].clear();
+    }
     m_cellH = std::ceil(fm.lineSpacing());
     m_ascent = fm.ascent();
 }
@@ -356,14 +424,80 @@ void TerminalView::geometryChange(const QRectF &n, const QRectF &o)
         resizeTerminal();
 }
 
+// libvterm 0.3.3 aborts ("screen_resize failed to update cursor position") when re-flowing makes
+// the wrapped line the cursor ends in taller than the new screen: it drops off the top with the
+// cursor. This runs resize_buffer()'s row bookkeeping (screen.c) without moving any cells, so such
+// a resize can be done without reflow instead.
+bool TerminalView::reflowLosesCursor(int newRows, int newCols) const
+{
+    VTermState *state = vterm_obtain_state(m_vt);
+    VTermPos cursor;
+    vterm_state_get_cursorpos(state, &cursor);
+    auto continued = [&](int row) {
+        const VTermLineInfo *info = row >= 0 && row < m_rows ? vterm_state_get_lineinfo(state, row) : nullptr;
+        return info && info->continuation;
+    };
+    auto used = [&](int row) {   // libvterm's line_popcount
+        for (int col = m_cols - 1; col >= 0; --col) {
+            VTermScreenCell cell{};
+            vterm_screen_get_cell(m_screen, VTermPos{row, col}, &cell);
+            if (cell.chars[0])
+                return col + 1;
+        }
+        return 0;
+    };
+    int oldRow = m_rows - 1, newRow = newRows - 1, finalBlank = newRows, newCursor = -1;
+    while (oldRow >= 0) {
+        const int end = oldRow;
+        while (oldRow >= 0 && continued(oldRow))
+            --oldRow;
+        const int start = std::max(0, oldRow);
+        int width = 0;
+        for (int row = start; row <= end; ++row)
+            width += row < m_rows - 1 && continued(row + 1) ? m_cols : used(row);
+        if (finalBlank == newRow + 1 && width == 0)
+            finalBlank = newRow;
+        const int height = width ? (width + newCols - 1) / newCols : 1;
+        int newStart = newRow - height + 1;
+        const int spare = newRows - finalBlank;
+        if (newStart < 0 && spare >= 0 && (newCursor == -1 || newCursor - newStart < newRows)) {
+            const int down = std::min(-newStart, spare);   // scrolled down into the blank rows
+            newRow += down;
+            newStart += down;
+            if (newCursor >= 0)
+                newCursor += down;
+            finalBlank += down;
+        }
+        if (newStart < 0) {   // this line falls off the top
+            if (newCursor == -1 && start <= cursor.row && cursor.row < end)
+                newCursor = 0;
+            oldRow = start;
+            break;
+        }
+        if (cursor.row >= start && cursor.row <= end)
+            newCursor = newStart + std::min(height - 1, ((cursor.row - start) * m_cols + cursor.col) / newCols);
+        oldRow = start - 1;
+        newRow = newStart - 1;
+    }
+    return newCursor == -1 && cursor.row > oldRow;
+}
+
 void TerminalView::resizeTerminal()
 {
-    const int cols = std::max(10, int((width() - 8) / m_cellW));
-    const int rows = std::max(3, int((height() - 6) / m_cellH));
+    if (width() < 1 || height() < 1 || !(m_cellW > 0) || !(m_cellH > 0))   // hidden / not laid out yet
+        return;
+    const int cols = std::clamp(int((width() - 8) / m_cellW), 10, 2000);
+    const int rows = std::clamp(int((height() - 6) / m_cellH), 3, 1000);
     if (cols != m_cols || rows != m_rows) {
+        // Re-flow unless that would trip libvterm's abort (see above); the shell redraws anyway.
+        const bool noReflow = reflowLosesCursor(rows, cols);
+        if (noReflow)
+            vterm_screen_enable_reflow(m_screen, false);
+        vterm_set_size(m_vt, rows, cols);
+        if (noReflow)
+            vterm_screen_enable_reflow(m_screen, true);
         m_cols = cols;
         m_rows = rows;
-        vterm_set_size(m_vt, rows, cols);
         vterm_screen_flush_damage(m_screen);
         Q_EMIT sizeChanged();
     }
@@ -372,16 +506,62 @@ void TerminalView::resizeTerminal()
     update();
 }
 
-QColor TerminalView::toColor(const VTermColor &c, bool fg) const
+// ---- painting ----------------------------------------------------------------------------------
+
+// The cells of a visible row: from the screen, or with a scroll offset from the history.
+// Returns false for rows above the oldest history line.
+bool TerminalView::rowCells(int row, VTermScreenCell *out) const
 {
-    if (fg ? VTERM_COLOR_IS_DEFAULT_FG(&c) : VTERM_COLOR_IS_DEFAULT_BG(&c))
-        return fg ? kFg : QColor(Qt::transparent);
-    VTermColor rgb = c;
-    vterm_screen_convert_color_to_rgb(m_screen, &rgb);
-    return QColor(rgb.rgb.red, rgb.rgb.green, rgb.rgb.blue);
+    const int histRow = int(m_scrollback.size()) - m_scrollOffset + row;
+    if (m_scrollOffset > 0 && histRow < int(m_scrollback.size())) {
+        if (histRow < 0)
+            return false;
+        unpackLine(m_scrollback[size_t(histRow)], out, m_cols);
+        return true;
+    }
+    for (int col = 0; col < m_cols; ++col)
+        vterm_screen_get_cell(m_screen, VTermPos{row - (m_scrollOffset > 0 ? m_scrollOffset : 0), col}, &out[col]);
+    return true;
 }
 
-// ---- painting ----------------------------------------------------------------------------------
+QRgb TerminalView::toRgb(const VTermColor &c, bool fg) const
+{
+    if (fg ? VTERM_COLOR_IS_DEFAULT_FG(&c) : VTERM_COLOR_IS_DEFAULT_BG(&c))
+        return fg ? kFg.rgba() : 0;   // default background: none (the item's see-through one)
+    if (VTERM_COLOR_IS_RGB(&c))
+        return qRgb(c.rgb.red, c.rgb.green, c.rgb.blue);
+    VTermColor rgb = c;
+    vterm_screen_convert_color_to_rgb(m_screen, &rgb);
+    return qRgb(rgb.rgb.red, rgb.rgb.green, rgb.rgb.blue);
+}
+
+// Glyph of a character in the (regular / bold / italic) font; 0 if it isn't there, then the cell
+// is drawn with drawText, which falls back to other fonts.
+quint32 TerminalView::glyphFor(int style, char32_t c) const
+{
+    if (c < 128 && m_ascii[style][c] != quint32(-1))
+        return m_ascii[style][c];
+    auto it = m_glyphs[style].constFind(c);
+    if (it != m_glyphs[style].cend())
+        return *it;
+    char16_t utf16[2];
+    const int n = QChar::requiresSurrogates(c) ? 2 : 1;
+    if (n == 2) {
+        utf16[0] = QChar::highSurrogate(c);
+        utf16[1] = QChar::lowSurrogate(c);
+    } else {
+        utf16[0] = char16_t(c);
+    }
+    quint32 glyph = 0;
+    int count = 1;
+    if (!m_raw[style].glyphIndexesForChars(reinterpret_cast<const QChar *>(utf16), n, &glyph, &count) || count != 1)
+        glyph = 0;
+    if (c < 128)
+        m_ascii[style][c] = glyph;
+    else
+        m_glyphs[style].insert(c, glyph);
+    return glyph;
+}
 
 void TerminalView::paint(QPainter *p)
 {
@@ -389,55 +569,124 @@ void TerminalView::paint(QPainter *p)
     QColor bg = kBg;
     bg.setAlphaF(.8);   // Alacritty: window.opacity
     p->fillRect(boundingRect(), bg);
-    p->setFont(m_font);
-    QFont bold = m_font;
-    bold.setBold(true);
-    QFont italic = m_font;
-    italic.setItalic(true);
+    const QFont fonts[3] = {m_font, m_boldFont, m_italicFont};
     const qreal x0 = 4, y0 = 3;
     const VTermPos selA = before(m_selA, m_selB) ? m_selA : m_selB, selB = before(m_selA, m_selB) ? m_selB : m_selA;
+    // Only the rows in the damaged part (update(rect) clips the painter to it).
+    const QRectF clip = p->hasClipping() ? p->clipBoundingRect() : boundingRect();
+    // (A row more each side, for glyphs that reach into the next row.)
+    const int firstRow = std::max(0, int((clip.top() - y0) / m_cellH) - 1);
+    const int lastRow = std::min(m_rows - 1, int((clip.bottom() - y0) / m_cellH) + 1);
+    m_rowBuf.resize(size_t(m_cols));
+    VTermScreenCell *cells = m_rowBuf.data();
+    // All backgrounds first, then the text: one glyph run per colour and style for the whole
+    // screen, each glyph placed at its cell. Per-cell drawText (a QString, a shaping pass and a
+    // font switch each) was most of the painting time.
+    for (TextRun &r : m_runs) {
+        r.glyphs.clear();
+        r.positions.clear();
+    }
+    struct Extra   // drawn after the runs: cells drawText has to do, underlines
+    {
+        QRectF rect;
+        QRgb fg;
+        int style;
+        QString text;
+    };
+    std::vector<Extra> extras;
+    TextRun *run = nullptr;
 
-    for (int row = 0; row < m_rows; ++row) {
-        // With a scroll offset, the top rows come from the history.
-        const int histRow = int(m_scrollback.size()) - m_scrollOffset + row;
-        for (int col = 0; col < m_cols; ++col) {
-            VTermScreenCell cell{};
-            if (m_scrollOffset > 0 && histRow < int(m_scrollback.size())) {
-                if (histRow < 0)
-                    continue;
-                const auto &line = m_scrollback[size_t(histRow)];
-                if (col >= int(line.size()))
-                    continue;
-                cell = line[size_t(col)];
-            } else {
-                vterm_screen_get_cell(m_screen, VTermPos{row - (m_scrollOffset > 0 ? m_scrollOffset : 0), col}, &cell);
+    for (int row = firstRow; row <= lastRow; ++row) {
+        if (!rowCells(row, cells))
+            continue;
+        const int top = qRound(y0 + row * m_cellH), bottom = qRound(y0 + row * m_cellH + m_cellH);
+        const qreal baseline = y0 + row * m_cellH + m_ascent;
+        // backgrounds, a run of cells with the same colour at a time (whole pixels, no seams)
+        QRgb runBg = 0;
+        int runStart = 0;
+        auto flushBg = [&](int end) {
+            if (qAlpha(runBg)) {
+                const int left = qRound(x0 + runStart * m_cellW), right = qRound(x0 + end * m_cellW);
+                p->fillRect(QRect(left, top, right - left, bottom - top), QColor::fromRgba(runBg));
             }
-            QColor fg = toColor(cell.fg, true), cbg = toColor(cell.bg, false);
+        };
+        for (int col = 0; col < m_cols;) {
+            const VTermScreenCell &cell = cells[col];
+            const int w = std::max(1, int(cell.width));
+            QRgb cbg = toRgb(cell.bg, false);
             if (cell.attrs.reverse)
-                std::swap(fg, cbg = cbg.alpha() ? cbg : kBg);
+                cbg = toRgb(cell.fg, true);
             const VTermPos here{row, col};
-            if (m_selA.row >= 0 && before(selA, here) && before(here, selB)) {
-                cbg = QColor(0x43, 0x4C, 0x5E);   // nord2
+            if (m_selA.row >= 0 && before(selA, here) && before(here, selB))
+                cbg = qRgb(0x43, 0x4C, 0x5E);   // nord2
+            if (cbg != runBg) {
+                flushBg(col);
+                runBg = cbg;
+                runStart = col;
             }
-            const QRectF r(x0 + col * m_cellW, y0 + row * m_cellH, m_cellW * std::max(1, int(cell.width)), m_cellH);
-            if (cbg.alpha()) {   // whole pixels, so neighbouring cells meet without seams
-                const int left = qRound(r.left()), right = qRound(r.right()), top = qRound(r.top()), bottom = qRound(r.bottom());
-                p->fillRect(QRect(left, top, right - left, bottom - top), cbg);
+            col += w;
+        }
+        flushBg(m_cols);
+        // text and underlines, collected
+        for (int col = 0; col < m_cols; ++col) {
+            const VTermScreenCell &cell = cells[col];
+            const bool text = cell.chars[0] && cell.chars[0] != ' ';
+            if (!text && !cell.attrs.underline)
+                continue;
+            QRgb fg = toRgb(cell.fg, true);
+            if (cell.attrs.reverse) {
+                const QRgb b = toRgb(cell.bg, false);
+                fg = qAlpha(b) ? b : kBg.rgba();
             }
-            if (cell.chars[0] && cell.chars[0] != ' ') {
-                QString text;
-                for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i]; ++i)
-                    text += QString::fromUcs4(reinterpret_cast<const char32_t *>(&cell.chars[i]), 1);
-                p->setFont(cell.attrs.bold ? bold : cell.attrs.italic ? italic : m_font);
-                p->setPen(fg);
-                p->drawText(QPointF(r.left(), r.top() + m_ascent), text);
+            const qreal left = x0 + col * m_cellW;
+            const int style = cell.attrs.bold ? 1 : cell.attrs.italic ? 2 : 0;
+            if (text) {
+                const quint32 glyph = cell.width == 1 && !cell.chars[1] ? glyphFor(style, char32_t(cell.chars[0])) : 0;
+                if (glyph) {
+                    if (!run || run->fg != fg || run->style != style) {
+                        run = nullptr;
+                        for (TextRun &r : m_runs)
+                            if (r.fg == fg && r.style == style)
+                                run = &r;
+                        if (!run)
+                            run = &m_runs.emplace_back(TextRun{fg, style, {}, {}});
+                    }
+                    run->glyphs.append(glyph);
+                    run->positions.append(QPointF(left, baseline));
+                } else {   // wide, combined or not in the font: drawText, with font fallback
+                    QString chars;
+                    for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i]; ++i)
+                        chars += QString::fromUcs4(reinterpret_cast<const char32_t *>(&cell.chars[i]), 1);
+                    extras.push_back(Extra{QRectF(left, baseline, 0, 0), fg, style, chars});
+                }
             }
             if (cell.attrs.underline)
-                p->fillRect(QRectF(r.left(), r.bottom() - 2, r.width(), 1), fg);
+                extras.push_back(Extra{QRectF(left, y0 + row * m_cellH + m_cellH - 2, m_cellW * std::max(1, int(cell.width)), 1), fg, -1, {}});
             if (cell.width > 1)
                 ++col;
         }
     }
+    for (TextRun &r : m_runs) {
+        if (r.glyphs.isEmpty())
+            continue;
+        QGlyphRun glyphRun;
+        glyphRun.setRawFont(m_raw[r.style]);
+        glyphRun.setGlyphIndexes(r.glyphs);
+        glyphRun.setPositions(r.positions);
+        p->setPen(QColor::fromRgba(r.fg));
+        p->drawGlyphRun(QPointF(), glyphRun);
+    }
+    for (const Extra &e : extras) {
+        if (e.style < 0) {
+            p->fillRect(e.rect, QColor::fromRgba(e.fg));
+        } else {
+            p->setFont(fonts[e.style]);
+            p->setPen(QColor::fromRgba(e.fg));
+            p->drawText(e.rect.topLeft(), e.text);
+        }
+    }
+    if (m_runs.size() > 64)   // e.g. after a truecolour gradient: don't keep them all
+        m_runs.clear();
     // Cursor: underline when focused (as in Alacritty's config), hollow box when not.
     if (m_cursorVisible && m_scrollOffset == 0) {
         const QRectF c(x0 + m_cursor.col * m_cellW, y0 + m_cursor.row * m_cellH, m_cellW, m_cellH);
@@ -599,7 +848,10 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         update();
         return;
     }
-    m_scrollOffset = 0;
+    if (m_scrollOffset) {   // typing goes back to the prompt
+        m_scrollOffset = 0;
+        update();
+    }
     VTermKey key = VTERM_KEY_NONE;
     switch (e->key()) {
     case Qt::Key_Return: case Qt::Key_Enter: key = VTERM_KEY_ENTER; break;
@@ -633,7 +885,7 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         QQuickPaintedItem::keyPressEvent(e);
         return;
     }
-    update();
+    // no repaint here: the program's echo damages what changes
 }
 
 void TerminalView::inputMethodEvent(QInputMethodEvent *e)
@@ -828,13 +1080,13 @@ void TerminalView::insertPaths(const QStringList &paths)
 void TerminalView::focusInEvent(QFocusEvent *e)
 {
     m_focused = true;
-    update();
+    updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);   // underline cursor
     QQuickPaintedItem::focusInEvent(e);
 }
 
 void TerminalView::focusOutEvent(QFocusEvent *e)
 {
     m_focused = false;
-    update();
+    updateCells(m_cursor.row, m_cursor.col, m_cursor.row + 1, m_cursor.col + 1);   // hollow box
     QQuickPaintedItem::focusOutEvent(e);
 }

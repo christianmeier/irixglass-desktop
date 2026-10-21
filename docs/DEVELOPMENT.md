@@ -411,6 +411,41 @@ section's colour. `IconPicker.qml` (Emoji / App Icons, search, Standard Icon) se
 - Offscreen Qt (the tests) has no real `QDrag`: `exec()` returns at once, so drops are tested with
   synthetic `QDragEnterEvent` / `QDragMoveEvent` / `QDropEvent` sent to the window.
 
+### Performance: terminal
+
+`IRIXFM_TERM_BENCH=<dir> QT_QPA_PLATFORM=offscreen build/terminal_test` runs a benchmark instead
+of the tests: a 200×60-cell terminal, throughput (`seq 1 200000`, `cat` of an 8 MB file,
+`ls --color -la /usr/bin` ×5 until the prompt is back, with paint counts), `paint()` time of a
+full screen (ls --color, a colour per cell, plain text, scrolled back; also at 1.5x) and the RSS
+of a full 10000-line scrollback. It saves PNGs of the painted screens and of the window as
+rendered to `<dir>`, to compare before / after (`magick compare -metric AE`).
+
+- **paint()** draws all backgrounds first (one `fillRect` per run of cells with the same colour,
+  whole pixels), then the text as one `QGlyphRun` per colour and style for the whole screen, each
+  glyph at its cell (`QRawFont` per style, glyph cache). Cells the font lacks (glyph 0), wide and
+  combined cells go through `drawText` as before, for font fallback. Per-cell `drawText` (a
+  QString, a shaping pass and a font switch per cell) was most of the time. The output is
+  pixel-identical. 200×60: ls screen 7–11 → 2 ms, plain text 25–38 → 3 ms, colour per cell
+  33–50 → 8 ms.
+- **Partial repaints**: libvterm damage and the cursor's old / new cell call `update(rect)`;
+  `QQuickPaintedItem` clips the painter to the dirty area and `paint()` draws only those rows.
+  Title changes (each prompt), key presses and focus changes no longer repaint everything.
+  `terminal_test` checks that the rendered window still matches a full paint.
+- **Scrollback** stores 20-byte cells (`SbCell`), not `VTermScreenCell` (40 bytes), without the
+  trailing blank cells; combining characters go in `SbLine::more`. 10000 lines of ls --color at
+  200 columns: 78.6 → 11.2 MB. Popped lines are filled with blanks in the *default* colours
+  (`m_blank`); `VTermScreenCell{}` was opaque black.
+- **Throughput is bounded by libvterm**: every line feed at the bottom memmoves the whole screen
+  buffer (rows × cols × 36 bytes, `moverect_internal` in screen.c), about 20 µs per line at
+  200×60. `seq 1 200000` is mostly that. Painting runs at most once per frame (`update()` is
+  coalesced), now 1–3 ms a frame.
+- Crashes fixed: `~TerminalView` sends SIGHUP (interactive bash ignores SIGTERM), waits, and
+  deletes the `KPtyProcess` itself before `vterm_free`; left to `~QObject`, `~KPtyProcess` waited
+  for the live shell and crashed in `KPty::logout`. libvterm 0.3.3 aborts ("screen_resize failed
+  to update cursor position") when reflow pushes the wrapped line holding the cursor off the top:
+  `reflowLosesCursor()` replays `resize_buffer()`'s row bookkeeping and such a resize is done
+  without reflow. Zero-size (hidden) resizes and non-finite font sizes are ignored.
+
 ### Web tabs
 
 `qml/BrowserView.qml` (Qt WebEngine; `QtWebEngineQuick::initialize()` runs first thing in
