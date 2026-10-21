@@ -183,6 +183,7 @@ Item {
         showDotAndDotDot: false
         caseSensitive: false
         sortCaseSensitive: false
+        onFolderChanged: if (pane.dir) Fm.prefetchKinds(pane.dir)   // as on the main side
     }
 
     // a glass panel of its own, lit when active

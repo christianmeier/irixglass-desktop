@@ -879,6 +879,7 @@ Window {
         sortCaseSensitive: false
         sortField: win.sortField
         sortReversed: win.sortReversed
+        onFolderChanged: Fm.prefetchKinds(win.dir)   // the icons' kinds, worked out in the background
         onCountChanged: { win.selectPending(); win.applyPendingScroll() }
         onStatusChanged: {
             if (status === FolderListModel.Loading) win.waitForLoad = false   // the new folder is on its way

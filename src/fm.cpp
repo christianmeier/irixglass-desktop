@@ -783,6 +783,30 @@ qint64 changeTime(const QFileInfo &fi)
 }
 } // namespace
 
+namespace
+{
+// kind() without the cache; also run in prefetchKinds()'s worker thread (QMimeDatabase is thread-safe)
+QString kindOf(const QFileInfo &fi)
+{
+    if (fi.isDir())
+        return QStringLiteral("folder");
+    if (fi.suffix() == QLatin1String("desktop"))
+        return QStringLiteral("app");
+    // By name first (no disk reads); look inside only when the name says nothing. MatchContent,
+    // not MatchDefault: the name was just matched, and doing it again took half the time.
+    static const QMimeDatabase db;
+    QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
+    if (mime.isDefault())
+        mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchContent);
+    if (mime.name().startsWith(QLatin1String("image/")))
+        return QStringLiteral("image");
+    if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
+        || mime.inherits(QStringLiteral("application/x-shellscript")))
+        return QStringLiteral("exe");
+    return QStringLiteral("doc");
+}
+} // namespace
+
 QString Fm::kind(const QString &path) const
 {
     const QFileInfo fi(path);
@@ -790,32 +814,54 @@ QString Fm::kind(const QString &path) const
     const auto it = m_kindCache.constFind(path);
     if (it != m_kindCache.constEnd() && it->ctime == ctime)
         return it->kind;
-    QString k;
-    if (fi.isDir())
-        k = QStringLiteral("folder");
-    else if (fi.suffix() == QLatin1String("desktop"))
-        k = QStringLiteral("app");
-    else {
-        // By name first (no disk reads); look inside only when the name says nothing. MatchContent,
-        // not MatchDefault: the name was just matched, and doing it again took half the time.
-        static const QMimeDatabase db;
-        QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
-        if (mime.isDefault())
-            mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchContent);
-        if (mime.name().startsWith(QLatin1String("image/")))
-            k = QStringLiteral("image");
-        else if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
-                 || mime.inherits(QStringLiteral("application/x-shellscript")))
-            k = QStringLiteral("exe");
-        else
-            k = QStringLiteral("doc");
-    }
+    const QString k = kindOf(fi);
     if (ctime >= 0) {
         if (m_kindCache.size() >= kMaxKindCache)
             m_kindCache.clear();
         m_kindCache.insert(path, {ctime, k});
     }
     return k;
+}
+
+void Fm::prefetchKinds(const QString &dir)
+{
+    const qint64 mtime = QFileInfo(dir).lastModified().toMSecsSinceEpoch();
+    if (dir.isEmpty() || m_kindPrefetched.value(dir, -1) == mtime)
+        return;   // done before, and no file was added, removed or renamed since
+    if (m_kindPrefetched.size() > 200)
+        m_kindPrefetched.clear();
+    m_kindPrefetched.insert(dir, mtime);
+    const int gen = ++m_kindGen;
+    QPointer<Fm> self(this);
+    (void)QtConcurrent::run([self, gen, dir] {
+        constexpr int kMax = 20000, kBatch = 200;
+        QList<QPair<QString, KindEntry>> batch;
+        auto flush = [&] {
+            if (!batch.isEmpty() && self)
+                QMetaObject::invokeMethod(self, [self, b = batch] {
+                    if (!self)
+                        return;
+                    for (const auto &[path, e] : b) {
+                        if (self->m_kindCache.size() >= kMaxKindCache)
+                            self->m_kindCache.clear();
+                        self->m_kindCache.insert(path, e);
+                    }
+                });
+            batch.clear();
+        };
+        // In name order, as the views list them by default: the top of the folder comes first.
+        const QFileInfoList files = QDir(dir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+        for (int i = 0; i < files.size() && i < kMax; ++i) {
+            if (!self || self->m_kindGen.loadRelaxed() != gen)
+                return;   // another folder was opened
+            const qint64 ctime = changeTime(files[i]);
+            if (ctime >= 0)
+                batch.append({files[i].absoluteFilePath(), {ctime, kindOf(files[i])}});
+            if (batch.size() >= kBatch)
+                flush();
+        }
+        flush();
+    });
 }
 
 QVariantMap Fm::desktopInfo(const QString &path) const

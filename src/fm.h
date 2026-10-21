@@ -44,6 +44,9 @@ public:
     Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow);
 
     Q_INVOKABLE QString kind(const QString &path) const;  // folder | app | image | exe | doc
+    // Works out kind() for a folder's files in the background, so scrolling a big folder finds
+    // them cached (files without an extension have to be read). The views call it on each folder.
+    Q_INVOKABLE void prefetchKinds(const QString &dir);
     Q_INVOKABLE QVariantMap desktopInfo(const QString &path) const;  // {name, icon}
     Q_INVOKABLE QString freeSpace(const QString &path) const;
     Q_INVOKABLE QString humanSize(qint64 bytes) const;
@@ -189,5 +192,7 @@ private:
         QVariantMap info;
     };
     mutable QHash<QString, KindEntry> m_kindCache;
+    QAtomicInt m_kindGen;                  // bumped to cancel the running prefetchKinds()
+    QHash<QString, qint64> m_kindPrefetched;   // folder -> its mtime when its kinds were prefetched
     mutable QHash<QString, DesktopEntry> m_desktopCache;
 };
