@@ -55,6 +55,7 @@
 #include <KDesktopFile>
 #include <KApplicationTrader>
 #include <QQuickWebEngineProfile>
+#include <QQuickWebEngineDownloadRequest>
 #include <QSet>
 #include <KFileItem>
 #include <KIO/CopyJob>
@@ -888,6 +889,28 @@ QObject *Fm::webProfile()
         auto *p = new QQuickWebEngineProfile(QStringLiteral("irixfm"), this);
         p->setHttpCacheType(QQuickWebEngineProfile::DiskHttpCache);
         p->setPersistentCookiesPolicy(QQuickWebEngineProfile::AllowPersistentCookies);
+        // Downloads go to the Downloads folder (a free name, never over an existing file); the
+        // web tab's bar shows progress and the finished file.
+        connect(p, &QQuickWebEngineProfile::downloadRequested, this, [this](QQuickWebEngineDownloadRequest *d) {
+            const QString folder = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+            QDir().mkpath(folder);
+            QString name = d->downloadFileName().isEmpty() ? QStringLiteral("download") : d->downloadFileName();
+            const QFileInfo fi(name);
+            for (int i = 1; QFileInfo::exists(folder + QLatin1Char('/') + name); ++i)
+                name = fi.completeBaseName() + QStringLiteral(" (%1)").arg(i) + (fi.suffix().isEmpty() ? QString() : QLatin1Char('.') + fi.suffix());
+            d->setDownloadDirectory(folder);
+            d->setDownloadFileName(name);
+            d->accept();
+            const QString path = folder + QLatin1Char('/') + name;
+            Q_EMIT downloadProgress(path, 0);
+            connect(d, &QWebEngineDownloadRequest::receivedBytesChanged, this, [this, d, path] {
+                if (d->totalBytes() > 0)
+                    Q_EMIT downloadProgress(path, int(100 * d->receivedBytes() / d->totalBytes()));
+            });
+            connect(d, &QWebEngineDownloadRequest::isFinishedChanged, this, [this, d, path] {
+                Q_EMIT downloadFinished(path, d->state() == QWebEngineDownloadRequest::DownloadCompleted);
+            });
+        });
         m_webProfile = p;
     }
     return m_webProfile;

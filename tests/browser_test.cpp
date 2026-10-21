@@ -4,7 +4,10 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QClipboard>
 #include <QFile>
+#include <QFileInfo>
+#include <QMimeData>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -51,6 +54,25 @@ int main(int argc, char *argv[])
     const QString base = QDir(tmp.path()).canonicalPath();
     write(base + QStringLiteral("/page.html"), "<html><head><title>Hello Page</title><style>body{margin:0} a{display:block;width:200px;height:40px}</style></head><body><a id=l href='two.html'>next</a></body></html>");
     write(base + QStringLiteral("/two.html"), "<html><head><title>Second Page</title></head><body>two</body></html>");
+    // a form: the title shows what's in the field; a target=_blank link; a download link
+    write(base + QStringLiteral("/form.html"),
+          "<html><head><title>v:</title><style>body{margin:0} input{position:absolute;left:0;top:0;width:300px;height:40px}"
+          " a{position:absolute;left:0;top:60px;width:200px;height:30px;display:block}"
+          " #dl{top:110px}</style></head><body>"
+          "<input id=f oninput=\"document.title='v:'+this.value\">"
+          "<a id=nw href='two.html' target=_blank>new window</a>"
+          "<a id=dl href='data.bin' download>download</a></body></html>");
+    write(base + QStringLiteral("/data.bin"), QByteArray(4096, 'x'));
+    write(base + QStringLiteral("/victim.txt"), "do not touch");
+    // downloads go to XDG_DOWNLOAD_DIR: point it into the test folder, not the real ~/Downloads
+    QDir().mkpath(base + QStringLiteral("/dl"));
+    {
+        const QString cfg = qEnvironmentVariable("XDG_CONFIG_HOME");
+        if (!cfg.isEmpty()) {
+            QDir().mkpath(cfg);
+            write(cfg + QStringLiteral("/user-dirs.dirs"), ("XDG_DOWNLOAD_DIR=\"" + base + "/dl\"\n").toUtf8());
+        }
+    }
 
     const QString assets = QStringLiteral(IRIXFM_SOURCE_DIR);
     Fm fm(base, assets);
@@ -129,6 +151,80 @@ int main(int argc, char *argv[])
                   QStringLiteral("Ctrl+Shift+W closes the web tab"));
         }
 
+        // inside a page: typing in a form, the editing keys stay in the page (they must not paste,
+        // undo or delete files: fm's window shortcuts for those are off while a web tab shows),
+        // target=_blank links, downloads
+        {
+            win->setProperty("selection", QVariantMap{{base + QStringLiteral("/form.html"), true}});
+            QTest::keyClick(window, Qt::Key_F7);
+            QTest::qWait(300);
+            QQuickItem *w = active();
+            waitFor([&] { return w && w->property("title").toString() == QStringLiteral("v:"); });
+            auto *view = w->findChild<QQuickItem *>(QStringLiteral("webView"));
+            QTest::qWait(400);
+            QTest::mouseClick(window, Qt::LeftButton, {}, view->mapToScene(QPointF(100, 20)).toPoint());
+            QTest::qWait(200);
+            for (const char c : QByteArray("hello"))
+                QTest::keyClick(window, c);
+            check(waitFor([&] { return w->property("title").toString() == QStringLiteral("v:hello"); }, 3000),
+                  QStringLiteral("typing into a form field in the page works"), w->property("title").toString());
+            // the clipboard holds a file AND text: Ctrl+V must paste the text into the field, not the file into the folder
+            auto *mime = new QMimeData;
+            mime->setUrls({QUrl::fromLocalFile(base + QStringLiteral("/victim.txt"))});
+            mime->setText(QStringLiteral("-clip"));
+            QGuiApplication::clipboard()->setMimeData(mime);
+            const int filesBefore = QDir(base).entryList(QDir::Files).size();
+            QTest::keyClick(window, Qt::Key_End);
+            QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier);
+            QTest::qWait(500);
+            check(waitFor([&] { return w->property("title").toString().startsWith(QStringLiteral("v:hello")) && w->property("title").toString() != QStringLiteral("v:hello"); }, 3000)
+                      && QDir(base).entryList(QDir::Files).size() == filesBefore,
+                  QStringLiteral("Ctrl+V pastes into the page, not files into the folder"),
+                  w->property("title").toString() + " files " + QString::number(QDir(base).entryList(QDir::Files).size()));
+            // Ctrl+A then Delete clears the field; the selected file stays put
+            win->setProperty("selection", QVariantMap{{base + QStringLiteral("/victim.txt"), true}});
+            QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+            QTest::keyClick(window, Qt::Key_Delete);
+            check(waitFor([&] { return w->property("title").toString() == QStringLiteral("v:"); }, 3000)
+                      && QFile::exists(base + QStringLiteral("/victim.txt")),
+                  QStringLiteral("Ctrl+A and Delete edit the field, no file is trashed"), w->property("title").toString());
+            // Ctrl+Z undoes in the field, not fm's last file operation
+            const int beforeUndo = QDir(base).entryList(QDir::Files).size();
+            QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+            check(waitFor([&] { return w->property("title").toString() != QStringLiteral("v:"); }, 3000)
+                      && QDir(base).entryList(QDir::Files).size() == beforeUndo,
+                  QStringLiteral("Ctrl+Z undoes in the field, not a file operation"), w->property("title").toString());
+            // target=_blank: opens in this tab
+            QTest::mouseClick(window, Qt::LeftButton, {}, view->mapToScene(QPointF(50, 75)).toPoint());
+            check(waitFor([&] { return w->property("title").toString() == QStringLiteral("Second Page"); }, 5000),
+                  QStringLiteral("a link that opens a new window opens in the tab"), w->property("title").toString());
+            QMetaObject::invokeMethod(win, "goBack");
+            waitFor([&] { return w->property("title").toString().startsWith(QStringLiteral("v:")); });
+            QTest::qWait(400);
+            // a download link: saved to the Downloads folder
+            QTest::mouseClick(window, Qt::LeftButton, {}, view->mapToScene(QPointF(50, 125)).toPoint());
+            check(waitFor([&] { return QFileInfo(base + QStringLiteral("/dl/data.bin")).size() == 4096; }, 8000),
+                  QStringLiteral("download links save into Downloads"), QDir(base + QStringLiteral("/dl")).entryList(QDir::Files).join(", "));
+            auto *notice = w->findChild<QQuickItem *>(QStringLiteral("downloadNotice"));
+            check(waitFor([&] { return notice && notice->isVisible() && w->property("downloadText").toString().contains(QStringLiteral("✓")); }, 3000),
+                  QStringLiteral("…the bar says so"), w->property("downloadText").toString());
+            const int tabsBefore = tabs().size();
+            QTest::mouseClick(window, Qt::LeftButton, {}, notice->mapToScene(QPointF(notice->width() / 2, notice->height() / 2)).toPoint());
+            QTest::qWait(400);
+            check(tabs().size() == tabsBefore + 1 && win->property("dir").toString() == base + QStringLiteral("/dl")
+                      && win->property("selection").toMap().contains(base + QStringLiteral("/dl/data.bin")),
+                  QStringLiteral("…and clicking it shows the file in a folder tab"), win->property("dir").toString());
+            QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier);   // back to the web tab
+            QTest::qWait(200);
+            // the profile keeps cookies and storage on disk
+            auto *profile = view->property("profile").value<QObject *>();
+            check(profile && !profile->property("offTheRecord").toBool()
+                      && profile->property("persistentStoragePath").toString().contains(QStringLiteral("irixfm")),
+                  QStringLiteral("the web profile is saved on disk (cookies, logins)"),
+                  profile ? profile->property("persistentStoragePath").toString() : QString());
+            QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+            QTest::qWait(200);
+        }
         // several web tabs at once all load (they share one profile)
         {
             QStringList titles;

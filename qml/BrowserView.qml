@@ -124,6 +124,37 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
         }
     }
 
+    // Downloads (into ~/Downloads, Fm.webProfile): "name 42 %", then "name ✓ — Show" for a while.
+    property string downloadPath: ""
+    property string downloadText: ""
+    signal showFileRequested(string path)
+    Timer { id: downloadHide; interval: 8000; onTriggered: b.downloadText = "" }
+    Connections {
+        target: Fm
+        enabled: b.visible
+        function onDownloadProgress(path, percent) { b.downloadPath = path; b.downloadText = path.split("/").pop() + "  " + percent + " %"; downloadHide.stop() }
+        function onDownloadFinished(path, ok) {
+            b.downloadPath = path
+            b.downloadText = path.split("/").pop() + (ok ? "  ✓  Show in Downloads" : "  — failed")
+            downloadHide.restart()
+        }
+    }
+    Rectangle {
+        objectName: "downloadNotice"
+        visible: b.downloadText !== ""
+        z: 3
+        anchors.right: parent.right; anchors.rightMargin: 12 * b.u
+        y: bar.height + 12 * b.u
+        width: dlText.implicitWidth + 24 * b.u; height: 28 * b.tu; radius: height / 2
+        color: Qt.rgba(28 / 255, 30 / 255, 38 / 255, .95); border.color: Qt.rgba(1, 1, 1, .15)
+        Text {
+            id: dlText
+            anchors.centerIn: parent; text: b.downloadText; color: "white"
+            font.family: b.fontFamily; font.pixelSize: 12 * b.tu
+        }
+        TapHandler { onTapped: if (b.downloadText.includes("✓")) b.showFileRequested(b.downloadPath) }
+    }
+
     // ---- the page ----------------------------------------------------------------------------
     Rectangle {   // rounded frame, so the page sits in the glass like the terminal does
         id: frame

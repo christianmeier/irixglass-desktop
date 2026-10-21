@@ -137,6 +137,8 @@ public:
     Q_INVOKABLE void deleteTagEverywhere(const QString &tag);
 
 Q_SIGNALS:
+    void downloadProgress(const QString &path, int percent);   // web tabs' downloads
+    void downloadFinished(const QString &path, bool ok);
     void undoChanged();
     void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
     void volumesChanged();

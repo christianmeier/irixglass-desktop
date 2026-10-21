@@ -344,6 +344,7 @@ Window {
             t.anchors.fill = layer
             t.visible = Qt.binding(() => win.activeTermId === id || splitPane.activeTermId === id)
             t.activeFocusChanged.connect(() => { if (t.activeFocus) win.activePane = layer === splitPane.termLayer ? 1 : 0 })
+            t.showFileRequested.connect(path => { openTabFor(path.substring(0, path.lastIndexOf("/")), ""); pendingSelect = [path] })
         } else {
             t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
                                                    workingDirectory: cwd, termId: id, fontPointSize: termFontSize })
