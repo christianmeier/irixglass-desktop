@@ -45,6 +45,7 @@ manager icon; the IRIX icons are only inside the window.
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
+- The icon-size thumbwheel scales icons in every view, including the list and search results.
 - Remembers icon size, view mode, hidden files and window size.
 
 ## Requirements
@@ -65,7 +66,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (100 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (101 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```

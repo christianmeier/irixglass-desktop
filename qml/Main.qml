@@ -64,6 +64,11 @@ Window {
     property real wheelValue: .352              // thumbwheel 0..1
     readonly property real iconScale: .55 + wheelValue * 1.05
     readonly property real k: u * iconScale     // px per icon unit (icons are drawn in a 100-unit box)
+    // List and search results: the icon follows the thumbwheel too (26 px at the default size, at least
+    // 16 px); rows grow with it, text stays at the system size.
+    readonly property real listIcon: Math.max(16, 26 * u * iconScale / .92)
+    readonly property real listRowH: Math.max(28 * tu, listIcon + 6 * u)
+    readonly property real listTextX: listIcon + 14 * u
     property int viewMode: 0                    // 0 icons, 1 list, 2 previews
     property bool showHidden: false
     readonly property string fontFamily: "SF Pro Text"
@@ -1017,7 +1022,7 @@ Window {
         header: Item {
             z: 2; width: list.width; height: 26 * win.tu
             Row {
-                x: 40 * win.u; height: parent.height
+                x: win.listTextX; height: parent.height
                 Repeater {
                     // Click a column to sort by it; click again to reverse.
                     model: [["Name", list.width - 430 * win.u, FolderListModel.Name], ["Date Modified", 180 * win.u, FolderListModel.Time],
@@ -1052,26 +1057,27 @@ Window {
             readonly property string kind: fileIsDir ? "folder" : Fm.kind(filePath)
             readonly property var info: kind === "app" ? Fm.desktopInfo(filePath) : null
             readonly property bool sel: win.selection[filePath] === true
-            width: list.width; height: 28 * win.tu
+            width: list.width; height: win.listRowH
             Rectangle {
                 anchors.fill: parent; radius: 6 * win.u
                 color: row.sel ? "#0a84ff" : rowDrop.containsDrag ? Qt.rgba(1, 1, 1, .14) : row.index % 2 ? Qt.rgba(1, 1, 1, .035) : "transparent"
             }
             Image {
                 x: 8 * win.u; y: (row.height - height) / 2 - 1 * win.u
-                width: 26 * win.u; height: width
+                width: win.listIcon; height: width
                 visible: row.kind !== "app"
                 source: win.asset(row.kind === "app" ? "doc" : row.kind)
-                sourceSize: Qt.size(64, 64); smooth: true
+                sourceSize: Qt.size(width * 2, height * 2); smooth: true
             }
             K.Icon {
-                x: 11 * win.u; y: (row.height - height) / 2
-                width: 18 * win.u; height: width
+                x: 8 * win.u + win.listIcon * .15; y: (row.height - height) / 2
+                width: win.listIcon * .7; height: width
+                roundToIconSize: false
                 visible: row.kind === "app"
                 source: row.info ? row.info.icon : ""
             }
             Row {
-                x: 40 * win.u; height: parent.height
+                x: win.listTextX; height: parent.height
                 Text {
                     width: list.width - 430 * win.u; anchors.verticalCenter: parent.verticalCenter
                     visible: win.renaming !== row.filePath
@@ -1187,19 +1193,19 @@ Window {
             required property var modelData
             required property int index
             readonly property bool sel: win.resultIndex === index
-            width: results.width; height: 30 * win.tu
+            width: results.width; height: win.listRowH
             Rectangle {
                 anchors.fill: parent; radius: 6 * win.u
                 color: hit.sel ? "#0a84ff" : hit.index % 2 ? Qt.rgba(1, 1, 1, .035) : "transparent"
             }
             Image {
                 x: 8 * win.u; anchors.verticalCenter: parent.verticalCenter
-                width: 26 * win.u; height: width
+                width: win.listIcon; height: width
                 source: win.asset(hit.modelData.isDir ? "folder" : Fm.kind(hit.modelData.path) === "app" ? "doc" : Fm.kind(hit.modelData.path))
-                sourceSize: Qt.size(64, 64)
+                sourceSize: Qt.size(width * 2, height * 2)
             }
             Text {
-                x: 40 * win.u; width: parent.width * .38; anchors.verticalCenter: parent.verticalCenter
+                x: win.listTextX; width: parent.width * .38; anchors.verticalCenter: parent.verticalCenter
                 text: hit.modelData.name; elide: Text.ElideMiddle; color: "white"
                 font.family: win.fontFamily; font.pixelSize: 13 * win.tu
             }

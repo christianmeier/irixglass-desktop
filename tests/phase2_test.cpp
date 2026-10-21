@@ -243,6 +243,17 @@ int main(int argc, char *argv[])
             walk(list->property("contentItem").value<QQuickItem *>());
             check(inside, QStringLiteral("list view shows the Kind column inside the window"), seen.join(", "));
         }
+        // List icons follow the icon-size thumbwheel; rows grow with them.
+        {
+            const double small = (win->setProperty("wheelValue", 0.1), QTest::qWait(100), win->property("listIcon").toDouble());
+            const double rowSmall = win->property("listRowH").toDouble();
+            win->setProperty("wheelValue", 0.9);
+            QTest::qWait(100);
+            const double big = win->property("listIcon").toDouble(), rowBig = win->property("listRowH").toDouble();
+            check(big > small * 1.8 && rowBig > rowSmall, QStringLiteral("list icons and rows scale with the icon size"),
+                  QString::number(small) + " -> " + QString::number(big));
+            win->setProperty("wheelValue", 0.352);
+        }
         win->setProperty("viewMode", 0);
 
         // --- sidebar: hovering an entry shows a remove button that removes it
