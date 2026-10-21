@@ -76,7 +76,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Duplicate (⌘D) | ✅ Ctrl+D | | `KIO::copyAs` to "name copy", "name copy 2" |
 | Make Alias | ✅ menu (Ctrl+L stays the path bar, as in Dolphin) | | `KIO::linkAs` to "name alias" |
 | Copy / Paste (⌘C / ⌘V), Move (⌥⌘V) | ✅ Ctrl+C / Ctrl+V / Ctrl+Alt+V | | |
-| Drag: move / copy (⌥) / alias (⌥⌘) | 🟡 copy, Shift moves | 3 | Finder semantics: same disk moves |
+| Drag: move / copy (⌥) / alias (⌥⌘) | ✅ drags inside fm move on the same disk, copy across disks or with Ctrl | | `Fm::dropInternal` |
 | Move to Trash (⌘⌫) | ✅ Del, Ctrl+Backspace | | |
 | Undo / Redo (⌘Z / ⇧⌘Z) for move, copy, rename, trash, new folder | 🟡 Undo (Ctrl+Z); no Redo | 3 | `KIO::FileUndoManager` (it has no redo) |
 | Get Info (⌘I): kind, size (folders counted), where, dates, permissions, Open with | ✅ Ctrl+I, one window per item (read-only for now) | 2 | editing name/permissions/Open with later |

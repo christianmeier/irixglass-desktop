@@ -857,6 +857,27 @@ void Fm::drop(const QList<QUrl> &urls, const QString &dir, bool move)
     undoable(move ? KIO::move(todo, dest) : KIO::copy(todo, dest));
 }
 
+void Fm::copyOrMove(const QStringList &paths, const QString &dir, bool move)
+{
+    drop(toUrls(paths), dir, move);
+}
+
+bool Fm::copyModifierHeld() const
+{
+    return QGuiApplication::queryKeyboardModifiers() & Qt::ControlModifier;
+}
+
+void Fm::dropInternal(const QList<QUrl> &urls, const QString &dir)
+{
+    if (urls.isEmpty())
+        return;
+    const QString destRoot = QStorageInfo(dir).rootPath();
+    bool sameDisk = true;
+    for (const QUrl &u : urls)
+        sameDisk &= QStorageInfo(QFileInfo(u.toLocalFile()).absolutePath()).rootPath() == destRoot;
+    drop(urls, dir, sameDisk && !copyModifierHeld());
+}
+
 QString Fm::makeFolder(const QString &dir)
 {
     QString name = QStringLiteral("New Folder");

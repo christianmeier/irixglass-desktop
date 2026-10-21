@@ -55,6 +55,9 @@ manager icon; the IRIX icons are only inside the window.
   jump; middle-click a folder for a background tab; drag files onto a tab to switch to it / drop
   into its folder; "////" lists tabs that don't fit. Each tab keeps its folder, history, selection,
   scroll position and search, and the tabs come back the next time fm starts.
+- Split view (F3): a second list with its own folder next to the main view. Drag files between the
+  sides to move them (Ctrl while dropping copies; another disk copies, like Finder), drop onto a
+  folder to put them inside, or press F5 / F6 to copy / move the active side's selection across.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
   to the standard size.
 - Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
@@ -87,7 +90,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (173 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (180 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -138,6 +141,7 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab |
 | Ctrl+Tab, Ctrl+PgDn / Ctrl+Shift+Tab, Ctrl+PgUp | Next / previous tab |
 | Alt+1…8 / Alt+9 | Go to tab 1…8 / the last tab |
+| F3 / F5 / F6 | Split view / copy / move to the other side |
 
 ## Layout of the code
 
@@ -146,9 +150,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, preview pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

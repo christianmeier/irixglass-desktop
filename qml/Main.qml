@@ -61,6 +61,15 @@ Window {
     property int tabIndex: 0
     property bool tabBarShown: true
     property bool folderTabs: true              // opening a folder / place adds a tab (or switches to its tab)
+    // ---- split view (F3): a second side with its own folder; drag between them moves (Ctrl copies)
+    property bool splitView: false
+    property string splitDir: ""
+    property int activePane: 0                  // 0 = the main side, 1 = the split side (F5 / F6 go to the other)
+    property bool internalDrag: false           // a drag that started inside fm (move by default)
+    readonly property real contentAreaW: width - (240 * u - contentShift) - previewW - 10 * u
+    property real splitW: splitView ? contentAreaW / 2 : 0
+    readonly property bool compactList: list.width < 640 * u   // narrow list (split view): no Date column
+    Behavior on splitW { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     property var closedTabs: []                 // for Reopen Closed Tab
     property real pendingScrollY: -1
     property bool waitForLoad: false            // the folder model still shows the previous folder
@@ -135,6 +144,8 @@ Window {
         property alias activeTab: win.savedTabIndex
         property alias tabBarShown: win.tabBarShown
         property alias folderTabs: win.folderTabs
+        property alias splitView: win.splitView
+        property alias splitDir: win.splitDir
         property alias width: win.width
         property alias height: win.height
     }
@@ -205,6 +216,25 @@ Window {
         if (i >= 0) { switchTab(i); return }
         newTab(path, true)
         if (searchText) search.text = searchText
+    }
+
+    // ---- split view ------------------------------------------------------------------
+    function toggleSplit() {
+        if (!splitView && !(splitDir && Fm.resolvePath(splitDir, "/").ok)) { splitDir = dir; splitPane.dir = dir }
+        splitView = !splitView
+        activePane = 0
+    }
+    // Drops: drags from inside fm move on the same disk (Ctrl copies), others follow the drag's action.
+    function dropFiles(urls, target, proposedMove) {
+        if (inTrash && target === dir && activePane === 0) return
+        if (internalDrag) Fm.dropInternal(urls, target)
+        else Fm.drop(urls, target, proposedMove)
+    }
+    // F5 / F6: the active side's selection to the other side.
+    function sendToOtherSide(move) {
+        if (!splitView) return
+        if (activePane === 0) { if (paths().length) Fm.copyOrMove(paths(), splitPane.dir, move) }
+        else if (splitPane.paths().length) Fm.copyOrMove(splitPane.paths(), dir, move)
     }
 
     // ---- tabs ----------------------------------------------------------------------
@@ -1186,8 +1216,8 @@ Window {
 
     // Drops onto empty space go into the current folder.
     DropArea {
-        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - win.bottomH
-        onDropped: drop => { if (!win.inTrash) Fm.drop(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
+        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW - win.splitW; height: parent.height - y - win.bottomH
+        onDropped: drop => { if (!win.inTrash) win.dropFiles(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
 
     GridView {
@@ -1195,7 +1225,7 @@ Window {
         objectName: "grid"
         visible: win.viewMode !== 1
         x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH
-        width: parent.width - x - 20 * u - win.previewW
+        width: parent.width - x - 20 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
         cellWidth: 168 * u * win.iconScale / .92
@@ -1226,6 +1256,7 @@ Window {
             property bool active: false
             onPressed: mouse => {
                 keys.forceActiveFocus()
+                win.activePane = 0
                 if (mouse.button === Qt.RightButton) { bgMenu.open(); return }
                 if (!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) win.selection = ({})
                 start = Qt.point(mouse.x, mouse.y + grid.contentY); active = true
@@ -1369,6 +1400,7 @@ Window {
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
                 Drag.mimeData: ({ "text/uri-list": Fm.uriList(win.paths()) })
+                Drag.onActiveChanged: win.internalDrag = Drag.active
             }
             MouseArea {
                 id: mouse
@@ -1378,6 +1410,7 @@ Window {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 onPressed: m => {
                     keys.forceActiveFocus()
+                    win.activePane = 0
                     if (m.button === Qt.MiddleButton) { if (cell.fileIsDir) win.openInNewTab([cell.filePath], false); return }
                     if (!cell.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(cell.index, cell.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
@@ -1396,7 +1429,7 @@ Window {
                 // Spring-loaded: hovering with a drag opens the folder.
                 onEntered: cellSpring.restart()
                 onExited: cellSpring.stop()
-                onDropped: d => { cellSpring.stop(); Fm.drop(d.urls, cell.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+                onDropped: d => { cellSpring.stop(); win.dropFiles(d.urls, cell.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
             Timer { id: cellSpring; interval: win.springDelay; onTriggered: win.go(cell.filePath) }
         }
@@ -1411,7 +1444,7 @@ Window {
             onWheel: event => win.scroll(list, event)
         }
         x: 252 * u - win.contentShift; y: 80 * u + win.scopeH
-        width: parent.width - x - 14 * u - win.previewW
+        width: parent.width - x - 14 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
         model: win.searchActive ? resultsModel : folder
@@ -1424,12 +1457,13 @@ Window {
                 x: win.listTextX; height: parent.height
                 Repeater {
                     // Click a column to sort by it; click again to reverse.
-                    model: [["Name", list.width - 430 * win.u, FolderListModel.Name], ["Date Modified", 180 * win.u, FolderListModel.Time],
+                    model: [["Name", list.width - (win.compactList ? 250 : 430) * win.u, FolderListModel.Name],
+                            ["Date Modified", win.compactList ? 0 : 180 * win.u, FolderListModel.Time],
                             ["Size", 90 * win.u, FolderListModel.Size], [win.searchActive ? "Where" : "Kind", 110 * win.u, FolderListModel.Type]]
                     Text {
                         required property var modelData
                         readonly property bool active: win.sortField === modelData[2]
-                        width: modelData[1]
+                        width: modelData[1]; visible: width > 0
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData[0] + (active ? (win.sortReversed ? "  ▾" : "  ▴") : "")
                         color: "white"; opacity: active ? .85 : .45
@@ -1480,7 +1514,7 @@ Window {
                 x: win.listTextX; height: parent.height
                 Text {
                     id: rowName
-                    width: list.width - 430 * win.u - (row.tags.length ? 30 * win.u : 0); anchors.verticalCenter: parent.verticalCenter
+                    width: list.width - (win.compactList ? 250 : 430) * win.u - (row.tags.length ? 30 * win.u : 0); anchors.verticalCenter: parent.verticalCenter
                     visible: win.renaming !== row.filePath
                     text: row.info && row.info.name ? row.info.name : row.fileName
                     elide: Text.ElideRight; color: "white"
@@ -1493,13 +1527,13 @@ Window {
                 }
                 Rename {
                     active: win.renaming === row.filePath
-                    width: list.width - 440 * win.u; anchors.verticalCenter: parent.verticalCenter
+                    width: list.width - (win.compactList ? 260 : 440) * win.u; anchors.verticalCenter: parent.verticalCenter
                     path: row.filePath; name: row.fileName; u: win.tu; fontFamily: win.fontFamily
                     onDone: { win.renaming = ""; keys.forceActiveFocus() }
                 }
                 Repeater {
                     model: [
-                        [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), 180],
+                        [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), win.compactList ? 0 : 180],
                         // folder sizes: the fresh count, else the cached one (shown at once), else "…"
                         [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--")
                                        : Fm.humanSize(row.fileSize), 90],
@@ -1508,7 +1542,7 @@ Window {
                     ]
                     Text {
                         required property var modelData
-                        width: modelData[1] * win.u; anchors.verticalCenter: parent.verticalCenter
+                        width: modelData[1] * win.u; visible: width > 0; anchors.verticalCenter: parent.verticalCenter
                         text: modelData[0]; color: "white"; opacity: row.sel ? .9 : .55
                         elide: Text.ElideRight
                         font.family: win.fontFamily; font.pixelSize: 12 * win.tu
@@ -1521,6 +1555,7 @@ Window {
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
                 Drag.mimeData: ({ "text/uri-list": Fm.uriList(win.paths()) })
+                Drag.onActiveChanged: win.internalDrag = Drag.active
             }
             MouseArea {
                 id: rowMouse
@@ -1529,6 +1564,7 @@ Window {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 onPressed: m => {
                     keys.forceActiveFocus()
+                    win.activePane = 0
                     if (m.button === Qt.MiddleButton) { if (row.fileIsDir) win.openInNewTab([row.filePath], false); return }
                     if (!row.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(row.index, row.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
@@ -1546,7 +1582,7 @@ Window {
                 anchors.fill: parent
                 onEntered: rowSpring.restart()
                 onExited: rowSpring.stop()
-                onDropped: d => { rowSpring.stop(); Fm.drop(d.urls, row.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+                onDropped: d => { rowSpring.stop(); win.dropFiles(d.urls, row.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
             Timer { id: rowSpring; interval: win.springDelay; onTriggered: win.go(row.filePath) }
             // Folder sizes are counted in the background (View ▸ Calculate All Sizes).
@@ -1610,6 +1646,29 @@ Window {
         font.family: win.fontFamily; font.pixelSize: 15 * win.tu
     }
 
+    // ---- split view: the second side ---------------------------------------------------
+    SplitPane {
+        id: splitPane
+        visible: win.splitW > 4
+        x: parent.width - win.previewW - win.splitW + 4 * u; y: 66 * u
+        width: Math.max(0, win.splitW - 14 * u); height: parent.height - y - win.bottomH - 4 * u
+        // set once (from the saved split folder), then the side navigates on its own and saves it
+        Component.onCompleted: dir = win.splitDir || win.dir
+        onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
+        active: win.activePane === 1
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        iconSize: win.listIcon
+        assetFor: win.asset
+        tagsFor: win.tagsOf
+        colorFor: win.tagColor
+        showHidden: win.showHidden
+        onActivated: { win.activePane = 1; keys.forceActiveFocus() }
+        onDropRequested: (urls, target, proposedMove) => win.dropFiles(urls, target, proposedMove)
+        onDragStarted: on => win.internalDrag = on
+        onOpenFile: p => Fm.open(p)
+        onMenuRequested: splitMenu.open()
+    }
+
     // ---- preview pane (Ctrl+Shift+P) ----------------------------------------------------
     PreviewPane {
         id: preview
@@ -1631,7 +1690,7 @@ Window {
         id: tabStrip
         visible: win.tabBarShown
         x: 262 * u - win.contentShift; y: parent.height - win.bottomH
-        width: parent.width - x - win.previewW - 20 * u; height: win.tabBarH
+        width: parent.width - x - win.previewW - win.splitW - 20 * u; height: win.tabBarH
         tabs: win.tabModel
         current: win.tabIndex
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
@@ -1846,6 +1905,8 @@ Window {
             P.MenuItem { text: "Other…"; onTriggered: Fm.openWith(win.paths(), "") }
         }
         P.MenuItem { text: "Open in New Tab"; visible: win.paths().length > 0 && win.paths().every(p => Fm.kind(p) === "folder"); onTriggered: win.openInNewTab(win.paths(), true) }
+        P.MenuItem { text: "Copy to Other Side\tF5"; visible: win.splitView; onTriggered: { win.activePane = 0; win.sendToOtherSide(false) } }
+        P.MenuItem { text: "Move to Other Side\tF6"; visible: win.splitView; onTriggered: { win.activePane = 0; win.sendToOtherSide(true) } }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.paths()[0]) }
         P.MenuSeparator {}
         P.Menu {
@@ -1985,6 +2046,18 @@ Window {
         informativeText: "It will be removed from all items that have it."
         buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
         onOkClicked: win.deleteTag(tagMenu.name)
+    }
+    P.Menu {
+        id: splitMenu
+        P.MenuItem { text: "Open"; enabled: splitPane.paths().length > 0; onTriggered: { for (const p of splitPane.paths()) Fm.kind(p) === "folder" ? splitPane.go(p) : Fm.open(p) } }
+        P.MenuItem { text: "Copy to Other Side\tF5"; enabled: splitPane.paths().length > 0; onTriggered: { win.activePane = 1; win.sendToOtherSide(false) } }
+        P.MenuItem { text: "Move to Other Side\tF6"; enabled: splitPane.paths().length > 0; onTriggered: { win.activePane = 1; win.sendToOtherSide(true) } }
+        P.MenuItem { text: "Open in New Tab"; enabled: splitPane.paths().some(p => Fm.kind(p) === "folder"); onTriggered: win.openInNewTab(splitPane.paths(), true) }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Show This Folder on the Other Side"; onTriggered: win.go(splitPane.dir) }
+        P.MenuItem { text: "Move to Trash"; enabled: splitPane.paths().length > 0; onTriggered: { Fm.trash(splitPane.paths()); splitPane.selection = ({}) } }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Close Split View\tF3"; onTriggered: win.toggleSplit() }
     }
     P.Menu {
         id: tabMenu
@@ -2128,6 +2201,7 @@ Window {
             P.MenuItem { text: (win.sidebarShown ? "Hide" : "Show") + " Sidebar\tCtrl+Alt+S"; onTriggered: win.sidebarShown = !win.sidebarShown }
             P.MenuItem { text: (win.previewShown ? "Hide" : "Show") + " Preview\tCtrl+Shift+P"; onTriggered: win.previewShown = !win.previewShown }
             P.MenuItem { text: (win.tabBarShown ? "Hide" : "Show") + " Tab Bar"; onTriggered: win.tabBarShown = !win.tabBarShown }
+            P.MenuItem { text: "Split View\tF3"; checkable: true; checked: win.splitView; onTriggered: win.toggleSplit() }
             P.MenuItem { text: "Open Folders in New Tabs"; checkable: true; checked: win.folderTabs; onTriggered: win.folderTabs = !win.folderTabs }
             P.MenuItem { text: "Standard Icon Size"; onTriggered: win.wheelValue = win.defaultWheel }
         }
@@ -2183,6 +2257,9 @@ Window {
     Shortcut { sequence: "Ctrl+W"; onActivated: win.closeTab(win.tabIndex) }
     Shortcut { sequence: "Ctrl+Shift+W"; onActivated: win.close() }
     Shortcut { sequence: "Ctrl+T"; onActivated: win.newTab(win.dir, true) }
+    Shortcut { sequence: "F3"; onActivated: win.toggleSplit() }
+    Shortcut { sequence: "F5"; enabled: win.splitView; onActivated: win.sendToOtherSide(false) }
+    Shortcut { sequence: "F6"; enabled: win.splitView; onActivated: win.sendToOtherSide(true) }
     Shortcut { sequence: "Ctrl+Shift+T"; onActivated: win.reopenClosedTab() }
     // Next / previous tab (IRIX used Page Down / Page Up for Icon Catalog pages).
     Shortcut { sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: win.cycleTab(1) }

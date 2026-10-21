@@ -63,6 +63,11 @@ public:
     Q_INVOKABLE bool canPaste() const;
     Q_INVOKABLE void paste(const QString &dir);
     Q_INVOKABLE void drop(const QList<QUrl> &urls, const QString &dir, bool move);
+    // A drag that started inside fm (e.g. between the split view's sides), Finder style: move on the
+    // same disk, copy onto another disk, and Ctrl held while dropping copies.
+    Q_INVOKABLE void dropInternal(const QList<QUrl> &urls, const QString &dir);
+    Q_INVOKABLE bool copyModifierHeld() const;
+    Q_INVOKABLE void copyOrMove(const QStringList &paths, const QString &dir, bool move);   // F5 / F6
     Q_INVOKABLE QString makeFolder(const QString &dir);
     Q_INVOKABLE void rename(const QString &path, const QString &newName);
 

@@ -199,6 +199,15 @@ How tabs work:
 - `TabStrip.qml` is a non-interactive horizontal `ListView` of `NotebookTab`s (`spacing: -s`, so
   the slanted sides interleave), drawing the page edge with a gap where the active tab joins it.
 
+### Split view
+
+`qml/SplitPane.qml` is a self-contained second side (its own FolderListModel, path bar, selection,
+drag and drop); the main side gives up `splitW` of its width. `activePane` says which side F5 / F6
+copy / move from (`sendToOtherSide` → `Fm::copyOrMove`). Drags that start inside fm set
+`internalDrag`; drops then go through `Fm::dropInternal`, which moves on the same disk and copies
+across disks or when Ctrl is held (`QGuiApplication::queryKeyboardModifiers`). Drags from other apps
+keep their proposed action. A narrow list (`compactList`) hides its Date column.
+
 ### Sidebar sections
 
 Sections are part of `places` (title, colour, items) and can be created, renamed, moved and
@@ -266,6 +275,8 @@ wallpaper to judge it, e.g.
 - **`stdout` is buffered when piped**: tests call `setvbuf(stdout, nullptr, _IONBF, 0)` so a hang
   still shows how far they got.
 - **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
+- **A component's own `dir` must not be bound to a setting it writes back** (SplitPane: binding
+  loop); set it once in `Component.onCompleted`, then save on change.
 - **Menus already have `title`** (FINAL): a custom `title` property on a `P.Menu` fails the whole
   file. Same family as `Item.top`.
 - **Middle-click needs `Qt.MiddleButton` in `acceptedButtons`**, and a MouseArea can set
