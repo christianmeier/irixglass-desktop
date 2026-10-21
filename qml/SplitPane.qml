@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Shapes
 import Qt.labs.folderlistmodel
+import org.kde.kirigami as K
 
 // The second side of the split view (F3): a list of its own folder, with a path bar, back / up,
 // selection and drag and drop. Dragging between the sides moves (Ctrl copies); F5 / F6 copy /
@@ -21,6 +23,10 @@ Item {
     property var tagsFor                 // function(path) -> tags
     property var colorFor                // function(tag) -> colour
     property bool showHidden: false
+    // Its own view (0 icons, 1 list, 2 previews), set by the toolbar's view buttons while active.
+    property int viewMode: 1
+    property real k: 1                   // icon units → px (the window's icon size)
+    property real cellSize: 140
     signal activated()
     signal dropRequested(var urls, string target, bool proposedMove)
     signal menuRequested()
@@ -116,6 +122,20 @@ Item {
         } else { s = ({}); s[path] = true; anchorIndex = i }
         selection = s
     }
+    // keyboard (the window routes keys here while this side is active)
+    function focusedPath() {
+        const p = anchorIndex >= 0 ? model.get(anchorIndex, "filePath") : ""
+        return p && selection[p] ? p : (paths()[0] || "")
+    }
+    readonly property int columns: viewMode === 1 ? 1 : Math.max(1, Math.floor(grid.width / grid.cellWidth))
+    function moveCursor(delta) {
+        if (!model.count) return
+        const i = Math.max(0, Math.min(model.count - 1, (anchorIndex < 0 ? -delta : anchorIndex) + delta))
+        select(i, 0)
+        rows.positionViewAtIndex(i, ListView.Contain)
+        grid.positionViewAtIndex(i, GridView.Contain)
+    }
+    function selectAll() { const s = ({}); for (let i = 0; i < model.count; ++i) s[model.get(i, "filePath")] = true; selection = s }
     function activateRow(i) {
         const path = model.get(i, "filePath")
         if (model.get(i, "fileIsDir")) go(path); else pane.openFile(path)
@@ -156,6 +176,7 @@ Item {
     }
     Item {
         id: columns
+        visible: pane.viewMode === 1
         // the same height as the main side's list header, so rows line up across the sides
         x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 26 * pane.tu
         Text {
@@ -170,11 +191,12 @@ Item {
         }
     }
     PaneFrame { anchors.fill: parent; u: pane.u; lineY: bar.y + bar.height; active: pane.active }
-    Rectangle { x: 8 * pane.u; y: columns.y + columns.height; width: pane.width - 16 * pane.u; height: 1; color: Qt.rgba(1, 1, 1, .06) }
+    Rectangle { visible: pane.viewMode === 1; x: 8 * pane.u; y: columns.y + columns.height; width: pane.width - 16 * pane.u; height: 1; color: Qt.rgba(1, 1, 1, .06) }
 
     ListView {
         id: rows
         objectName: "splitList"
+        visible: pane.viewMode === 1
         x: 6 * pane.u; y: columns.y + columns.height
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
@@ -258,6 +280,141 @@ Item {
                 enabled: r.fileIsDir
                 anchors.fill: parent
                 onDropped: d => { pane.dropRequested(d.urls, r.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
+            }
+        }
+    }
+
+    // ---- icons / previews: the same IRIX icons as the main side ----------------------------
+    GridView {
+        id: grid
+        objectName: "splitGrid"
+        visible: pane.viewMode !== 1
+        x: 6 * pane.u; y: columns.y + 6 * pane.u
+        width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
+        clip: true
+        model: model
+        interactive: false
+        cellWidth: pane.cellSize; cellHeight: pane.cellSize
+        ScrollBar.vertical: GlassScrollBar { u: pane.u }
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: e => {
+                const dy = e.pixelDelta.y !== 0 ? e.pixelDelta.y : e.angleDelta.y / 2
+                grid.contentY = Math.max(0, Math.min(Math.max(0, grid.contentHeight - grid.height), grid.contentY - dy))
+            }
+        }
+        delegate: Item {
+            id: c
+            required property int index
+            required property string fileName
+            required property string filePath
+            required property bool fileIsDir
+            required property url fileUrl
+            readonly property bool sel: pane.selection[filePath] === true
+            readonly property string kind: fileIsDir ? "folder" : Fm.kind(filePath)
+            readonly property var info: kind === "app" ? Fm.desktopInfo(filePath) : null
+            readonly property var tags: pane.tagsFor ? pane.tagsFor(filePath) : []
+            readonly property real kk: pane.k
+            width: grid.cellWidth; height: grid.cellHeight
+            Item {
+                id: ic
+                x: (c.width - 120 * c.kk) / 2; width: 120 * c.kk; height: width
+                Image {
+                    anchors.fill: parent
+                    visible: !(c.tags.length && !c.sel)
+                    source: pane.assetFor ? pane.assetFor(c.sel || cDrop.containsDrag ? "carpet-sel" : c.kind === "exe" ? "carpet-strong" : "carpet") : ""
+                    sourceSize: Qt.size(width * 2, height * 2); smooth: true
+                }
+                Shape {   // a tagged item's carpet in its tag colour
+                    anchors.fill: parent
+                    visible: c.tags.length > 0 && !c.sel
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
+                        fillColor: pane.colorFor ? pane.colorFor(c.tags[0] || "") : "gray"
+                        startX: 16 * c.kk; startY: 94 * c.kk
+                        PathLine { x: 68 * c.kk; y: 107 * c.kk }
+                        PathLine { x: 108 * c.kk; y: 90 * c.kk }
+                        PathLine { x: 56 * c.kk; y: 78 * c.kk }
+                        PathLine { x: 16 * c.kk; y: 94 * c.kk }
+                    }
+                }
+                Image {
+                    anchors.fill: parent
+                    visible: c.kind !== "app" && !thumb.visible
+                    source: pane.assetFor ? pane.assetFor(c.kind === "app" ? "doc" : c.kind) : ""
+                    sourceSize: Qt.size(width * 2, height * 2); smooth: true
+                }
+                K.Icon {
+                    visible: c.kind === "app"
+                    x: 32 * c.kk; y: 22 * c.kk; width: 58 * c.kk; height: width
+                    roundToIconSize: false
+                    source: c.info ? c.info.icon : ""
+                }
+                Rectangle {   // previews: the real picture
+                    id: thumb
+                    visible: pane.viewMode === 2 && c.kind === "image" && thumbImg.status === Image.Ready
+                    x: 30 * c.kk; y: 18 * c.kk; width: 62 * c.kk; height: 62 * c.kk
+                    color: "white"; border.color: "#1d1d1d"; rotation: 4
+                    Image {
+                        id: thumbImg
+                        anchors.fill: parent; anchors.margins: 3 * c.kk
+                        source: pane.viewMode === 2 && c.kind === "image" ? c.fileUrl : ""
+                        asynchronous: true; fillMode: Image.PreserveAspectCrop; sourceSize: Qt.size(256, 256)
+                    }
+                }
+            }
+            Rectangle {
+                visible: c.sel
+                width: Math.min(lbl.implicitWidth, lbl.width) + 14 * pane.tu; height: 21 * pane.tu; radius: 6 * pane.tu
+                x: (c.width - width) / 2; y: lbl.y + lbl.baselineOffset - 15 * pane.tu
+                color: pane.active ? "#0a84ff" : Qt.rgba(1, 1, 1, .2)
+            }
+            Text {
+                id: lbl
+                width: c.width - 16 * pane.u; x: 8 * pane.u
+                anchors.baseline: parent.top; anchors.baselineOffset: 110 * c.kk + 20 * pane.tu
+                horizontalAlignment: Text.AlignHCenter; elide: Text.ElideMiddle
+                text: c.info && c.info.name ? c.info.name : c.fileName
+                color: "white"; font.family: pane.fontFamily; font.pixelSize: 13 * pane.tu
+            }
+            TagDots {
+                tags: c.tags; colorFor: pane.colorFor; size: 9 * pane.tu
+                x: lbl.x + (lbl.width + Math.min(lbl.contentWidth, lbl.width)) / 2 + (c.sel ? 10 : 4) * pane.u
+                y: lbl.y + (lbl.height - height) / 2
+            }
+            Item {
+                id: cDrag
+                Drag.active: cMouse.drag.active
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
+                Drag.mimeData: ({ "text/uri-list": Fm.uriList(pane.paths()) })
+                Drag.onActiveChanged: pane.dragStarted(Drag.active)
+            }
+            MouseArea {
+                id: cMouse
+                x: (c.width - 100 * c.kk) / 2; y: 10 * c.kk
+                width: 100 * c.kk; height: 100 * c.kk + 26 * pane.tu
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                drag.target: cDrag
+                onPressed: m => {
+                    pane.activated()
+                    if (m.button === Qt.MiddleButton) { if (c.fileIsDir) pane.newTab(c.filePath, false); return }
+                    if (!c.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) pane.select(c.index, m.modifiers)
+                    if (m.button === Qt.RightButton) pane.menuRequested()
+                }
+                onReleased: { cDrag.x = 0; cDrag.y = 0 }
+                onDoubleClicked: m => {
+                    if (m.button !== Qt.LeftButton) return
+                    if (c.fileIsDir && m.modifiers & Qt.ControlModifier) pane.newTab(c.filePath, true)
+                    else pane.activateRow(c.index)
+                }
+            }
+            DropArea {
+                id: cDrop
+                enabled: c.fileIsDir
+                anchors.fill: cMouse
+                onDropped: d => { pane.dropRequested(d.urls, c.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
         }
     }

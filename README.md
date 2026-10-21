@@ -60,13 +60,19 @@ manager icon; the IRIX icons are only inside the window.
   sides to move them (Ctrl while dropping copies; another disk copies, like Finder), drop onto a
   folder to put them inside, or press F5 / F6 to copy / move the active side's selection across.
   Drag the divider between the sides to resize them (remembered); double-click it to centre it.
-  Each side has its own tabs: the tab keys (Ctrl+T, Ctrl+W, Ctrl+Tab, Alt+1…9, …) and sidebar
+  Each side has its own view (icons / list / previews), keyboard, Quick Look and preview pane —
+  click into a side (blue line) and the view buttons, Ctrl+1/2/3, arrows, Space, Enter and Delete
+  act on it. Each side has its own tabs: the tab keys (Ctrl+T, Ctrl+W, Ctrl+Tab, Alt+1…9, …) and sidebar
   places work on the active side (the one with the blue line under its header).
 - Maximized or full screen, fm keeps the floating dock's height free at the bottom, so tabs, status
   bar and sidebar end above it; the height is read from Plasma's panel settings and follows changes.
 - Quick Look and the preview pane render Markdown (headings, lists, tables, links, pictures) and
   highlight code with the Nord theme (KSyntaxHighlighting, the engine Kate uses) — both code files
   and fenced code blocks in Markdown whose language is known.
+- View ▸ Transparency: Clear, Light, Standard, Frosted or Solid glass (Ctrl+Alt+↑ / ↓ step it).
+  A Tags menu in the menu bar; Edit ▸ Find; Help ▸ Keyboard Shortcuts.
+- The bottom section (tabs + status bar) can be moved up by dragging the line above the tabs;
+  double-click puts it back.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
   to the standard size.
 - Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
@@ -99,7 +105,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (207 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (219 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```

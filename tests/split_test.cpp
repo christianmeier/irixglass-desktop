@@ -145,6 +145,68 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return exists(QStringLiteral("Right/ext.txt")); }) && exists(QStringLiteral("ext.txt")),
               QStringLiteral("a drag from another app copies"));
 
+        // the keyboard works on the active side: arrows, Space = Quick Look of its item
+        {
+            win->setProperty("activePane", 1);
+            pane->setProperty("selection", QVariantMap{});
+            pane->setProperty("anchorIndex", -1);
+            key(Qt::Key_Down);
+            const QString first = pane->property("selection").toMap().keys().value(0);
+            check(!first.isEmpty() && first.startsWith(at(QStringLiteral("Right"))), QStringLiteral("arrow keys move in the active split side"), first);
+            key(Qt::Key_Space);
+            check(win->property("quickLook").toString() == first, QStringLiteral("Space opens Quick Look of the split side's item"),
+                  win->property("quickLook").toString());
+            key(Qt::Key_Down);
+            check(win->property("quickLook").toString() != first && !win->property("quickLook").toString().isEmpty(),
+                  QStringLiteral("…and follows the arrow keys there"));
+            key(Qt::Key_Escape);
+            check(win->property("quickLook").toString().isEmpty(), QStringLiteral("Esc closes it"));
+            win->setProperty("previewShown", true);
+            QTest::qWait(300);
+            auto *preview = win->findChild<QQuickItem *>(QStringLiteral("previewPane"));
+            const QString sel = pane->property("selection").toMap().keys().value(0);
+            check(preview && preview->property("path").toString() == sel && !sel.isEmpty(),
+                  QStringLiteral("the preview pane shows the split side's item while it's active"), preview ? preview->property("path").toString() : QString());
+            win->setProperty("previewShown", false);
+            win->setProperty("activePane", 0);
+        }
+
+        // each side has its own view: the buttons / Ctrl+1/2/3 act on the active side
+        {
+            const int mainView = win->property("viewMode").toInt();
+            win->setProperty("activePane", 1);
+            key(Qt::Key_1, Qt::ControlModifier);
+            auto *sgrid = pane->findChild<QQuickItem *>(QStringLiteral("splitGrid"));
+            check(win->property("splitViewMode").toInt() == 0 && win->property("viewMode").toInt() == mainView && sgrid && sgrid->isVisible()
+                      && sgrid->property("count").toInt() > 0,
+                  QStringLiteral("Ctrl+1 on the split side shows its icons, the main side keeps its view"));
+            win->setProperty("activePane", 0);
+            key(Qt::Key_3, Qt::ControlModifier);
+            check(win->property("viewMode").toInt() == 2 && win->property("splitViewMode").toInt() == 0,
+                  QStringLiteral("Ctrl+3 on the main side changes only the main side"));
+            // clicking the toolbar's view buttons: first click into the split side, then on "list"
+            QTest::mouseClick(window, Qt::LeftButton, {}, pane->mapToScene(QPointF(pane->width() / 2, pane->height() - 30)).toPoint());
+            QTest::qWait(100);
+            check(win->property("activePane").toInt() == 1, QStringLiteral("clicking into the split side makes it active"));
+            auto *viewPill = win->findChild<QQuickItem *>(QStringLiteral("viewPill"));
+            QTest::mouseClick(window, Qt::LeftButton, {}, viewPill->mapToScene(QPointF((16 + 41 + 7) * .85, 18 * .85)).toPoint());
+            QTest::qWait(150);
+            check(win->property("splitViewMode").toInt() == 1 && win->property("viewMode").toInt() == 2,
+                  QStringLiteral("…then the list button switches the split side to the list"),
+                  QString::number(win->property("splitViewMode").toInt()));
+            win->setProperty("activePane", 0);
+            key(Qt::Key_1, Qt::ControlModifier);
+        }
+        // View ▸ Transparency: the glass tint follows
+        {
+            const QColor before = win->property("bodyTint").value<QColor>();
+            key(Qt::Key_Up, Qt::ControlModifier | Qt::AltModifier);
+            const QColor after = win->property("bodyTint").value<QColor>();
+            check(after.alphaF() < before.alphaF() - .05, QStringLiteral("Ctrl+Alt+Up makes the window more transparent"),
+                  QString::number(before.alphaF()) + " -> " + QString::number(after.alphaF()));
+            key(Qt::Key_Down, Qt::ControlModifier | Qt::AltModifier);
+        }
+
         // the split side has its own tabs, independent of the main side's
         {
             auto paneTabs = [&] { return pane->property("tabs").toList().size(); };

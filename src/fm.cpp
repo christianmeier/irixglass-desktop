@@ -710,7 +710,11 @@ void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow)
     if (m_shadow && m_shadow->isCreated())
         return;
     if (!m_shadow) {
-        // Shadow image: a blurred rounded rect, shifted down; tiles are cut around the window frame.
+        // Shadow image: a blurred rounded rect, shifted down, with the window's own rounded shape cut
+        // out (the glass is see-through, so nothing may darken it). The corner tiles reach `radius`
+        // into the window rect, so the shadow also fills the area just outside each rounded corner;
+        // with rectangle-only tiles that area stayed empty and the bottom corners (where the shadow
+        // is strongest) looked notched compared with the top ones.
         const int pad = 64, inner = 2 * radius + 4, offset = 18, blur = 18;
         QImage img(2 * pad + inner, 2 * pad + inner, QImage::Format_ARGB32_Premultiplied);
         img.fill(Qt::transparent);
@@ -722,15 +726,23 @@ void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow)
             p.fillPath(path, QColor(0, 0, 0, 150));
         }
         blurAlpha(img, blur / 2);
-        const int mid = pad + inner / 2, end = pad + inner;
+        {
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setCompositionMode(QPainter::CompositionMode_Clear);
+            QPainterPath window;
+            window.addRoundedRect(QRectF(pad, pad, inner, inner), radius, radius);
+            p.fillPath(window, Qt::transparent);
+        }
+        const int c = pad + radius, mid = pad + inner / 2, end = pad + inner;
         m_shadow = new KWindowShadow(this);
-        m_shadow->setTopLeftTile(tile(img, QRect(0, 0, pad, pad)));
+        m_shadow->setTopLeftTile(tile(img, QRect(0, 0, c, c)));
         m_shadow->setTopTile(tile(img, QRect(mid, 0, 1, pad)));
-        m_shadow->setTopRightTile(tile(img, QRect(end, 0, pad, pad)));
+        m_shadow->setTopRightTile(tile(img, QRect(end - radius, 0, c, c)));
         m_shadow->setRightTile(tile(img, QRect(end, mid, pad, 1)));
-        m_shadow->setBottomRightTile(tile(img, QRect(end, end, pad, pad)));
+        m_shadow->setBottomRightTile(tile(img, QRect(end - radius, end - radius, c, c)));
         m_shadow->setBottomTile(tile(img, QRect(mid, end, 1, pad)));
-        m_shadow->setBottomLeftTile(tile(img, QRect(0, end, pad, pad)));
+        m_shadow->setBottomLeftTile(tile(img, QRect(0, end - radius, c, c)));
         m_shadow->setLeftTile(tile(img, QRect(0, mid, pad, 1)));
         m_shadow->setPadding(QMargins(pad, pad, pad, pad));
         m_shadow->setWindow(window);

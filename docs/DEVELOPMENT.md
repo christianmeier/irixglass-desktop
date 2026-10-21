@@ -243,6 +243,19 @@ the definition by file name (then MIME type) and a small `AbstractHighlighter` s
 coloured `<span>`s with the **Nord** theme. Quick Look shows it in a `TextArea` (RichText); the
 preview pane shows the first 4 KB without pictures.
 
+### Active side, transparency, bottom section
+
+- `splitActive` decides where keys and commands go: the split side has its own `viewMode`
+  (`splitViewMode`, its own `GridView` with the IRIX icons), `moveCursor`, `focusedPath`,
+  `selectAll`; `activePaths()` / `activeFocusedPath()` feed Quick Look, Get Info, Copy and the
+  preview pane; the toolbar view buttons show and set `activeViewMode`.
+- `glassAlpha` (View ▸ Transparency, saved) drives `bodyTint`, `sidebarTint` and `pillTint`.
+- `bottomExtra` (dragged on `bottomHandle`, saved) lifts the tab bar and status bar on top of the
+  dock reserve (`bottomLift = dockInset + bottomExtra`).
+- The window shadow's corner tiles reach `radius` into the window and the window shape is cut out
+  of the shadow image, so the bottom corners (where the shadow is strongest) look like the top
+  ones; the window and sidebar edges are also lit at the bottom (`EdgeRing.bottomAlpha`).
+
 ### Sidebar sections
 
 Sections are part of `places` (title, colour, items) and can be created, renamed, moved and

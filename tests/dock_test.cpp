@@ -90,6 +90,26 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return fm.dockReserve() == 80; }), QStringLiteral("the dock grows: fm notices"), QString::number(fm.dockReserve()));
         QTest::qWait(100);
         check(strip->y() + strip->height() <= window->height() - 80, QStringLiteral("…and the tabs move up with it"));
+        // the bottom section can be moved up by dragging the line above the tabs
+        {
+            window->showNormal();
+            waitFor([&] { return !win->property("maximized").toBool(); });
+            QTest::qWait(150);
+            auto *handle = win->findChild<QQuickItem *>(QStringLiteral("bottomHandle"));
+            const double stripBottom = window->height() - strip->y();
+            const QPoint from = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+            QTest::mousePress(window, Qt::LeftButton, {}, from);
+            for (int dy = 10; dy <= 80; dy += 10)
+                QTest::mouseMove(window, from - QPoint(0, dy), 10);
+            QTest::mouseRelease(window, Qt::LeftButton, {}, from - QPoint(0, 80));
+            QTest::qWait(150);
+            check(window->height() - strip->y() > stripBottom + 50 && win->property("bottomExtra").toDouble() > 50,
+                  QStringLiteral("dragging the line above the tabs lifts the bottom section"), QString::number(win->property("bottomExtra").toDouble()));
+            const QPoint now = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+            QTest::mouseDClick(window, Qt::LeftButton, {}, now);
+            QTest::qWait(150);
+            check(win->property("bottomExtra").toDouble() == 0, QStringLiteral("double-click puts it back"));
+        }
         window->showNormal();
         waitFor([&] { return !win->property("maximized").toBool(); });
         check(win->property("dockInset").toDouble() == 0, QStringLiteral("back to a normal window: no gap"));

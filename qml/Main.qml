@@ -66,6 +66,10 @@ Window {
     property string splitDir: ""
     property string splitTabsJson: ""           // the split side's tabs, saved like the main side's
     property int splitTabIndex: 0
+    property int splitViewMode: 1               // the split side's own view (icons / list / previews)
+    // The view buttons and Ctrl+1/2/3 act on the active side.
+    readonly property int activeViewMode: splitActive ? splitViewMode : viewMode
+    function setViewMode(m) { if (splitActive) splitViewMode = m; else viewMode = m }
     property int activePane: 0                  // 0 = the main side, 1 = the split side (F5 / F6 go to the other)
     property bool internalDrag: false           // a drag that started inside fm (move by default)
     readonly property real contentAreaW: width - (240 * u - contentShift) - previewW - 10 * u
@@ -86,7 +90,10 @@ Window {
     // Maximized or full screen, the window reaches under the floating dock (it doesn't reserve space):
     // keep its height free so tabs and status bar stay visible. Follows the dock's size live.
     readonly property real dockInset: maximized ? Fm.dockReserve : 0
-    readonly property real bottomH: 52 * u + tabBarH + dockInset   // tab bar + status bar (+ dock)
+    // The bottom section (tabs + status bar) can be lifted by dragging the line above the tabs.
+    property real bottomExtra: 0
+    readonly property real bottomLift: dockInset + bottomExtra
+    readonly property real bottomH: 52 * u + tabBarH + bottomLift   // tab bar + status bar (+ dock, + dragged)
     readonly property var tabModel: tabs.map((t, i) => ({ title: tabTitle(i), dir: i === tabIndex ? dir : t.dir }))
     // Collapsed sidebar sections (by title), saved.
     property string collapsedJson: "[]"
@@ -121,8 +128,16 @@ Window {
     property int viewMode: 0                    // 0 icons, 1 list, 2 previews
     property bool showHidden: false
     readonly property string fontFamily: "SF Pro Text"
-    readonly property color sidebarTint: Qt.rgba(42 / 255, 45 / 255, 56 / 255, .35)
-    readonly property color bodyTint: Qt.rgba(20 / 255, 22 / 255, 29 / 255, .62)
+    // View ▸ Transparency: how much the glass tints the blurred desktop (Clear … Solid).
+    readonly property var glassLevels: [["Clear", .32], ["Light", .48], ["Standard", .62], ["Frosted", .76], ["Solid", .9]]
+    property real glassAlpha: .62
+    readonly property color sidebarTint: Qt.rgba(42 / 255, 45 / 255, 56 / 255, .35 * glassAlpha / .62)
+    readonly property color bodyTint: Qt.rgba(20 / 255, 22 / 255, 29 / 255, glassAlpha)
+    readonly property color pillTint: Qt.rgba(58 / 255, 61 / 255, 72 / 255, Math.min(.85, .40 * glassAlpha / .62))
+    function stepGlass(d) {
+        const i = glassLevels.findIndex(l => Math.abs(l[1] - glassAlpha) < .01)
+        glassAlpha = glassLevels[Math.max(0, Math.min(glassLevels.length - 1, (i < 0 ? 2 : i) + d))][1]
+    }
 
     width: 1300 * u
     height: 830 * u
@@ -157,8 +172,11 @@ Window {
         property alias splitView: win.splitView
         property alias splitDir: win.splitDir
         property alias splitRatio: win.splitRatio
+        property alias bottomExtra: win.bottomExtra
+        property alias glassAlpha: win.glassAlpha
         property alias splitTabs: win.splitTabsJson
         property alias splitTab: win.splitTabIndex
+        property alias splitViewMode: win.splitViewMode
         property alias width: win.width
         property alias height: win.height
     }
@@ -676,7 +694,8 @@ Window {
         if (t) submitPath(t)
     }
     function getInfo() {
-        for (const p of (paths().length ? paths() : [dir]))
+        const ps = activePaths()
+        for (const p of (ps.length ? ps : [splitActive ? splitPane.dir : dir]))
             infoComponent.createObject(null, { path: p, tu: tu, fontFamily: fontFamily, assetFor: asset })
     }
     // Quick Look shows the focused item (the last one clicked or reached with the keys).
@@ -684,7 +703,9 @@ Window {
         const p = anchorIndex >= 0 ? itemAt(anchorIndex, "filePath") : ""
         return p && selection[p] ? p : (paths()[0] || "")
     }
-    function toggleQuickLook() { quickLook = quickLook ? "" : focusedPath() }
+    function activePaths() { return splitActive ? splitPane.paths() : paths() }
+    function activeFocusedPath() { return splitActive ? splitPane.focusedPath() : focusedPath() }
+    function toggleQuickLook() { quickLook = quickLook ? "" : activeFocusedPath() }
     // Type to select: letters typed within a second form a prefix; the first matching name is selected.
     function typeSelect(text) {
         typeAhead += text.toLowerCase()
@@ -759,7 +780,7 @@ Window {
             PathRectangle { x: searchPill.x; y: searchPill.y; width: searchPill.width; height: searchPill.height; radius: searchPill.height / 2 }
         }
     }
-    EdgeRing { anchors.fill: parent; radius: win.r; visible: !win.maximized }
+    EdgeRing { anchors.fill: parent; radius: win.r; visible: !win.maximized; bottomAlpha: .55 }
 
     // Window dragging: empty toolbar strip and sidebar background.
     Item {
@@ -775,7 +796,7 @@ Window {
         opacity: 1 - win.sideShift / win.hiddenShift
         visible: opacity > .01
         Rectangle { anchors.fill: parent; radius: 18 * win.u; color: win.sidebarTint }
-        EdgeRing { anchors.fill: parent; radius: 18 * win.u }
+        EdgeRing { anchors.fill: parent; radius: 18 * win.u; bottomAlpha: .55 }
         DragHandler { target: null; onActiveChanged: if (active) win.startSystemMove() }
 
 
@@ -991,6 +1012,7 @@ Window {
     // ---- toolbar -------------------------------------------------------------
     Pill {
         id: navPill
+        tint: win.pillTint
         x: 250 * u - win.sideShift; y: 18 * u; width: 86 * u; height: 36 * u
         Text {
             x: 24 * win.u - width / 2; anchors.baseline: parent.top; anchors.baselineOffset: 24 * win.u
@@ -1007,6 +1029,7 @@ Window {
 
     Pill {
         id: pathPill
+        tint: win.pillTint
         x: 350 * u - win.sideShift; y: 18 * u; height: 36 * u
         transform: Translate { id: pathShake }
         width: viewPill.x - 15 * u - x
@@ -1141,6 +1164,8 @@ Window {
 
     Pill {
         id: viewPill
+        objectName: "viewPill"
+        tint: win.pillTint
         width: 176 * u; height: 36 * u; y: 18 * u
         x: searchPill.x - 14 * u - width
         // Split view toggle, after a thin divider (it's on/off, not one of the three views).
@@ -1165,7 +1190,7 @@ Window {
             ToolTip.text: (win.splitView ? "Close" : "Open") + " Split View (F3)"
         }
         Rectangle {
-            x: (4 + win.viewMode * 41) * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u; radius: 14 * win.u
+            x: (4 + win.activeViewMode * 41) * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u; radius: 14 * win.u
             color: Qt.rgba(1, 1, 1, .18)
             Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         }
@@ -1198,13 +1223,14 @@ Window {
                         PathLine { x: 12.5 * win.u; y: 11 * win.u }
                     }
                 }
-                TapHandler { onTapped: win.viewMode = index }
+                TapHandler { onTapped: win.setViewMode(index) }
             }
         }
     }
 
     Pill {
         id: searchPill
+        tint: win.pillTint
         width: 176 * u; height: 36 * u; y: 18 * u
         x: win.width - 17 * u - width
         Rectangle {
@@ -1244,6 +1270,21 @@ Window {
                 win.editPath(event.text); event.accepted = true; return
             }
             if (event.key === Qt.Key_Space && plain && !win.typeAhead) { win.toggleQuickLook(); event.accepted = true; return }
+            if (win.splitActive) {   // the split side has the keyboard
+                const sp = splitPane
+                let done = true
+                if (event.key === Qt.Key_Down) sp.moveCursor(sp.columns)
+                else if (event.key === Qt.Key_Up && !(event.modifiers & Qt.ControlModifier)) sp.moveCursor(-sp.columns)
+                else if (event.key === Qt.Key_Right && sp.viewMode !== 1 && !(event.modifiers & Qt.AltModifier)) sp.moveCursor(1)
+                else if (event.key === Qt.Key_Left && sp.viewMode !== 1 && !(event.modifiers & Qt.AltModifier)) sp.moveCursor(-1)
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { if (sp.anchorIndex >= 0) sp.activateRow(sp.anchorIndex) }
+                else if (event.key === Qt.Key_Backspace && !(event.modifiers & Qt.ControlModifier)) sp.goUp()
+                else if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) sp.goUp()
+                else if (event.key === Qt.Key_Delete || (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier)) { Fm.trash(sp.paths()); sp.selection = ({}) }
+                else if (event.key === Qt.Key_Escape) { if (win.quickLook) win.quickLook = ""; else sp.selection = ({}) }
+                else done = false
+                if (done) { event.accepted = true; return }
+            }
             if (win.quickLook && event.key === Qt.Key_Escape) { win.quickLook = ""; event.accepted = true; return }
             // Letters type-select; a space continues a name being typed (Space alone is Quick Look).
             if (plain && event.text.length === 1 && (event.text > " " || (event.text === " " && win.typeAhead)) && event.key !== Qt.Key_Delete) {
@@ -1724,10 +1765,14 @@ Window {
         onTabsChanged: Qt.callLater(win.persistSplitTabs)
         onTabIndexChanged: Qt.callLater(win.persistSplitTabs)
         onLastTabClosed: win.toggleSplit()
+        onSelectionChanged: if (win.quickLook && win.splitActive && paths().length) win.quickLook = focusedPath()
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
         active: win.activePane === 1
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
         iconSize: win.listIcon
+        viewMode: win.splitViewMode
+        k: win.k
+        cellSize: 168 * win.u * win.iconScale / .92
         assetFor: win.asset
         tagsFor: win.tagsOf
         colorFor: win.tagColor
@@ -1795,7 +1840,8 @@ Window {
         x: parent.width - win.previewW; y: 72 * u
         width: 270 * u; height: parent.height - 72 * u - win.bottomH - 8 * u
         clip: true
-        path: win.focusedPath() || win.dir
+        // the active side's item (or its folder)
+        path: win.activeFocusedPath() || (win.splitActive ? splitPane.dir : win.dir)
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
         assetFor: win.asset
         sizes: win.folderSizes
@@ -1849,16 +1895,42 @@ Window {
         }
     }
 
+    // Handle on the page edge above the tabs: drag up / down to move the bottom section;
+    // double-click puts it back.
+    Item {
+        id: bottomHandle
+        objectName: "bottomHandle"
+        x: 240 * u - win.contentShift; width: parent.width - x - win.previewW - 10 * u
+        y: parent.height - win.bottomH - 5 * u; height: 10 * u
+        z: 4
+        property real startExtra: 0
+        Rectangle {   // grip, on hover / while dragging
+            anchors.centerIn: parent; width: Math.min(parent.width * .2, 80 * win.u); height: 3 * win.u; radius: height / 2
+            color: Qt.rgba(1, 1, 1, bottomDrag.active ? .7 : .45)
+            visible: bottomHover.hovered || bottomDrag.active
+        }
+        HoverHandler { id: bottomHover; cursorShape: Qt.SplitVCursor }
+        DragHandler {
+            id: bottomDrag
+            target: null
+            xAxis.enabled: false
+            cursorShape: Qt.SplitVCursor
+            onActiveChanged: if (active) bottomHandle.startExtra = win.bottomExtra
+            onTranslationChanged: win.bottomExtra = Math.round(Math.max(-win.dockInset, Math.min(win.height * .45, bottomHandle.startExtra - translation.y)))
+        }
+        TapHandler { onDoubleTapped: win.bottomExtra = 0 }
+    }
+
     // ---- status bar ------------------------------------------------------------
     Rectangle {
         visible: !win.tabBarShown   // with tabs, the strip draws the page edge
-        x: 240 * u - win.contentShift; y: parent.height - 52 * u - win.dockInset; width: parent.width - x - 10 * u; height: 1
+        x: 240 * u - win.contentShift; y: parent.height - 52 * u - win.bottomLift; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
     Text {
         id: statusText
         objectName: "status"
-        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.dockInset
+        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.bottomLift
         readonly property int n: win.paths().length
         text: win.searchActive
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
@@ -1870,7 +1942,7 @@ Window {
     }
     Pill {   // the Trash's "Empty" button, as in Finder
         visible: win.inTrash && folder.count > 0 && !win.searchActive
-        x: statusText.x + statusText.width + 14 * u; y: parent.height - 41 * u - win.dockInset
+        x: statusText.x + statusText.width + 14 * u; y: parent.height - 41 * u - win.bottomLift
         height: 22 * u; width: emptyLabel.implicitWidth + 24 * u
         Text {
             id: emptyLabel
@@ -1882,7 +1954,7 @@ Window {
     }
     Text {
         anchors.right: parent.right; anchors.rightMargin: 258 * u
-        anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.dockInset
+        anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.bottomLift
         text: "Icon size"; color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
     }
@@ -1890,7 +1962,7 @@ Window {
         id: wheelCtl
         objectName: "thumbwheel"
         u: win.u
-        x: parent.width - 244 * u; y: parent.height - 42 * u - win.dockInset; width: 190 * u; height: 22 * u
+        x: parent.width - 244 * u; y: parent.height - 42 * u - win.bottomLift; width: 190 * u; height: 22 * u
         value: win.wheelValue
         onValueChanged: win.wheelValue = value
     }
@@ -1903,7 +1975,7 @@ Window {
     Item {
         id: homeButton
         objectName: "homeButton"
-        x: parent.width - 48 * u; y: parent.height - 42 * u - win.dockInset; width: 22 * u; height: 22 * u
+        x: parent.width - 48 * u; y: parent.height - 42 * u - win.bottomLift; width: 22 * u; height: 22 * u
         readonly property bool atHome: Math.abs(win.wheelValue - win.defaultWheel) < .005
         Rectangle { anchors.fill: parent; radius: 5 * win.u; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
         Rectangle {
@@ -2348,12 +2420,14 @@ Window {
             P.MenuItem { text: "Select All\tCtrl+A"; onTriggered: win.selectAll() }
             P.MenuItem { text: "Rename…\tF2"; onTriggered: if (win.paths().length === 1) win.renaming = win.paths()[0] }
             P.MenuItem { text: "Copy Path\tCtrl+Alt+C"; onTriggered: Fm.copyPathText(win.paths().length ? win.paths().join("\n") : win.dir) }
+            P.MenuSeparator {}
+            P.MenuItem { text: "Find…\tCtrl+F"; onTriggered: search.forceActiveFocus() }
         }
         P.Menu {
             title: "View"
-            P.MenuItem { text: "as Icons\tCtrl+1"; checkable: true; checked: win.viewMode === 0; onTriggered: win.viewMode = 0 }
-            P.MenuItem { text: "as List\tCtrl+2"; checkable: true; checked: win.viewMode === 1; onTriggered: win.viewMode = 1 }
-            P.MenuItem { text: "as Previews\tCtrl+3"; checkable: true; checked: win.viewMode === 2; onTriggered: win.viewMode = 2 }
+            P.MenuItem { text: "as Icons\tCtrl+1"; checkable: true; checked: win.activeViewMode === 0; onTriggered: win.setViewMode(0) }
+            P.MenuItem { text: "as List\tCtrl+2"; checkable: true; checked: win.activeViewMode === 1; onTriggered: win.setViewMode(1) }
+            P.MenuItem { text: "as Previews\tCtrl+3"; checkable: true; checked: win.activeViewMode === 2; onTriggered: win.setViewMode(2) }
             P.MenuSeparator {}
             P.Menu {
                 title: "Sort By"
@@ -2365,6 +2439,25 @@ Window {
                 P.MenuItem { text: "Reverse Order"; checkable: true; checked: win.sortReversed; onTriggered: win.sortReversed = !win.sortReversed }
             }
             P.MenuSeparator {}
+            P.Menu {
+                id: glassMenu
+                title: "Transparency"
+                Instantiator {
+                    model: win.glassLevels
+                    delegate: P.MenuItem {
+                        required property var modelData
+                        text: modelData[0]
+                        checkable: true
+                        checked: Math.abs(win.glassAlpha - modelData[1]) < .01
+                        onTriggered: win.glassAlpha = modelData[1]
+                    }
+                    onObjectAdded: (i, o) => glassMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => glassMenu.removeItem(o)
+                }
+                P.MenuSeparator {}
+                P.MenuItem { text: "More Transparent\tCtrl+Alt+Up"; onTriggered: win.stepGlass(-1) }
+                P.MenuItem { text: "Less Transparent\tCtrl+Alt+Down"; onTriggered: win.stepGlass(1) }
+            }
             P.MenuItem { text: "Bigger Icons\tCtrl++"; onTriggered: wheelCtl.nudge(.08) }
             P.MenuItem { text: "Smaller Icons\tCtrl+-"; onTriggered: wheelCtl.nudge(-.08) }
             P.MenuSeparator {}
@@ -2412,6 +2505,44 @@ Window {
             P.MenuItem { text: "Trash"; onTriggered: win.go(Fm.trashDir) }
         }
         P.Menu {
+            id: tagsBarMenu
+            title: "Tags"
+            Instantiator {
+                model: win.tagDefs
+                delegate: P.MenuItem {
+                    required property var modelData
+                    required property int index
+                    text: modelData.name + (index < 7 ? "\tCtrl+Alt+" + (index + 1) : "")
+                    icon.source: win.tagIcon(modelData.color)
+                    checkable: true
+                    checked: win.selectionHasTag(modelData.name)
+                    enabled: win.paths().length > 0
+                    onTriggered: win.toggleTag(modelData.name)
+                }
+                onObjectAdded: (i, o) => tagsBarMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => tagsBarMenu.removeItem(o)
+            }
+            P.MenuSeparator {}
+            P.MenuItem { text: "New Tag…"; onTriggered: win.newTag(true) }
+            P.MenuItem { text: "Remove All Tags\tCtrl+Alt+0"; enabled: win.paths().length > 0; onTriggered: win.clearSelectionTags() }
+            P.MenuSeparator {}
+            P.Menu {
+                id: showTaggedMenu
+                title: "Show Items Tagged"
+                Instantiator {
+                    model: win.tagDefs
+                    delegate: P.MenuItem {
+                        required property var modelData
+                        text: modelData.name
+                        icon.source: win.tagIcon(modelData.color)
+                        onTriggered: win.showTagged(modelData.name)
+                    }
+                    onObjectAdded: (i, o) => showTaggedMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => showTaggedMenu.removeItem(o)
+                }
+            }
+        }
+        P.Menu {
             title: "Window"
             P.MenuItem { text: "Minimize\tCtrl+M"; onTriggered: win.showMinimized() }
             P.MenuItem { text: "Next Tab\tCtrl+PgDown"; onTriggered: win.activeCycleTab(1) }
@@ -2422,6 +2553,7 @@ Window {
         P.Menu {
             title: "Help"
             P.MenuItem { text: "fm Help"; onTriggered: Qt.openUrlExternally("file://" + Fm.assetDir + "/README.md") }
+            P.MenuItem { text: "Keyboard Shortcuts"; onTriggered: win.quickLook = Fm.assetDir + "/README.md" }
         }
     }
 
@@ -2446,9 +2578,9 @@ Window {
         }
     }
     Shortcut { sequence: "Ctrl+M"; onActivated: win.showMinimized() }
-    Shortcut { sequences: [StandardKey.Copy]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.copyToClipboard(win.paths()) }
+    Shortcut { sequences: [StandardKey.Copy]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.copyToClipboard(win.activePaths()) }
     Shortcut { sequences: [StandardKey.Paste]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.paste(win.dir) }
-    Shortcut { sequences: [StandardKey.SelectAll]; enabled: !search.activeFocus && !win.renaming; onActivated: win.selectAll() }
+    Shortcut { sequences: [StandardKey.SelectAll]; enabled: !search.activeFocus && !win.renaming; onActivated: win.splitActive ? splitPane.selectAll() : win.selectAll() }
     Shortcut { sequence: "Ctrl+F"; onActivated: search.forceActiveFocus() }
     Shortcut { sequences: ["Ctrl+L", "Ctrl+Shift+G"]; onActivated: win.editPath() }
     Shortcut { sequences: ["Ctrl+H", "Ctrl+Shift+>", "Ctrl+Shift+."]; onActivated: win.showHidden = !win.showHidden }
@@ -2471,6 +2603,8 @@ Window {
     Shortcut { sequence: "Ctrl+Shift+P"; onActivated: win.previewShown = !win.previewShown }
     Shortcut { sequence: "Ctrl+Shift+Del"; onActivated: emptyDialog.open() }
     Shortcut { sequence: "Ctrl+Alt+Z"; onActivated: win.compressSelected() }
+    Shortcut { sequence: "Ctrl+Alt+Up"; onActivated: win.stepGlass(-1) }
+    Shortcut { sequence: "Ctrl+Alt+Down"; onActivated: win.stepGlass(1) }
     // Tags: Ctrl+Alt+1…7 toggle the first seven tags on the selection, Ctrl+Alt+0 removes all.
     Repeater {
         model: 7
@@ -2481,9 +2615,9 @@ Window {
     }
     Shortcut { sequence: "Ctrl+Alt+0"; onActivated: win.clearSelectionTags() }
     Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.go(Fm.home) }
-    Shortcut { sequence: "Ctrl+1"; onActivated: win.viewMode = 0 }
-    Shortcut { sequence: "Ctrl+2"; onActivated: win.viewMode = 1 }
-    Shortcut { sequence: "Ctrl+3"; onActivated: win.viewMode = 2 }
+    Shortcut { sequence: "Ctrl+1"; onActivated: win.setViewMode(0) }
+    Shortcut { sequence: "Ctrl+2"; onActivated: win.setViewMode(1) }
+    Shortcut { sequence: "Ctrl+3"; onActivated: win.setViewMode(2) }
     Shortcut { sequences: ["Ctrl++", "Ctrl+="]; onActivated: wheelCtl.nudge(.08) }
     Shortcut { sequence: "Ctrl+-"; onActivated: wheelCtl.nudge(-.08) }
 }
