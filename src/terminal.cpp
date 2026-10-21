@@ -3,6 +3,7 @@
 #include <QClipboard>
 #include <QFontMetricsF>
 #include <QGuiApplication>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QLoggingCategory>
 #include <QMimeData>
@@ -99,6 +100,20 @@ TerminalView::TerminalView(QQuickItem *parent)
     m_font.setStyleHint(QFont::Monospace);
     updateMetrics();
     connect(this, &TerminalView::fontChanged, this, [this] { updateMetrics(); resizeTerminal(); update(); });
+    // After the shell prints (a prompt after `cd`), look where it is: /proc/<pid>/cwd. Works for
+    // any shell, without prompt hooks (OSC 7).
+    m_cwdCheck = new QTimer(this);
+    m_cwdCheck->setSingleShot(true);
+    m_cwdCheck->setInterval(120);
+    connect(m_cwdCheck, &QTimer::timeout, this, [this] {
+        if (!running())
+            return;
+        const QString cwd = QFileInfo(QStringLiteral("/proc/%1/cwd").arg(m_pty->processId())).symLinkTarget();
+        if (!cwd.isEmpty() && cwd != m_cwd) {
+            m_cwd = cwd;
+            Q_EMIT currentDirectoryChanged();
+        }
+    });
     m_sizeHint = new QTimer(this);
     m_sizeHint->setSingleShot(true);
     m_sizeHint->setInterval(1200);
@@ -164,6 +179,7 @@ void TerminalView::start()
         const QByteArray data = m_pty->pty()->readAll();
         vterm_input_write(m_vt, data.constData(), size_t(data.size()));
         vterm_screen_flush_damage(m_screen);
+        m_cwdCheck->start();
     });
     connect(m_pty, &QProcess::finished, this, [this](int code) {
         Q_EMIT runningChanged();
@@ -772,6 +788,8 @@ bool TerminalView::changeDirectory(const QString &path)
 {
     if (!running() || !m_program.isEmpty() || path.isEmpty())
         return false;
+    if (path == m_cwd)   // already there (e.g. the path bar is following the shell's own cd)
+        return true;
     const pid_t fg = tcgetpgrp(m_pty->pty()->masterFd());
     if (fg <= 0 || fg != m_pty->processId())   // a program runs in the shell: leave it alone
         return false;

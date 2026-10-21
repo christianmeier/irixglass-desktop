@@ -334,6 +334,7 @@ Window {
         t.fontChanged.connect(() => termFontSize = t.fontPointSize)   // pinch / Ctrl+± size, kept for new terminals
         const all = Object.assign({}, terminals); all[id] = t; terminals = all
         t.titleChanged.connect(() => termTitleRev++)
+        t.currentDirectoryChanged.connect(() => terminalCwdChanged(id, t.currentDirectory))
         t.finished.connect(() => Qt.callLater(() => terminalFinished(id)))
         t.start()
         return id
@@ -344,6 +345,11 @@ Window {
         const all = Object.assign({}, terminals); delete all[id]; terminals = all
         t.destroy()
         if (activeTermId === id) activeTermId = 0
+    }
+    // The shell cd'ed: the path bar of the side showing it follows (and go() won't cd it back).
+    function terminalCwdChanged(id, path) {
+        if (activeTermId === id && dir !== path) go(path)
+        else if (splitPane.activeTermId === id && splitPane.dir !== path) splitPane.go(path)
     }
     // The program ended (exit, :q): its tab closes, on whichever side it was.
     function terminalFinished(id) {

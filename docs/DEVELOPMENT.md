@@ -394,6 +394,10 @@ section's colour. `IconPicker.qml` (Emoji / App Icons, search, Standard Icon) se
   (`vterm_screen_enable_reflow`). `termFontSize` is saved for new terminals.
 - `go()` on a side with a terminal calls `changeDirectory(path)`: only when the shell itself is the
   pty's foreground process group (`tcgetpgrp`), so nvim / tmux / a running command are left alone.
+  The other way round: 120 ms after output, the shell's cwd is read from `/proc/<pid>/cwd`
+  (any shell, no OSC 7 needed); a change emits `currentDirectoryChanged` and
+  `terminalCwdChanged` calls the side's `go()`. `changeDirectory` skips a path the shell is already
+  in, so the two don't ping-pong.
 - **Drops and pinches are taken at the window** (`eventFilter` on the `QQuickWindow`), before Qt
   Quick's own delivery. Before that, a drop on a terminal tab could land on the folder `DropArea`
   behind it and **move the file into the tab's folder**; those `DropArea`s are disabled while a

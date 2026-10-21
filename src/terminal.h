@@ -23,6 +23,8 @@ class TerminalView : public QQuickPaintedItem
     Q_PROPERTY(QString program MEMBER m_program NOTIFY programChanged)          // "" = the login shell
     Q_PROPERTY(QStringList arguments MEMBER m_arguments NOTIFY programChanged)
     Q_PROPERTY(QString workingDirectory MEMBER m_cwd NOTIFY programChanged)
+    // The shell's folder now (after `cd`), so the side's path bar can follow it.
+    Q_PROPERTY(QString currentDirectory READ currentDirectory NOTIFY currentDirectoryChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)                    // set by the program (OSC 0/2)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(int columns READ columns NOTIFY sizeChanged)
@@ -36,6 +38,7 @@ public:
     void paint(QPainter *painter) override;
 
     QString title() const { return m_title; }
+    QString currentDirectory() const { return m_cwd; }
     bool running() const;
     int columns() const { return m_cols; }
     int rows() const { return m_rows; }
@@ -69,6 +72,7 @@ public:
 Q_SIGNALS:
     void programChanged();
     void titleChanged();
+    void currentDirectoryChanged();
     void runningChanged();
     void sizeChanged();
     void fontChanged();
@@ -110,6 +114,7 @@ private:
     static inline qreal s_lastPointSize = 12;
     qreal m_pointSize = s_lastPointSize;
     QTimer *m_sizeHint = nullptr;
+    QTimer *m_cwdCheck = nullptr;              // reads the shell's cwd shortly after output
     class QVariantAnimation *m_sizeAnim = nullptr;              // shows "14 pt" for a moment after a change
     qreal m_cellW = 8, m_cellH = 16, m_ascent = 12;
     int m_cols = 80, m_rows = 24;

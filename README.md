@@ -71,7 +71,7 @@ manager icon; the IRIX icons are only inside the window.
   change the text size live (saved). The button next to the thumbwheel picks the size at which the
   output has no wrapped lines (at most 12 pt). Drop files or folders onto a terminal to type their
   paths (shell-quoted; nothing is moved). Changing the folder (path bar, ‹ ↑) cds the shell there
-  when it's at its prompt.
+  when it's at its prompt, and a `cd` in the shell moves the path bar along.
 - The view buttons in the toolbar always show the active side's view (icons / list / previews).
 - Sidebar icons: the theme's own symbolic icons (home, desktop, documents, downloads, applications,
   trash, network…) in the section's colour, like Finder. Right-click an entry ▸ **Icon…** to give it
@@ -121,7 +121,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (256 checks, incl. split view and terminal tabs)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (258 checks, incl. split view and terminal tabs)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```

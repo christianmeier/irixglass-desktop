@@ -153,6 +153,13 @@ int main(int argc, char *argv[])
                 check(!t->changeDirectory(base), QStringLiteral("…but not while a program runs in it"));
                 QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
                 QTest::qWait(300);
+                // …and the other way round: cd in the shell, the path bar follows
+                t->sendText(QStringLiteral("cd ..\r"));
+                check(waitFor([&] { return win->property("dir").toString() == base; }, 3000),
+                      QStringLiteral("cd in the shell moves the path bar along"), win->property("dir").toString());
+                t->sendText(QStringLiteral("cd 'sub dir'\r"));
+                check(waitFor([&] { return win->property("dir").toString() == sub; }, 3000) && win->property("activeTermId").toInt() != 0,
+                      QStringLiteral("…every time, and the terminal stays in front"), win->property("dir").toString());
             }
             // dropping files types their paths, quoted; nothing is moved
             const QString odd = base + QStringLiteral("/it's a folder");
