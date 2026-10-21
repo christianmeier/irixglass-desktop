@@ -101,6 +101,7 @@ private:
     bool handleGesture(QEvent *e);
     void updateMetrics();
     void resizeTerminal();
+    bool reflowLosesCursor(int newRows, int newCols) const;
     QColor toColor(const VTermColor &c, bool fg) const;
     VTermPos cellAt(QPointF p) const;
     QString textBetween(VTermPos a, VTermPos b) const;

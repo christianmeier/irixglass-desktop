@@ -221,6 +221,32 @@ int main(int argc, char *argv[])
             check(win->property("activeTermId").toInt() == 0, QStringLiteral("…and the folder view is back"));
         }
 
+        // crashes from the user's core dumps
+        {
+            auto *c = new TerminalView;
+            c->setParentItem(window->contentItem());
+            c->setSize(QSizeF(800, 500));
+            c->setProperty("program", QStringLiteral("/bin/bash"));
+            c->setProperty("arguments", QStringList{QStringLiteral("--norc"), QStringLiteral("--noprofile")});
+            c->start();
+            waitFor([&] { return c->screenText().contains(QStringLiteral("fm$")); });
+            // libvterm aborted when re-flowing pushed the line the cursor ends in off the top
+            c->sendText(QStringLiteral("printf '%0.s=' $(seq 1 3000); sleep 30\r"));
+            QTest::qWait(500);
+            c->setFontSize(48);
+            c->setFontSize(30);
+            c->setSize(QSizeF(0, 0));   // a hidden tab
+            c->fitWidth();
+            QTest::qWait(400);
+            c->setSize(QSizeF(800, 500));
+            c->setFontSize(12);
+            check(c->running() && c->columns() > 10 && c->screenText().contains(QStringLiteral("=====")),
+                  QStringLiteral("re-sizing with a long wrapped line at the cursor doesn't crash"), c->screenText());
+            // deleting a terminal whose shell ignores SIGTERM (interactive bash) crashed in ~KPtyProcess
+            delete c;
+            check(true, QStringLiteral("closing a terminal with a running shell doesn't crash"));
+        }
+
         // Neovim on the selected file
         win->setProperty("selection", QVariantMap{{base + QStringLiteral("/hello.txt"), true}});
         QTest::keyClick(window, Qt::Key_F4, Qt::ShiftModifier);
