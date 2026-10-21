@@ -42,6 +42,11 @@ manager icon; the IRIX icons are only inside the window.
   Eject, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
   through subfolders (scope bar: this folder / subfolders / Home), folder sizes in the list,
   Compress / Expand, Recent Folders.
+- Tags (colour labels) in Nord colours, like Finder's: right-click ▸ Tags, Ctrl+Alt+1…7 (Ctrl+Alt+0
+  removes all), or drop items on a tag in the sidebar. Tagged items get colour dots and their IRIX
+  carpet takes the tag colour. The sidebar's Tags section shows everything with a tag, and tags can
+  be renamed, recoloured, reordered, hidden or deleted there. Stored as `user.xdg.tags`, so Dolphin
+  and Baloo share them. Details: [docs/TAGS.md](docs/TAGS.md).
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
@@ -66,7 +71,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (101 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (124 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -109,6 +114,7 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+Shift+., Ctrl+H | Show hidden files |
 | Ctrl+Alt+S / Ctrl+Shift+P | Hide sidebar / show preview pane |
 | Ctrl+Alt+Z | Compress |
+| Ctrl+Alt+1…7 / Ctrl+Alt+0 | Toggle tag 1…7 / remove all tags |
 | Ctrl+Shift+Del | Empty Trash |
 | Ctrl+1 / 2 / 3 | Icons / list / previews |
 | Ctrl++ / Ctrl+- / Ctrl+wheel | Bigger / smaller icons (or roll the thumbwheel: drag, scroll or swipe over it) |
@@ -121,9 +127,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, preview pane, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
-icons/          generated SVG layers: carpets (normal, executable, selected) and glyphs
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test (make test)
+qml/*.qml       Quick Look, Get Info window, preview pane, tag dots, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

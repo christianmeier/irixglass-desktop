@@ -142,6 +142,24 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
 - **Settings are saved immediately** for the sidebar (`settings.sync()`), and `main.cpp` quits
   cleanly on SIGTERM/SIGINT (KSignalHandler), so `pkill irixfm` no longer loses changes.
 
+### Tags
+
+See [TAGS.md](TAGS.md) for the behaviour. Implementation:
+
+- Tags live on the files (`Fm::tags/setTags/addTag/removeTag`, xattr `user.xdg.tags`,
+  comma-separated). The names, Nord colours, order and sidebar visibility live in the settings
+  (`tagsJson` → `win.tagDefs`); a tag found on a file but not defined shows grey.
+- Views read tags with `win.tagsOf(path)` = `Fm.tags(path, win.tagRev)`; `Fm::tagsChanged` bumps
+  `tagRev`, which re-evaluates every binding. The tinted carpet is a `Shape` in the carpet's outline
+  (a shader effect rendered nothing off-screen).
+- Finding: `Fm::startTagSearch(tag, here)` checks candidates from fm's index
+  (`$XDG_DATA_HOME/irixfm/tags.json`), `baloosearch6 tag:<name>` and the folder on screen, and
+  re-reads each file's tags before listing it. `tag:Name` in the search field or a click in the
+  sidebar starts it; the scope bar then shows the tag.
+- Rename / Delete Tag rewrite the tag on every candidate file (`renameTagEverywhere`,
+  `deleteTagEverywhere`).
+- Menus show colour dots from `icons/tag-<hex>.svg` (generated for the 10 Nord colours).
+
 ### Settings
 
 `QtCore.Settings` in category `fm` → `~/.config/irixfm/irixfm.conf`: icon size (thumbwheel value),

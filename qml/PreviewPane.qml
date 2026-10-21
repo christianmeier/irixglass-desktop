@@ -82,7 +82,8 @@ Item {
         Rectangle { width: parent.width; height: 1; color: Qt.rgba(1, 1, 1, .1) }
         Item { width: 1; height: 4 * pane.tu }
         Repeater {
-            model: [["Created", pane.info.created], ["Modified", pane.info.modified], ["Where", pane.info.where]]
+            model: [["Tags", (pane.info.tags || []).join(", ")], ["Created", pane.info.created], ["Modified", pane.info.modified],
+                    ["Where", pane.info.where]].filter(r => r[1])
             Column {
                 required property var modelData
                 width: parent.width

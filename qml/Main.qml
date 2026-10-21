@@ -52,6 +52,15 @@ Window {
     property int resultIndex: -1
     property var volumes: Fm.volumes            // removable drives (Solid); a property so tests can fake one
     readonly property bool searchActive: search.text.length > 0
+    // ---- tags (docs/TAGS.md): names and Nord colours here, the tags themselves on the files (user.xdg.tags)
+    property string tagsJson: ""
+    property int tagRev: 0                      // bumped when tags change, so views re-read them
+    property string renamingTag: ""
+    readonly property var nordColors: [["Red", "#BF616A"], ["Orange", "#D08770"], ["Yellow", "#EBCB8B"], ["Green", "#A3BE8C"],
+                                       ["Teal", "#8FBCBB"], ["Cyan", "#88C0D0"], ["Light Blue", "#81A1C1"], ["Blue", "#5E81AC"],
+                                       ["Purple", "#B48EAD"], ["Gray", "#4C566A"]]
+    readonly property var tagDefs: tagsJson ? JSON.parse(tagsJson) : defaultTags()
+    readonly property string searchTag: { const m = search.text.match(/^tag:\s*(.+)$/i); return m ? m[1].trim() : "" }
     readonly property bool inTrash: dir === Fm.trashDir || dir.startsWith(Fm.trashDir + "/")
     // Layout: the sidebar slides away (sideShift) and the preview pane takes room on the right.
     readonly property int springDelay: 900      // ms hovering with a drag before a folder opens
@@ -103,6 +112,7 @@ Window {
         property alias recent: win.recentJson
         property alias searchScope: win.searchScope
         property alias trashAdded: win.trashAdded
+        property alias tags: win.tagsJson
         property alias width: win.width
         property alias height: win.height
     }
@@ -270,10 +280,15 @@ Window {
             if (sec.title === "Locations" || (si === places.length - 1 && !places.some(x => x.title === "Locations")))
                 volumes.forEach(v => rows.push({ kind: "volume", si: si, item: v, color: sec.color }))
         })
+        // Tags section (not part of `places`): the shown tags, in their order.
+        rows.push({ kind: "head", si: -1, title: "Tags", tags: true, first: false })
+        tagDefs.forEach((t, ti) => { if (t.shown) rows.push({ kind: "tag", si: -1, ti: ti, tag: t }) })
+        if (!tagDefs.some(t => t.shown)) rows.push({ kind: "empty", si: -1, hint: "Right-click to show tags" })
         return rows
     }
     Connections {
         target: Fm
+        function onTagsChanged() { win.tagRev++; if (win.searchTag) win.runSearch() }
         function onVolumeMounted(udi, path) { win.go(path) }
         function onFolderSizeReady(p, bytes, files, folders) {
             const s = Object.assign({}, win.folderSizes)
@@ -284,6 +299,62 @@ Window {
         function onSearchDone(count, truncated) { win.searching = false; win.searchTruncated = truncated }
         function onArchiveDone(path, ok) { if (ok) win.selectWhenReady([path]) }
     }
+    // ---- tags ------------------------------------------------------------------------
+    function defaultTags() {
+        return ["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"]
+            .map(n => ({ name: n, color: nordColors.find(c => c[0] === n)[1], shown: true }))
+    }
+    function setTagDefs(d) { tagsJson = JSON.stringify(d); settings.sync() }
+    function tagDef(name) { return tagDefs.find(t => t.name.toLowerCase() === String(name).toLowerCase()) }
+    function tagColor(name) { const d = tagDef(name); return d ? d.color : "#4C566A" }
+    function tagIcon(color) { return asset("tag-" + color.substring(1).toLowerCase()) }
+    function tagsOf(p) { return Fm.tags(p, tagRev) }
+    function selectionHasTag(name) {
+        const ps = paths()
+        return ps.length > 0 && ps.every(p => tagsOf(p).some(t => t.toLowerCase() === name.toLowerCase()))
+    }
+    function toggleTag(name) {
+        const ps = paths()
+        if (!ps.length) return
+        if (selectionHasTag(name)) Fm.removeTag(ps, name); else Fm.addTag(ps, name)
+    }
+    function toggleTagIndex(i) { if (tagDefs[i]) toggleTag(tagDefs[i].name) }
+    function clearSelectionTags() { if (paths().length) Fm.clearTags(paths()) }
+    // A new tag gets the first unused Nord colour and opens for renaming in the sidebar.
+    function newTag(assign) {
+        let n = "New Tag", i = 2
+        while (tagDef(n)) n = "New Tag " + i++
+        const used = tagDefs.map(t => t.color)
+        const free = nordColors.find(c => !used.includes(c[1])) || nordColors[0]
+        setTagDefs(tagDefs.concat([{ name: n, color: free[1], shown: true }]))
+        if (assign && paths().length) Fm.addTag(paths(), n)
+        sidebarShown = true
+        renamingTag = n
+        return n
+    }
+    function renameTag(old, name) {
+        name = name.trim().replace(/,/g, " ")
+        if (!name || name === old || (tagDef(name) && name.toLowerCase() !== old.toLowerCase())) return
+        setTagDefs(tagDefs.map(t => t.name === old ? Object.assign({}, t, { name: name }) : t))
+        Fm.renameTagEverywhere(old, name)
+        if (searchTag.toLowerCase() === old.toLowerCase()) search.text = "tag:" + name
+    }
+    function setTagColor(name, color) { setTagDefs(tagDefs.map(t => t.name === name ? Object.assign({}, t, { color: color }) : t)) }
+    function setTagShown(name, shown) { setTagDefs(tagDefs.map(t => t.name === name ? Object.assign({}, t, { shown: shown }) : t)) }
+    function moveTag(name, delta) {
+        const d = tagDefs.slice(), i = d.findIndex(t => t.name === name), j = i + delta
+        if (i < 0 || j < 0 || j >= d.length) return
+        const [x] = d.splice(i, 1); d.splice(j, 0, x); setTagDefs(d)
+    }
+    function deleteTag(name) {
+        setTagDefs(tagDefs.filter(t => t.name !== name))
+        Fm.deleteTagEverywhere(name)
+        if (searchTag.toLowerCase() === name.toLowerCase()) search.text = ""
+    }
+    function resetTags() { tagsJson = ""; settings.sync() }
+    function showTagged(name) { search.text = "tag:" + name }
+    function urlsToPaths(urls) { return urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, ""))) }
+
     // ---- Finder commands -----------------------------------------------------------
     function sortBy(field) {
         if (sortField === field) sortReversed = !sortReversed
@@ -336,7 +407,8 @@ Window {
         searchResults = []; resultIndex = -1; searchTruncated = false
         if (!search.text) { Fm.stopSearch(); searching = false; return }
         searching = true
-        Fm.startSearch(searchScope === 2 ? Fm.home : dir, search.text, showHidden, searchScope !== 0)
+        if (searchTag) Fm.startTagSearch(searchTag, dir)   // "tag:Red" (or a click on a tag in the sidebar)
+        else Fm.startSearch(searchScope === 2 ? Fm.home : dir, search.text, showHidden, searchScope !== 0)
     }
     Timer { id: searchDelay; interval: 200; onTriggered: win.runSearch() }
     onSearchScopeChanged: if (searchActive) runSearch()
@@ -429,8 +501,11 @@ Window {
                 readonly property bool head: modelData.kind === "head"
                 readonly property bool vol: modelData.kind === "volume"
                 readonly property bool item: modelData.kind === "item" || vol
-                readonly property bool current: item && (modelData.item.action === "trash" ? win.inTrash
-                                                         : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
+                readonly property bool tagRow: modelData.kind === "tag"
+                readonly property bool tagHead: head && !!modelData.tags
+                readonly property bool current: tagRow ? win.searchTag.toLowerCase() === modelData.tag.name.toLowerCase()
+                                                : item && (modelData.item.action === "trash" ? win.inTrash
+                                                           : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
                 readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
                 // Header rows carry the gap above them, so baselines match the mockup.
                 readonly property real gap: head && !modelData.first ? 30 * win.tu : 0
@@ -438,14 +513,20 @@ Window {
                 height: gap + (head ? 28 : 30) * win.tu
 
                 Rectangle {
-                    visible: row.item && (row.current || hov.hovered || drop.containsDrag)
+                    visible: (row.item || row.tagRow) && (row.current || hov.hovered || drop.containsDrag)
                     x: 14 * win.u; y: 4 * win.tu; width: 196 * win.u; height: 26 * win.tu; radius: 8 * win.tu
                     color: Qt.rgba(1, 1, 1, row.current || drop.containsDrag ? .16 : .07)
                 }
                 Rectangle {   // drop target line for headers / empty sections
-                    visible: !row.item && drop.containsDrag
+                    visible: !row.item && !row.tagRow && !row.tagHead && row.modelData.si >= 0 && drop.containsDrag
                     x: 14 * win.u; y: row.height - 3 * win.tu; width: 196 * win.u; height: 2 * win.tu; radius: 1
                     color: "#0a84ff"
+                }
+                Rectangle {   // a tag: a filled Nord colour dot
+                    visible: row.tagRow
+                    x: 23 * win.u; y: 8.5 * win.tu; width: 13 * win.tu; height: width; radius: width / 2
+                    color: row.tagRow ? row.modelData.tag.color : "transparent"
+                    border.color: Qt.rgba(1, 1, 1, .35); border.width: 1
                 }
                 Rectangle {
                     visible: row.item
@@ -453,15 +534,16 @@ Window {
                     color: "transparent"; border.color: row.modelData.color || "transparent"; border.width: 1.6 * win.u
                 }
                 Text {
-                    visible: !(row.item && win.renamingPlace === row.key)
-                    x: (row.head ? 16 : row.item ? 48 : 22) * win.u
+                    visible: !(row.item && win.renamingPlace === row.key) && !(row.tagRow && win.renamingTag === row.modelData.tag.name)
+                    x: (row.head ? 16 : row.item || row.tagRow ? 48 : 22) * win.u
                     width: (row.head ? 170 : 160) * win.u
                     elide: Text.ElideRight
                     anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
-                    text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item) : "Drop folders here"
-                    color: "white"; opacity: row.head ? .45 : row.item ? 1 : .3
+                    text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item)
+                          : row.tagRow ? row.modelData.tag.name : (row.modelData.hint || "Drop folders here")
+                    color: "white"; opacity: row.head ? .45 : row.item || row.tagRow ? 1 : .3
                     font.family: win.fontFamily
-                    font.pixelSize: (row.head ? 11 : row.item ? 13.5 : 12) * win.tu
+                    font.pixelSize: (row.head ? 11 : row.item || row.tagRow ? 13.5 : 12) * win.tu
                     font.weight: row.head ? Font.DemiBold : Font.Normal
                 }
                 Rename {
@@ -472,6 +554,14 @@ Window {
                     onCommitted: text => win.placeRename(row.modelData.si, row.modelData.ii, text)
                     onDone: { win.renamingPlace = ""; keys.forceActiveFocus() }
                 }
+                Rename {
+                    active: row.tagRow && win.renamingTag === row.modelData.tag.name
+                    x: 44 * win.u; width: 160 * win.u; y: 4 * win.tu
+                    name: row.tagRow ? row.modelData.tag.name : ""
+                    u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
+                    onCommitted: text => win.renameTag(row.modelData.tag.name, text)
+                    onDone: { win.renamingTag = ""; keys.forceActiveFocus() }
+                }
                 Text {   // "+" on a hovered header: add the current folder to this section
                     visible: row.head && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
@@ -479,18 +569,19 @@ Window {
                     text: "+"; color: "white"; opacity: plusHover.hovered ? .9 : .5
                     font.family: win.fontFamily; font.pixelSize: 15 * win.tu; font.weight: Font.DemiBold
                     HoverHandler { id: plusHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: win.placeAdd(row.modelData.si, win.dir) }
+                    TapHandler { onTapped: row.tagHead ? win.newTag(false) : win.placeAdd(row.modelData.si, win.dir) }
                 }
                 Rectangle {   // ⊖ on a hovered entry: remove it from the sidebar
                     id: removeButton
                     objectName: "removeButton"
-                    visible: row.item && !row.vol && hov.hovered && win.renamingPlace !== row.key
+                    visible: ((row.item && !row.vol && win.renamingPlace !== row.key) || (row.tagRow && win.renamingTag !== row.modelData.tag.name)) && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 20 * win.u
                     y: 8.5 * win.tu; width: 14 * win.tu; height: width; radius: width / 2
                     color: removeHover.hovered ? "#ff453a" : Qt.rgba(1, 1, 1, .25)
                     Rectangle { anchors.centerIn: parent; width: parent.width * .5; height: 1.6 * win.u; color: "white" }
                     HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: win.placeRemove(row.modelData.si, row.modelData.ii) }
+                    // For a tag this only hides it from the sidebar (Delete Tag is in its menu).
+                    TapHandler { onTapped: row.tagRow ? win.setTagShown(row.modelData.tag.name, false) : win.placeRemove(row.modelData.si, row.modelData.ii) }
                 }
                 Text {   // ⏏ on mounted drives
                     visible: row.vol && row.modelData.item.mounted
@@ -507,6 +598,12 @@ Window {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: m => {
                         keys.forceActiveFocus()
+                        if (row.tagRow) {
+                            if (m.button === Qt.RightButton) { tagMenu.tag = row.modelData.tag; tagMenu.open() }
+                            else win.showTagged(row.modelData.tag.name)
+                            return
+                        }
+                        if (row.tagHead || row.modelData.si < 0) { if (m.button === Qt.RightButton) tagsHeadMenu.open(); return }
                         placeMenu.si = row.modelData.si
                         placeMenu.ii = row.item ? row.modelData.ii : -1
                         if (m.button === Qt.RightButton && row.vol) { volumeMenu.vol = row.modelData.item; volumeMenu.open() }
@@ -514,7 +611,11 @@ Window {
                         else if (m.button === Qt.RightButton) (row.item ? placeMenu : sectionMenu).open()
                         else if (row.item) win.activatePlace(row.modelData.item)
                     }
-                    onDoubleClicked: m => { if (row.item && !row.vol && m.button === Qt.LeftButton) win.renamingPlace = row.key }
+                    onDoubleClicked: m => {
+                        if (m.button !== Qt.LeftButton) return
+                        if (row.tagRow) win.renamingTag = row.modelData.tag.name
+                        else if (row.item && !row.vol) win.renamingPlace = row.key
+                    }
                 }
                 DropArea {
                     id: drop
@@ -526,6 +627,8 @@ Window {
                     onExited: spring.stop()
                     onDropped: d => {
                         spring.stop()
+                        if (row.tagRow) { Fm.addTag(win.urlsToPaths(d.urls), row.modelData.tag.name); d.accept(Qt.LinkAction); return }   // tag them
+                        if (row.modelData.si < 0) return
                         const it = row.modelData.item
                         if (row.vol && it.mounted) { Fm.drop(d.urls, it.path, false); d.accept(Qt.CopyAction) }
                         else if (it && it.action === "trash") { Fm.trash(d.urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, "")))); d.accept(Qt.MoveAction) }
@@ -906,6 +1009,7 @@ Window {
             required property url fileUrl
             readonly property string kind: fileIsDir ? "folder" : Fm.kind(filePath)
             readonly property var info: kind === "app" ? Fm.desktopInfo(filePath) : null
+            readonly property var tags: win.tagsOf(filePath)
             readonly property bool sel: win.selection[filePath] === true
             readonly property real k: win.k
             width: grid.cellWidth; height: grid.cellHeight
@@ -916,9 +1020,34 @@ Window {
                 width: 120 * cell.k; height: width
                 readonly property size src: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
                 Image {
+                    id: carpet
                     anchors.fill: parent
+                    visible: !carpetTint.visible
                     source: win.asset(cell.sel || drop.containsDrag ? "carpet-sel" : cell.kind === "exe" ? "carpet-strong" : "carpet")
                     sourceSize: icon.src; smooth: true
+                }
+                // Tagged: the IRIX magic carpet takes the (first) tag's Nord colour. Same outline as
+                // icons/carpet*.svg (points 6,84 58,97 98,80 46,68 in a -10..110 view box).
+                Shape {
+                    id: carpetTint
+                    objectName: "carpetTint"
+                    anchors.fill: parent
+                    visible: cell.tags.length > 0 && !cell.sel && !drop.containsDrag
+                    preferredRendererType: Shape.CurveRenderer
+                    readonly property color tint: win.tagColor(cell.tags[0] || "")
+                    ShapePath {
+                        strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
+                        fillGradient: LinearGradient {
+                            x1: 16 * cell.k; y1: 78 * cell.k; x2: 108 * cell.k; y2: 107 * cell.k
+                            GradientStop { position: 0; color: Qt.lighter(carpetTint.tint, 1.25) }
+                            GradientStop { position: 1; color: carpetTint.tint }
+                        }
+                        startX: 16 * cell.k; startY: 94 * cell.k
+                        PathLine { x: 68 * cell.k; y: 107 * cell.k }
+                        PathLine { x: 108 * cell.k; y: 90 * cell.k }
+                        PathLine { x: 56 * cell.k; y: 78 * cell.k }
+                        PathLine { x: 16 * cell.k; y: 94 * cell.k }
+                    }
                 }
                 Image {
                     anchors.fill: parent
@@ -964,6 +1093,12 @@ Window {
                 color: "white"
                 font.family: win.fontFamily; font.pixelSize: 13 * win.tu
                 font.weight: cell.sel ? Font.Medium : Font.Normal
+            }
+            TagDots {
+                tags: cell.tags; colorFor: win.tagColor; size: 9 * win.tu
+                visible: cell.tags.length > 0 && label.visible
+                x: label.x + (label.width + Math.min(label.contentWidth, label.width)) / 2 + (cell.sel ? 10 : 4) * win.u
+                y: label.y + (label.height - height) / 2
             }
             Rename {
                 active: win.renaming === cell.filePath
@@ -1060,6 +1195,7 @@ Window {
             required property var fileSize
             readonly property string kind: fileIsDir ? "folder" : Fm.kind(filePath)
             readonly property var info: kind === "app" ? Fm.desktopInfo(filePath) : null
+            readonly property var tags: win.tagsOf(filePath)
             readonly property bool sel: win.selection[filePath] === true
             width: list.width; height: win.listRowH
             Rectangle {
@@ -1083,11 +1219,17 @@ Window {
             Row {
                 x: win.listTextX; height: parent.height
                 Text {
-                    width: list.width - 430 * win.u; anchors.verticalCenter: parent.verticalCenter
+                    id: rowName
+                    width: list.width - 430 * win.u - (row.tags.length ? 30 * win.u : 0); anchors.verticalCenter: parent.verticalCenter
                     visible: win.renaming !== row.filePath
                     text: row.info && row.info.name ? row.info.name : row.fileName
                     elide: Text.ElideRight; color: "white"
                     font.family: win.fontFamily; font.pixelSize: 13 * win.tu
+                    TagDots {
+                        tags: row.tags; colorFor: win.tagColor; size: 9 * win.tu
+                        x: Math.min(rowName.contentWidth, rowName.width) + 6 * win.u
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
                 Rename {
                     active: win.renaming === row.filePath
@@ -1157,8 +1299,23 @@ Window {
             text: "Search:  "; color: "white"; opacity: .55
             font.family: win.fontFamily; font.pixelSize: 12 * win.tu
         }
+        Row {   // tag search: "Tag: ● Name — everywhere"
+            visible: win.searchTag !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6 * win.u
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 11 * win.tu; height: width; radius: width / 2; color: win.tagColor(win.searchTag)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: (win.tagDef(win.searchTag) ? win.tagDef(win.searchTag).name : win.searchTag) + "  ·  everywhere"
+                color: "white"
+                font.family: win.fontFamily; font.pixelSize: 12 * win.tu; font.weight: Font.DemiBold
+            }
+        }
         Repeater {
-            model: [win.dir === "/" ? "/" : "“" + win.dir.split("/").pop() + "”", "Subfolders", "Home"]
+            model: win.searchTag ? [] : [win.dir === "/" ? "/" : "“" + win.dir.split("/").pop() + "”", "Subfolders", "Home"]
             Rectangle {
                 required property string modelData
                 required property int index
@@ -1209,9 +1366,15 @@ Window {
                 sourceSize: Qt.size(width * 2, height * 2)
             }
             Text {
-                x: win.listTextX; width: parent.width * .38; anchors.verticalCenter: parent.verticalCenter
+                id: hitName
+                x: win.listTextX; width: parent.width * .38 - 30 * win.u; anchors.verticalCenter: parent.verticalCenter
                 text: hit.modelData.name; elide: Text.ElideMiddle; color: "white"
                 font.family: win.fontFamily; font.pixelSize: 13 * win.tu
+                TagDots {
+                    tags: win.tagsOf(hit.modelData.path); colorFor: win.tagColor; size: 9 * win.tu
+                    x: Math.min(hitName.contentWidth, hitName.width) + 6 * win.u
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
             Text {   // where it is, relative to home
                 x: 48 * win.u + parent.width * .38; width: parent.width * .62 - 60 * win.u; anchors.verticalCenter: parent.verticalCenter
@@ -1395,6 +1558,27 @@ Window {
         }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.paths()[0]) }
         P.MenuSeparator {}
+        P.Menu {
+            id: itemTagsMenu
+            title: "Tags"
+            Instantiator {
+                model: win.tagDefs
+                delegate: P.MenuItem {
+                    required property var modelData
+                    required property int index
+                    text: modelData.name + (index < 7 ? "\tCtrl+Alt+" + (index + 1) : "")
+                    icon.source: win.tagIcon(modelData.color)
+                    checkable: true
+                    checked: win.selectionHasTag(modelData.name)
+                    onTriggered: win.toggleTag(modelData.name)
+                }
+                onObjectAdded: (i, o) => itemTagsMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => itemTagsMenu.removeItem(o)
+            }
+            P.MenuSeparator {}
+            P.MenuItem { text: "New Tag…"; onTriggered: win.newTag(true) }
+            P.MenuItem { text: "Remove All Tags\tCtrl+Alt+0"; onTriggered: win.clearSelectionTags() }
+        }
         P.MenuItem { text: "Put Back"; visible: win.inTrash; onTriggered: win.putBack() }
         P.MenuItem { text: "Delete Immediately…"; visible: win.inTrash; onTriggered: deleteDialog.open() }
         P.MenuSeparator { visible: win.inTrash }
@@ -1449,11 +1633,93 @@ Window {
         P.MenuItem { text: "Show Hidden Files"; checkable: true; checked: win.showHidden; onTriggered: win.showHidden = !win.showHidden }
     }
     P.Menu {
+        id: tagMenu
+        property var tag: null
+        readonly property string name: tag ? tag.name : ""
+        P.MenuItem { text: "Show Items Tagged “" + tagMenu.name + "”"; onTriggered: win.showTagged(tagMenu.name) }
+        P.MenuItem { text: "Rename “" + tagMenu.name + "”…"; onTriggered: win.renamingTag = tagMenu.name }
+        P.Menu {
+            id: tagColorMenu
+            title: "Colour"
+            Instantiator {
+                model: win.nordColors
+                delegate: P.MenuItem {
+                    required property var modelData
+                    text: modelData[0]
+                    icon.source: win.tagIcon(modelData[1])
+                    checkable: true
+                    checked: !!tagMenu.tag && tagMenu.tag.color === modelData[1]
+                    onTriggered: win.setTagColor(tagMenu.name, modelData[1])
+                }
+                onObjectAdded: (i, o) => tagColorMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => tagColorMenu.removeItem(o)
+            }
+        }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Move Up"; onTriggered: win.moveTag(tagMenu.name, -1) }
+        P.MenuItem { text: "Move Down"; onTriggered: win.moveTag(tagMenu.name, 1) }
+        P.MenuItem { text: "Remove from Sidebar"; onTriggered: win.setTagShown(tagMenu.name, false) }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Delete Tag “" + tagMenu.name + "”…"; onTriggered: deleteTagDialog.open() }
+    }
+    P.Menu {
+        id: tagsHeadMenu
+        P.MenuItem { text: "New Tag"; onTriggered: win.newTag(false) }
+        P.Menu {
+            id: hiddenTagsMenu
+            title: "Show in Sidebar"
+            Instantiator {
+                model: win.tagDefs
+                delegate: P.MenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    icon.source: win.tagIcon(modelData.color)
+                    checkable: true
+                    checked: modelData.shown
+                    onTriggered: win.setTagShown(modelData.name, !modelData.shown)
+                }
+                onObjectAdded: (i, o) => hiddenTagsMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => hiddenTagsMenu.removeItem(o)
+            }
+        }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Reset Tags"; onTriggered: win.resetTags() }
+    }
+    P.MessageDialog {
+        id: deleteTagDialog
+        title: "Delete Tag"
+        text: "Are you sure you want to delete the tag “" + tagMenu.name + "”?"
+        informativeText: "It will be removed from all items that have it."
+        buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
+        onOkClicked: win.deleteTag(tagMenu.name)
+    }
+    P.Menu {
         id: resultMenu
         P.MenuItem { text: "Open"; onTriggered: win.openResult(win.resultIndex) }
         P.MenuItem { text: "Show in Enclosing Folder"; onTriggered: { const p = win.focusedPath(); search.text = ""; win.showInFolder(p) } }
         P.MenuItem { text: "Quick Look"; onTriggered: win.toggleQuickLook() }
         P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
+        P.Menu {
+            id: resultTagsMenu
+            title: "Tags"
+            Instantiator {
+                model: win.tagDefs
+                delegate: P.MenuItem {
+                    required property var modelData
+                    required property int index
+                    text: modelData.name + (index < 7 ? "\tCtrl+Alt+" + (index + 1) : "")
+                    icon.source: win.tagIcon(modelData.color)
+                    checkable: true
+                    checked: win.selectionHasTag(modelData.name)
+                    onTriggered: win.toggleTag(modelData.name)
+                }
+                onObjectAdded: (i, o) => resultTagsMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => resultTagsMenu.removeItem(o)
+            }
+            P.MenuSeparator {}
+            P.MenuItem { text: "New Tag…"; onTriggered: win.newTag(true) }
+            P.MenuItem { text: "Remove All Tags\tCtrl+Alt+0"; onTriggered: win.clearSelectionTags() }
+        }
         P.MenuSeparator {}
         P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
         P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
@@ -1641,6 +1907,15 @@ Window {
     Shortcut { sequence: "Ctrl+Shift+P"; onActivated: win.previewShown = !win.previewShown }
     Shortcut { sequence: "Ctrl+Shift+Del"; onActivated: emptyDialog.open() }
     Shortcut { sequence: "Ctrl+Alt+Z"; onActivated: win.compressSelected() }
+    // Tags: Ctrl+Alt+1…7 toggle the first seven tags on the selection, Ctrl+Alt+0 removes all.
+    Repeater {
+        model: 7
+        Item {
+            required property int index
+            Shortcut { sequence: "Ctrl+Alt+" + (index + 1); onActivated: win.toggleTagIndex(index) }
+        }
+    }
+    Shortcut { sequence: "Ctrl+Alt+0"; onActivated: win.clearSelectionTags() }
     Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.go(Fm.home) }
     Shortcut { sequence: "Ctrl+1"; onActivated: win.viewMode = 0 }
     Shortcut { sequence: "Ctrl+2"; onActivated: win.viewMode = 1 }

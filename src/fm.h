@@ -100,6 +100,20 @@ public:
     Q_INVOKABLE QString compress(const QStringList &paths);
     Q_INVOKABLE QString expand(const QString &path);
 
+    // Tags (colour labels): the xattr user.xdg.tags, shared with Dolphin and Baloo. `rev` is
+    // ignored; QML passes a counter so bindings re-read after a change.
+    Q_INVOKABLE QStringList tags(const QString &path, int rev = 0) const;
+    Q_INVOKABLE void setTags(const QString &path, const QStringList &tags);
+    Q_INVOKABLE void addTag(const QStringList &paths, const QString &tag);
+    Q_INVOKABLE void removeTag(const QStringList &paths, const QString &tag);
+    Q_INVOKABLE void clearTags(const QStringList &paths);
+    // Everything with a tag, from Baloo, fm's own index and the folder being viewed (`here`);
+    // answers like startSearch.
+    Q_INVOKABLE void startTagSearch(const QString &tag, const QString &here = QString());
+    // Applied to every file that has the tag (background); tagsChanged when done.
+    Q_INVOKABLE void renameTagEverywhere(const QString &from, const QString &to);
+    Q_INVOKABLE void deleteTagEverywhere(const QString &tag);
+
 Q_SIGNALS:
     void undoChanged();
     void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
@@ -109,9 +123,14 @@ Q_SIGNALS:
     void searchBatch(const QVariantList &items);
     void searchDone(int count, bool truncated);
     void archiveDone(const QString &path, bool ok);
+    void tagsChanged();
 
 private:
     void refreshVolumes();
+    void loadTagIndex();
+    void saveTagIndex() const;
+    void indexTags(const QString &path, const QStringList &tags);
+    QStringList taggedCandidates(const QString &tag) const;  // index + Baloo, not yet verified
     void startNextSize();
     static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
@@ -121,4 +140,5 @@ private:
     QStringList m_sizeQueue;    // folder-size requests waiting; at most kMaxSizeJobs run at once
     int m_sizeRunning = 0;
     QAtomicInt m_searchGen;     // bumped to cancel the running search
+    QHash<QString, QStringList> m_tagIndex;   // path -> tags, for files fm has tagged
 };

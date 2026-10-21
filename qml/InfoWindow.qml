@@ -71,6 +71,7 @@ Window {
                     ["Created:", infoWin.info.created],
                     ["Modified:", infoWin.info.modified],
                     ["Opened:", infoWin.info.accessed],
+                    ["Tags:", (infoWin.info.tags || []).join(", ")],
                     ["Open with:", infoWin.info.openWith],
                     ["Owner:", infoWin.info.owner + " — " + infoWin.info.permOwner],
                     ["Group:", infoWin.info.group + " — " + infoWin.info.permGroup],

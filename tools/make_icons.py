@@ -59,7 +59,19 @@ def write(name, body):
         f'<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="-10 -10 120 120">{DEFS}{body}</svg>\n')
 
 
+# Nord colours for tags (docs/TAGS.md). Menus get a dot per colour: icons/tag-<hex>.svg
+NORD_TAGS = ["BF616A", "D08770", "EBCB8B", "A3BE8C", "8FBCBB", "88C0D0", "81A1C1", "5E81AC", "B48EAD", "4C566A"]
+
+
+def write_tag_dots():
+    for hexc in NORD_TAGS:
+        (OUT / f"tag-{hexc.lower()}.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+            f'<circle cx="16" cy="16" r="11" fill="#{hexc}" stroke="#ECEFF4" stroke-opacity=".55" stroke-width="1.5"/></svg>\n')
+
+
 if __name__ == "__main__":
+    write_tag_dots()
     write("carpet", carpet())
     write("carpet-strong", carpet(strong=True))
     write("carpet-sel", carpet(sel=True))

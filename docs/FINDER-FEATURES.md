@@ -32,7 +32,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Trash with Empty Trash / Put Back | ✅ sidebar, Empty (button, menu, Ctrl+Shift+Del), Put Back, Delete Immediately | | home trash folder + KIO restore / emptyTrash |
 | Removable drives and mounted volumes, Eject | ✅ in Locations, mount on click, ⏏ | | Solid |
 | Network / servers (Connect to Server ⌘K) | 🟡 opens Dolphin | 3 | needs a KIO-based model (`KDirModel`) |
-| Tags section | ⬜ | 3 | `user.xdg.tags` xattr (Baloo-compatible) |
+| Tags section | ✅ see [TAGS.md](TAGS.md) | | `user.xdg.tags` xattr (Baloo-compatible) |
 | iCloud, AirDrop, Shared | ➖ | | (KDE Connect could stand in for AirDrop) |
 
 ## Views
@@ -84,7 +84,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Copy path (⌥⌘C) | ✅ Ctrl+Alt+C | | |
 | Share ▸ | ⬜ | 3 | KDE Purpose |
 | Quick Actions (rotate, markup, PDF) | ⬜ | 3 | |
-| Tags (colour dots on items, tag menu) | ⬜ | 3 | xattr |
+| Tags (colour dots on items, tag menu) | ✅ Nord colours, dots + tinted carpets, Ctrl+Alt+1…7 | | xattr `user.xdg.tags` |
 | Open in Terminal (service) | ✅ | | |
 | Eject, Burn | ✅ Eject / ➖ Burn | | |
 
@@ -94,7 +94,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 |---|---|---|---|
 | Filter the current folder as you type | ✅ | | |
 | Search "This Mac" / current folder recursively, scope bar | ✅ scope bar: this folder / with subfolders / Home; results with their folder | 3 | Baloo for content search later |
-| Search tokens (Kind:, Date:, Tags:) | ⬜ | 3 | |
+| Search tokens (Kind:, Date:, Tags:) | 🟡 `tag:Name` | 3 | Kind:, Date: later |
 | Saved searches / Smart Folders | ⬜ | 3 | |
 
 ## Phase 1 (built on branch `finder-features`): done
@@ -117,5 +117,5 @@ list, Compress / Expand, Recent Folders. Checked by `tests/phase2_test.cpp` (34 
 
 ## Phase 3 (later)
 
-Tabs, column view, gallery view, Group By, tags, Recents (files), New Folder with Selection,
+Tabs, column view, gallery view, Group By, Recents (files), New Folder with Selection,
 Finder drag semantics, batch rename, Get Info editing, Share, content search (Baloo), settings window.

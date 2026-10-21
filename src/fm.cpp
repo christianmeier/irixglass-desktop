@@ -15,7 +15,10 @@
 #include <QRegion>
 #include <QDirIterator>
 #include <QStandardPaths>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStorageInfo>
+#include <sys/xattr.h>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <K7Zip>
@@ -160,6 +163,7 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent)
     connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceAdded, this, &Fm::refreshVolumes);
     connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceRemoved, this, &Fm::refreshVolumes);
     refreshVolumes();
+    loadTagIndex();
 }
 
 // ---- Trash ---------------------------------------------------------------------------
@@ -518,6 +522,7 @@ QVariantMap Fm::info(const QString &path) const
     m[QStringLiteral("permOther")] = access(QFile::ReadOther, QFile::WriteOther);
     m[QStringLiteral("executable")] = !fi.isDir() && fi.isExecutable();
     const KService::Ptr app = fi.isDir() ? KService::Ptr() : KApplicationTrader::preferredService(mime.name());
+    m[QStringLiteral("tags")] = tags(path);
     m[QStringLiteral("openWith")] = app ? app->name() : QString();
     m[QStringLiteral("openWithIcon")] = app ? app->icon() : QString();
     return m;
@@ -789,4 +794,190 @@ void Fm::rename(const QString &path, const QString &newName)
         return;
     undoable(KIO::moveAs(QUrl::fromLocalFile(path), QUrl::fromLocalFile(fi.absolutePath() + QLatin1Char('/') + newName),
                          KIO::HideProgressInfo));
+}
+
+// ---- Tags -------------------------------------------------------------------------------------
+
+namespace
+{
+const char kTagAttr[] = "user.xdg.tags";
+
+QStringList readTags(const QString &path)
+{
+    const QByteArray p = QFile::encodeName(path);
+    char buf[4096];
+    const ssize_t n = getxattr(p.constData(), kTagAttr, buf, sizeof buf);
+    if (n <= 0)
+        return {};
+    QStringList out;
+    for (const QString &t : QString::fromUtf8(buf, int(n)).split(QLatin1Char(','), Qt::SkipEmptyParts))
+        out << t.trimmed();
+    out.removeAll(QString());
+    return out;
+}
+
+bool writeTags(const QString &path, const QStringList &tags)
+{
+    const QByteArray p = QFile::encodeName(path);
+    if (tags.isEmpty())
+        return removexattr(p.constData(), kTagAttr) == 0 || errno == ENODATA;
+    const QByteArray v = tags.join(QLatin1Char(',')).toUtf8();
+    return setxattr(p.constData(), kTagAttr, v.constData(), size_t(v.size()), 0) == 0;
+}
+
+bool hasTag(const QStringList &tags, const QString &tag)
+{
+    return tags.contains(tag, Qt::CaseInsensitive);
+}
+
+QString tagIndexFile()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/irixfm/tags.json");
+}
+} // namespace
+
+QStringList Fm::tags(const QString &path, int) const
+{
+    return readTags(path);
+}
+
+void Fm::setTags(const QString &path, const QStringList &list)
+{
+    QStringList clean;
+    for (const QString &t : list)
+        if (!t.trimmed().isEmpty() && !t.contains(QLatin1Char(',')) && !hasTag(clean, t.trimmed()))
+            clean << t.trimmed();
+    if (writeTags(path, clean))
+        indexTags(path, clean);
+    else
+        qWarning("irixfm: can't write tags on %s: %s", qPrintable(path), strerror(errno));
+}
+
+void Fm::addTag(const QStringList &paths, const QString &tag)
+{
+    for (const QString &p : paths) {
+        QStringList t = readTags(p);
+        if (!hasTag(t, tag))
+            setTags(p, t << tag);
+    }
+    saveTagIndex();
+    Q_EMIT tagsChanged();
+}
+
+void Fm::removeTag(const QStringList &paths, const QString &tag)
+{
+    for (const QString &p : paths) {
+        QStringList t = readTags(p);
+        t.removeIf([&](const QString &x) { return x.compare(tag, Qt::CaseInsensitive) == 0; });
+        setTags(p, t);
+    }
+    saveTagIndex();
+    Q_EMIT tagsChanged();
+}
+
+void Fm::clearTags(const QStringList &paths)
+{
+    for (const QString &p : paths)
+        setTags(p, {});
+    saveTagIndex();
+    Q_EMIT tagsChanged();
+}
+
+void Fm::indexTags(const QString &path, const QStringList &tags)
+{
+    if (tags.isEmpty())
+        m_tagIndex.remove(path);
+    else
+        m_tagIndex.insert(path, tags);
+}
+
+void Fm::loadTagIndex()
+{
+    QFile f(tagIndexFile());
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    for (auto it = o.begin(); it != o.end(); ++it)
+        m_tagIndex.insert(it.key(), it.value().toVariant().toStringList());
+}
+
+void Fm::saveTagIndex() const
+{
+    QJsonObject o;
+    for (auto it = m_tagIndex.begin(); it != m_tagIndex.end(); ++it)
+        o.insert(it.key(), QJsonValue::fromVariant(it.value()));
+    QDir().mkpath(QFileInfo(tagIndexFile()).absolutePath());
+    QFile f(tagIndexFile());
+    if (f.open(QIODevice::WriteOnly))
+        f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+QStringList Fm::taggedCandidates(const QString &tag) const
+{
+    // fm's own index (finds files Baloo doesn't index: hidden folders, other disks, Baloo off)…
+    QStringList out;
+    for (auto it = m_tagIndex.begin(); it != m_tagIndex.end(); ++it)
+        if (hasTag(it.value(), tag))
+            out << it.key();
+    // …plus Baloo, which indexes user.xdg.tags, so tags set by Dolphin or before fm are found too.
+    QProcess baloo;
+    baloo.start(QStringLiteral("baloosearch6"), {QStringLiteral("tag:") + tag});
+    if (baloo.waitForFinished(10000))
+        for (const QString &line : QString::fromLocal8Bit(baloo.readAllStandardOutput()).split(QLatin1Char('\n')))
+            if (line.startsWith(QLatin1Char('/')) && !out.contains(line.trimmed()))
+                out << line.trimmed();
+    return out;
+}
+
+void Fm::startTagSearch(const QString &tag, const QString &here)
+{
+    const int gen = ++m_searchGen;
+    QPointer<Fm> self(this);
+    QStringList candidates = taggedCandidates(tag);
+    // The folder on screen too: finds tags set by other tools where Baloo doesn't look.
+    if (!here.isEmpty())
+        for (const QFileInfo &fi : QDir(here).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden))
+            if (!candidates.contains(fi.absoluteFilePath()))
+                candidates << fi.absoluteFilePath();
+    (void)QtConcurrent::run([self, gen, tag, candidates] {
+        QVariantList hits;
+        for (const QString &p : candidates) {
+            const QFileInfo fi(p);
+            if (!(fi.exists() && hasTag(readTags(p), tag)))   // moved, deleted or untagged since
+                continue;
+            hits << QVariantMap{{QStringLiteral("name"), fi.fileName()}, {QStringLiteral("path"), fi.absoluteFilePath()},
+                                {QStringLiteral("where"), fi.absolutePath()}, {QStringLiteral("isDir"), fi.isDir()},
+                                {QStringLiteral("modified"), fi.lastModified()}, {QStringLiteral("size"), fi.isDir() ? -1 : fi.size()}};
+        }
+        if (self)
+            QMetaObject::invokeMethod(self, [self, gen, hits] {
+                if (!self || self->m_searchGen != gen)
+                    return;
+                if (!hits.isEmpty())
+                    Q_EMIT self->searchBatch(hits);
+                Q_EMIT self->searchDone(int(hits.size()), false);
+            });
+    });
+}
+
+void Fm::renameTagEverywhere(const QString &from, const QString &to)
+{
+    for (const QString &p : taggedCandidates(from)) {
+        QStringList t = readTags(p);
+        bool changed = false;
+        for (QString &x : t)
+            if (x.compare(from, Qt::CaseInsensitive) == 0) {
+                x = to;
+                changed = true;
+            }
+        if (changed)
+            setTags(p, t);
+    }
+    saveTagIndex();
+    Q_EMIT tagsChanged();
+}
+
+void Fm::deleteTagEverywhere(const QString &tag)
+{
+    removeTag(taggedCandidates(tag), tag);
 }
