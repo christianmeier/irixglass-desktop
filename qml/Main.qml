@@ -2024,8 +2024,9 @@ Window {
         x: parent.width - win.previewW; y: 72 * u
         width: 270 * u; height: parent.height - 72 * u - win.bottomH - 8 * u
         clip: true
-        // the active side's item (or its folder)
-        path: win.activeFocusedPath() || (win.splitActive ? splitPane.dir : win.dir)
+        // the active side's item (or its folder); none while hidden, so a hidden pane doesn't read
+        // files, highlight code or count folder sizes (the whole home folder at start) for nothing
+        path: visible ? win.activeFocusedPath() || (win.splitActive ? splitPane.dir : win.dir) : ""
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
         assetFor: win.asset
         sizes: win.folderSizes
