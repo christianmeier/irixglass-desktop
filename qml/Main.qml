@@ -1283,8 +1283,10 @@ Window {
             ToolTip.text: "Terminal (F4), Neovim (Shift+F4)"
         }
         Rectangle {
+            objectName: "viewHighlight"
             x: (4 + win.activeViewMode * 41) * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u; radius: 14 * win.u
             color: Qt.rgba(1, 1, 1, .18)
+            visible: !(win.splitActive ? splitPane.termActive : win.termActive)   // a terminal tab has no view mode
             Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         }
         Repeater {
@@ -1410,6 +1412,7 @@ Window {
 
     // Drops onto empty space go into the current folder.
     DropArea {
+        enabled: !win.termActive   // a terminal takes drops itself (it types the paths)
         x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW - win.splitW; height: parent.height - y - win.bottomH
         onDropped: drop => { if (!win.inTrash) win.dropFiles(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
@@ -1965,7 +1968,7 @@ Window {
         current: win.tabIndex
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
         springDelay: win.springDelay
-        onActivated: i => win.switchTab(i)
+        onActivated: i => { win.activePane = 0; win.switchTab(i) }
         onCloseRequested: i => win.closeTab(i)
         onMiddleClicked: i => win.closeTab(i)
         onMenuRequested: i => { tabMenu.index = i; tabMenu.open() }

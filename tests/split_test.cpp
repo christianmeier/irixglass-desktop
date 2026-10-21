@@ -194,6 +194,15 @@ int main(int argc, char *argv[])
             check(win->property("splitViewMode").toInt() == 1 && win->property("viewMode").toInt() == 2,
                   QStringLiteral("…then the list button switches the split side to the list"),
                   QString::number(win->property("splitViewMode").toInt()));
+            // the view buttons show the clicked side's view: list on the split side, previews on the main side
+            auto *hl = win->findChild<QQuickItem *>(QStringLiteral("viewHighlight"));
+            auto hlMode = [&] { return qRound((hl->x() / .85 - 4) / 41); };
+            QTest::qWait(300);
+            check(hlMode() == 1, QStringLiteral("the view buttons show the split side's view while it's active"), QString::number(hlMode()));
+            QTest::mouseClick(window, Qt::LeftButton, {}, grid->mapToScene(QPointF(grid->width() / 2, grid->height() - 30)).toPoint());
+            QTest::qWait(300);
+            check(win->property("activePane").toInt() == 0 && hlMode() == 2,
+                  QStringLiteral("clicking into the main side switches them to its view"), QString::number(hlMode()));
             win->setProperty("activePane", 0);
             key(Qt::Key_1, Qt::ControlModifier);
         }

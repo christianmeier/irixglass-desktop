@@ -7,6 +7,8 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QMimeData>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -66,7 +68,7 @@ int main(int argc, char *argv[])
 
     QTimer::singleShot(1000, &app, [&] {
         window->requestActivate();
-        QTest::qWaitForWindowActive(window);
+        (void)QTest::qWaitForWindowActive(window);
 
         QTest::keyClick(window, Qt::Key_F4);
         QTest::qWait(300);
@@ -85,6 +87,47 @@ int main(int argc, char *argv[])
             t->sendText(QStringLiteral("echo after-ctrl-c\r"));
             check(waitFor([&] { return t->screenText().contains(QStringLiteral("after-ctrl-c")); }, 4000),
                   QStringLiteral("Ctrl+C goes to the program (interrupts sleep)"), t->screenText());
+            // pinch on the touchpad: the font follows; fewer columns fit, the shell is told (stty size)
+            const qreal pt = t->property("fontPointSize").toReal();
+            const int cols = t->columns();
+            const QPointF mid = t->mapToScene(QPointF(t->width() / 2, t->height() / 2));
+            auto gesture = [&](Qt::NativeGestureType type, qreal value) {
+                QNativeGestureEvent ev(type, QPointingDevice::primaryPointingDevice(), 2, mid, mid, window->mapToGlobal(mid), value, {});
+                QCoreApplication::sendEvent(window, &ev);
+            };
+            gesture(Qt::BeginNativeGesture, 0);
+            for (int i = 0; i < 10; ++i)
+                gesture(Qt::ZoomNativeGesture, .05);
+            gesture(Qt::EndNativeGesture, 0);
+            QTest::qWait(200);
+            check(t->property("fontPointSize").toReal() > pt * 1.5 && t->columns() < cols * .75,
+                  QStringLiteral("pinching out makes the terminal font bigger"),
+                  QString::number(t->property("fontPointSize").toReal()) + " cols " + QString::number(t->columns()));
+            t->sendText(QStringLiteral("stty size\r"));
+            check(waitFor([&] { return t->screenText().contains(QStringLiteral(" ") + QString::number(t->columns())); }),
+                  QStringLiteral("…and the program gets the new size"), t->screenText());
+            QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
+            const qreal afterMinus = t->property("fontPointSize").toReal();
+            QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
+            check(afterMinus < pt * 1.5 * 1.1 && qAbs(t->property("fontPointSize").toReal() - 12) < .01,
+                  QStringLiteral("Ctrl+- / Ctrl+0 shrink and reset the font"), QString::number(afterMinus));
+            // dropping files types their paths, quoted; nothing is moved
+            const QString odd = base + QStringLiteral("/it's a folder");
+            QDir().mkpath(odd);
+            QMimeData mime;
+            mime.setUrls({QUrl::fromLocalFile(odd), QUrl::fromLocalFile(base + QStringLiteral("/hello.txt"))});
+            const QPoint at = t->mapToScene(QPointF(t->width() / 2, t->height() / 2)).toPoint();
+            t->sendText(QStringLiteral("clear; printf '<%s>\\n' "));
+            QDragEnterEvent enter(at, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton, {});
+            QCoreApplication::sendEvent(window, &enter);
+            QDragMoveEvent move(at, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton, {});
+            QCoreApplication::sendEvent(window, &move);
+            QDropEvent drop(at, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton, {});
+            QCoreApplication::sendEvent(window, &drop);
+            t->sendText(QStringLiteral("\r"));
+            check(waitFor([&] { return t->screenText().contains("<" + odd + ">") && t->screenText().contains("<" + base + "/hello.txt>"); }),
+                  QStringLiteral("dropping files onto the terminal types their quoted paths"), t->screenText());
+            check(QFileInfo::exists(odd) && QFileInfo::exists(base + QStringLiteral("/hello.txt")), QStringLiteral("…and leaves the files where they are"));
             t->sendText(QStringLiteral("exit\r"));
             check(waitFor([&] { return tabs().size() == 1; }), QStringLiteral("exiting the shell closes its tab"));
             check(win->property("activeTermId").toInt() == 0, QStringLiteral("…and the folder view is back"));

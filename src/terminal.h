@@ -14,6 +14,7 @@ extern "C" {
 }
 
 class KPtyProcess;
+class QTimer;
 
 class TerminalView : public QQuickPaintedItem
 {
@@ -43,6 +44,12 @@ public:
     Q_INVOKABLE void paste();                           // clipboard, as a bracketed paste
     Q_INVOKABLE void copySelection();
     Q_INVOKABLE QString screenText() const;             // visible text (tests)
+    // Font size: touchpad pinch, Ctrl+wheel, Ctrl++ / Ctrl+- / Ctrl+0 (as in Alacritty).
+    // New terminals start at the last size used.
+    Q_INVOKABLE void zoomBy(qreal factor);
+    Q_INVOKABLE void setFontSize(qreal points);
+    // Dropped files and folders: their paths, shell-quoted, typed at the cursor (as in Alacritty).
+    Q_INVOKABLE void insertPaths(const QStringList &paths);
 
     // libvterm callbacks
     int onDamage(VTermRect rect);
@@ -69,6 +76,9 @@ protected:
     void mouseMoveEvent(QMouseEvent *e) override;
     void mouseReleaseEvent(QMouseEvent *e) override;
     void wheelEvent(QWheelEvent *e) override;
+    void dragEnterEvent(QDragEnterEvent *e) override;
+    void dragMoveEvent(QDragMoveEvent *e) override;
+    void dropEvent(QDropEvent *e) override;
     void focusInEvent(QFocusEvent *e) override;
     void focusOutEvent(QFocusEvent *e) override;
 
@@ -85,7 +95,9 @@ private:
     QString m_program, m_cwd, m_title;
     QStringList m_arguments;
     QFont m_font;
-    qreal m_pointSize = 12;
+    static inline qreal s_lastPointSize = 12;
+    qreal m_pointSize = s_lastPointSize;
+    QTimer *m_sizeHint = nullptr;              // shows "14 pt" for a moment after a change
     qreal m_cellW = 8, m_cellH = 16, m_ascent = 12;
     int m_cols = 80, m_rows = 24;
     VTermPos m_cursor{0, 0};

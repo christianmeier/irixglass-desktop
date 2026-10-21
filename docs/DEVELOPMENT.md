@@ -245,6 +245,17 @@ side's `termLayer`); a tab with `term`/`termId` shows its terminal instead of th
 (`activeTermId`, `termActive`). Terminal tabs aren't persisted. When the program exits
 (`finished`), its tab closes. Tab titles come from the program (OSC 0/2) via `termTitle`.
 
+Font size: `TerminalView::event` takes `QEvent::NativeGesture` (`ZoomNativeGesture`, the touchpad
+pinch; KWin/Wayland sends it as a native gesture, not as touch points) and calls
+`zoomBy(1 + value)`; Ctrl+wheel and Ctrl++/-/0 do the same (these keys are taken in
+`ShortcutOverride`, as Alacritty does). `setFontSize` clamps to 6–48 pt, re-measures the cell,
+resizes the vterm (the program gets SIGWINCH) and shows "N pt" for 1.2 s. The last size is
+`s_lastPointSize`, used by new terminals (not saved across restarts).
+
+Drops: the item has `ItemAcceptsDrops`; `dropEvent` types the local paths shell-quoted, inside a
+bracketed paste, and reports `CopyAction`, so the source never deletes anything. The folder
+`DropArea`s behind a terminal are disabled while it shows (`enabled: !termActive`).
+
 ### The dock
 
 A Plasma panel set to "Windows Go Below" (or auto-hide) doesn't reserve space, so a maximized

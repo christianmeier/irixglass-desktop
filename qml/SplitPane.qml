@@ -187,6 +187,7 @@ Item {
         onPressed: m => { pane.activated(); if (m.button === Qt.RightButton) pane.menuRequested(); else pane.selection = ({}) }
     }
     DropArea {   // dropping on the empty part: into this side's folder
+        enabled: !pane.termActive   // a terminal takes drops itself (it types the paths)
         anchors.fill: parent
         onDropped: d => { pane.dropRequested(d.urls, pane.dir, d.proposedAction === Qt.MoveAction); d.accept() }
     }

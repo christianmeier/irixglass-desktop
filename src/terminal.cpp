@@ -4,6 +4,8 @@
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QMimeData>
+#include <QRegularExpression>
 #include <QPainter>
 #include <QTimer>
 
@@ -17,6 +19,16 @@ const QColor kFg(0xD8, 0xDE, 0xE9), kBg(0x2E, 0x34, 0x40);
 const QRgb kPalette[16] = {0x3B4252, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x88C0D0, 0xE5E9F0,
                            0x4C566A, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x8FBCBB, 0xECEFF4};
 constexpr int kScrollback = 5000;
+
+// Ctrl++ / Ctrl+= / Ctrl+- / Ctrl+0 change the font size, as in Alacritty.
+bool isZoomKey(const QKeyEvent *k)
+{
+    if (!(k->modifiers() & Qt::ControlModifier) || (k->modifiers() & Qt::AltModifier))
+        return false;
+    const int key = k->key();
+    return key == Qt::Key_Plus || key == Qt::Key_Equal || key == Qt::Key_Minus || key == Qt::Key_Underscore
+        || (key == Qt::Key_0 && !(k->modifiers() & Qt::ShiftModifier));
+}
 
 TerminalView *self(void *user)
 {
@@ -61,12 +73,17 @@ TerminalView::TerminalView(QQuickItem *parent)
     setActiveFocusOnTab(true);
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptHoverEvents(false);
+    setFlag(ItemAcceptsDrops, true);
     setFillColor(Qt::transparent);
     setAntialiasing(true);
     m_font = QFont(QStringLiteral("Noto Sans Mono"));   // the terminal font stays Noto Sans Mono 12
     m_font.setStyleHint(QFont::Monospace);
     updateMetrics();
     connect(this, &TerminalView::fontChanged, this, [this] { updateMetrics(); resizeTerminal(); update(); });
+    m_sizeHint = new QTimer(this);
+    m_sizeHint->setSingleShot(true);
+    m_sizeHint->setInterval(1200);
+    connect(m_sizeHint, &QTimer::timeout, this, [this] { update(); });
 
     m_vt = vterm_new(m_rows, m_cols);
     vterm_set_utf8(m_vt, 1);
@@ -231,6 +248,21 @@ int TerminalView::onPopLine(int cols, VTermScreenCell *cells)
 
 // ---- geometry ----------------------------------------------------------------------------------
 
+void TerminalView::setFontSize(qreal points)
+{
+    points = std::clamp(points, 6.0, 48.0);
+    if (qAbs(points - m_pointSize) < .01)
+        return;
+    m_pointSize = s_lastPointSize = points;
+    Q_EMIT fontChanged();
+    m_sizeHint->start();
+}
+
+void TerminalView::zoomBy(qreal factor)
+{
+    setFontSize(m_pointSize * factor);
+}
+
 void TerminalView::updateMetrics()
 {
     m_font.setPointSizeF(m_pointSize);
@@ -336,6 +368,20 @@ void TerminalView::paint(QPainter *p)
         else
             p->drawRect(c.adjusted(.5, .5, -.5, -.5));
     }
+    // "14 pt" in the top-right corner while the size changes.
+    if (m_sizeHint->isActive()) {
+        QFont f = m_font;
+        f.setPointSizeF(11);
+        f.setBold(true);
+        p->setFont(f);
+        const QString text = QString::number(m_pointSize, 'f', m_pointSize < 10 ? 1 : 0) + QStringLiteral(" pt");
+        const QRectF box(width() - 84, 10, 72, 26);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0x3B, 0x42, 0x52, 230));
+        p->drawRoundedRect(box, 8, 8);
+        p->setPen(QColor(0x88, 0xC0, 0xD0));
+        p->drawText(box, Qt::AlignCenter, text);
+    }
 }
 
 QString TerminalView::screenText() const
@@ -357,6 +403,14 @@ QString TerminalView::screenText() const
 
 bool TerminalView::event(QEvent *e)
 {
+    // Touchpad pinch: the font follows the fingers.
+    if (e->type() == QEvent::NativeGesture) {
+        auto *g = static_cast<QNativeGestureEvent *>(e);
+        if (g->gestureType() == Qt::ZoomNativeGesture)
+            zoomBy(1 + g->value());
+        e->accept();
+        return true;
+    }
     // The terminal gets the keys (Ctrl+C, Ctrl+W, …) before the window's shortcuts — except
     // Ctrl+Shift+… (copy / paste / tab commands), Ctrl+PgUp/PgDn / Ctrl+Tab (switch tabs) and Alt+1…9.
     if (e->type() == QEvent::ShortcutOverride) {
@@ -366,7 +420,7 @@ bool TerminalView::event(QEvent *e)
         const bool tabKeys = (m & Qt::ControlModifier)
             && (k->key() == Qt::Key_PageUp || k->key() == Qt::Key_PageDown || k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab);
         const bool altDigit = (m & Qt::AltModifier) && k->key() >= Qt::Key_1 && k->key() <= Qt::Key_9;
-        if (!ctrlShift && !tabKeys && !altDigit) {
+        if ((!ctrlShift && !tabKeys && !altDigit) || isZoomKey(k)) {
             e->accept();
             return true;
         }
@@ -377,6 +431,13 @@ bool TerminalView::event(QEvent *e)
 void TerminalView::keyPressEvent(QKeyEvent *e)
 {
     const auto m = e->modifiers();
+    if (isZoomKey(e)) {
+        if (e->key() == Qt::Key_0)
+            setFontSize(12);
+        else
+            zoomBy(e->key() == Qt::Key_Minus || e->key() == Qt::Key_Underscore ? 1 / 1.1 : 1.1);
+        return;
+    }
     if ((m & Qt::ControlModifier) && (m & Qt::ShiftModifier)) {
         if (e->key() == Qt::Key_C) { copySelection(); return; }
         if (e->key() == Qt::Key_V) { paste(); return; }
@@ -510,6 +571,12 @@ void TerminalView::copySelection()
 
 void TerminalView::wheelEvent(QWheelEvent *e)
 {
+    if (e->modifiers() & Qt::ControlModifier) {   // Ctrl+wheel: font size
+        const qreal d = e->pixelDelta().y() ? e->pixelDelta().y() / 400.0 : e->angleDelta().y() / 1200.0;
+        zoomBy(1 + d);
+        e->accept();
+        return;
+    }
     const int steps = e->pixelDelta().y() ? e->pixelDelta().y() / int(m_cellH) : e->angleDelta().y() / 40;
     if (!steps)
         return;
@@ -526,6 +593,53 @@ void TerminalView::wheelEvent(QWheelEvent *e)
         update();
     }
     e->accept();
+}
+
+// ---- drag and drop -----------------------------------------------------------------------------
+
+void TerminalView::dragEnterEvent(QDragEnterEvent *e)
+{
+    if (e->mimeData()->hasUrls() || e->mimeData()->hasText()) {
+        e->setDropAction(Qt::CopyAction);   // nothing is moved: only the path is typed
+        e->accept();
+    } else {
+        e->ignore();
+    }
+}
+
+void TerminalView::dragMoveEvent(QDragMoveEvent *e)
+{
+    e->setDropAction(Qt::CopyAction);
+    e->accept();
+}
+
+void TerminalView::dropEvent(QDropEvent *e)
+{
+    QStringList paths;
+    for (const QUrl &u : e->mimeData()->urls())
+        paths << (u.isLocalFile() ? u.toLocalFile() : u.toString());
+    if (paths.isEmpty() && e->mimeData()->hasText())
+        paths << e->mimeData()->text();
+    insertPaths(paths);
+    e->setDropAction(Qt::CopyAction);
+    e->accept();
+    forceActiveFocus();
+}
+
+void TerminalView::insertPaths(const QStringList &paths)
+{
+    QStringList quoted;
+    for (const QString &p : paths) {
+        static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_@%+=:,./~-]+$"));
+        quoted << (plain.match(p).hasMatch() ? p : QLatin1Char('\'') + QString(p).replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QLatin1Char('\''));
+    }
+    if (quoted.isEmpty())
+        return;
+    m_scrollOffset = 0;
+    vterm_keyboard_start_paste(m_vt);
+    sendText(quoted.join(QLatin1Char(' ')) + QLatin1Char(' '));
+    vterm_keyboard_end_paste(m_vt);
+    update();
 }
 
 void TerminalView::focusInEvent(QFocusEvent *e)
