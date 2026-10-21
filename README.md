@@ -121,7 +121,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (262 checks, incl. split view and terminal tabs)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (256 checks, incl. split view and terminal tabs)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
