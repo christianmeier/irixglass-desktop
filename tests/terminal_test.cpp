@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
@@ -89,19 +90,27 @@ int runBench(const QString &out)
         waitFor([&] { return t->screenText().contains(QStringLiteral("fm$")); });
         return t;
     };
-    // Runs a command and waits (polling every ms) until the marker it prints after it shows.
+    // Runs a command and waits until the marker it prints after it shows. Looks every 10 ms from a
+    // timer, so the event loop runs freely in between, as in the app.
     auto run = [&](BenchTerm *t, const QString &cmd, int ms = 60000) {
         const int n = ++seqNo;
         const QString mark = QStringLiteral("DONE%1X").arg(n + 1);
         t->sendText(cmd + QStringLiteral("; echo DONE$((%1+1))X\r").arg(n));
         QElapsedTimer e;
         e.start();
-        while (e.elapsed() < ms && !t->screenText().contains(mark))
-            QTest::qWait(1);
+        QEventLoop loop;
+        QTimer poll;
+        QObject::connect(&poll, &QTimer::timeout, &loop, [&] {
+            if (e.elapsed() > ms || t->screenText().contains(mark))
+                loop.quit();
+        });
+        poll.start(10);
+        loop.exec();
         return e.elapsed();
     };
-    auto paintAvg = [&](BenchTerm *t, const QString &name) {
-        QImage img(size, QImage::Format_ARGB32_Premultiplied);
+    auto paintAvg = [&](BenchTerm *t, const QString &name, qreal dpr = 1) {
+        QImage img(size * dpr, QImage::Format_ARGB32_Premultiplied);
+        img.setDevicePixelRatio(dpr);   // the user's screen is at 1.5x
         const int n = 200;
         QElapsedTimer e;
         e.start();
@@ -150,6 +159,7 @@ int runBench(const QString &out)
     // paint: a typical colourful screen, the worst case (colours change every cell), plain text
     run(t, QStringLiteral("clear; ls --color=always -la /usr/bin | tail -n 58"));
     std::printf("bench: paint, ls --color -la /usr/bin screen: %.0f us\n", paintAvg(t, QStringLiteral("ls")));
+    std::printf("bench: paint, the same at 1.5x: %.0f us\n", paintAvg(t, QStringLiteral("ls-1.5x"), 1.5));
     run(t, QStringLiteral("clear; for r in $(seq 0 57); do for c in $(seq 0 199); do printf '\\e[3%d;4%d%sm%x' $((c%8)) $(((c/8+r)%8)) $([ $((c%3)) = 0 ] && echo ';1') $((c%16)); done; printf '\\e[0m\\n'; done"));
     std::printf("bench: paint, every cell a different colour: %.0f us\n", paintAvg(t, QStringLiteral("grid")));
     run(t, QStringLiteral("clear; for i in $(seq 1 57); do printf '%0.s-' $(seq 1 199); echo; done"));
