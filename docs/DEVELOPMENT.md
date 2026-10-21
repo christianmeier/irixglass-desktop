@@ -235,7 +235,7 @@ A real Alacritty window can't be embedded on Wayland, so fm has its own terminal
 `src/terminal.{h,cpp}`, a `QQuickPaintedItem` (`TerminalView`, registered as `IrixFm 1.0`) that
 runs the program in a `KPtyProcess` and feeds its output to **libvterm** (the engine behind
 Neovim's `:terminal`). It paints the libvterm screen with the Alacritty look (Noto Sans Mono 12,
-Nord palette, background alpha .82, underline cursor), keeps 5000 lines of scrollback, does
+Nord palette, bold = bright colours, background alpha .8, underline cursor; all as in the user's alacritty.toml), keeps 10000 lines of scrollback, does
 selection, Ctrl+Shift+C/V, bracketed paste and mouse reporting. It accepts `ShortcutOverride` for
 every key except Ctrl+Shift+…, Ctrl+PgUp/PgDn/Tab and Alt+1…9, so Ctrl+C, Ctrl+W etc. reach the
 program while tab switching still works.

@@ -26,7 +26,7 @@ namespace
 const QColor kFg(0xD8, 0xDE, 0xE9), kBg(0x2E, 0x34, 0x40);
 const QRgb kPalette[16] = {0x3B4252, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x88C0D0, 0xE5E9F0,
                            0x4C566A, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x8FBCBB, 0xECEFF4};
-constexpr int kScrollback = 5000;
+constexpr int kScrollback = 10000;   // Alacritty: scrolling.history
 
 // Ctrl++ / Ctrl+= / Ctrl+- / Ctrl+0 change the font size, as in Alacritty.
 bool isZoomKey(const QKeyEvent *k)
@@ -371,7 +371,7 @@ void TerminalView::paint(QPainter *p)
 {
     // Nord background, slightly see-through like the user's Alacritty (opacity 0.8).
     QColor bg = kBg;
-    bg.setAlphaF(.82);
+    bg.setAlphaF(.8);   // Alacritty: window.opacity
     p->fillRect(boundingRect(), bg);
     p->setFont(m_font);
     QFont bold = m_font;
