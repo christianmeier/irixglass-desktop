@@ -1500,6 +1500,9 @@ Window {
         cellWidth: 168 * u * win.iconScale / .92
         cellHeight: 168 * u * win.iconScale / .92
         model: win.searchActive ? resultsModel : folder
+        // Delegates scrolled out are kept and refilled with the next items instead of being destroyed
+        // and created again (the delegates hold no state of their own that outlives an item).
+        reuseItems: true
         interactive: false
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
@@ -1716,6 +1719,7 @@ Window {
                 onDropped: d => { cellSpring.stop(); win.dropFiles(d.urls, cell.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
             Timer { id: cellSpring; interval: win.springDelay; onTriggered: win.go(cell.filePath) }
+            GridView.onPooled: cellSpring.stop()
         }
     }
 
@@ -1732,6 +1736,7 @@ Window {
         height: parent.height - win.bottomH - y
         clip: true
         model: win.searchActive ? resultsModel : folder
+        reuseItems: true   // as in the icon view
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
         headerPositioning: ListView.OverlayHeader
@@ -1882,8 +1887,12 @@ Window {
                 onDropped: d => { rowSpring.stop(); win.dropFiles(d.urls, row.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
             Timer { id: rowSpring; interval: win.springDelay; onTriggered: win.go(row.filePath) }
-            // Folder sizes are counted in the background (View ▸ Calculate All Sizes).
-            Component.onCompleted: if (fileIsDir && win.calcSizes && win.folderSizes[filePath] === undefined) Fm.folderSize(filePath)
+            ListView.onPooled: rowSpring.stop()
+            // Folder sizes are counted in the background (View ▸ Calculate All Sizes), when a row is
+            // created or reused for another item.
+            function askSize() { if (fileIsDir && win.calcSizes && win.folderSizes[filePath] === undefined) Fm.folderSize(filePath) }
+            Component.onCompleted: askSize()
+            ListView.onReused: askSize()
         }
     }
 
