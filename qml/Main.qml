@@ -607,6 +607,20 @@ Window {
         return true
     }
     function placeRemove(si, ii) { const p = copyPlaces(); p[si].items.splice(ii, 1); setPlaces(p) }
+    // A sidebar entry's standard icon (theme names, all with a -symbolic variant in WhiteSur / Breeze).
+    function standardPlaceIcon(item) {
+        const byAction = { trash: "user-trash", network: "network-workgroup", overview: "view-dual", find: "system-search" }
+        if (item.action) return (byAction[item.action] || "folder") + "-symbolic"
+        if (item.path === "~") return "user-home-symbolic"
+        if (item.path === "/") return "drive-harddisk-symbolic"
+        if (item.path === "/usr/share/applications") return "view-grid-symbolic"
+        const byName = { desktop: "user-desktop", documents: "folder-documents", downloads: "folder-download",
+                         applications: "applications-all", music: "folder-music", pictures: "folder-pictures",
+                         videos: "folder-videos", public: "folder-publicshare", templates: "folder-templates",
+                         code: "folder-development", projects: "folder-development", src: "folder-development" }
+        return (byName[(item.path || "").split("/").pop().toLowerCase()] || "folder") + "-symbolic"
+    }
+    function placeSetIcon(si, ii, icon) { const p = copyPlaces(); if (icon) p[si].items[ii].icon = icon; else delete p[si].items[ii].icon; setPlaces(p) }
     function placeRename(si, ii, label) { const p = copyPlaces(); p[si].items[ii].label = label.trim(); setPlaces(p) }
     function placeMove(si, ii, delta) {
         const p = copyPlaces(), items = p[si].items, j = ii + delta
@@ -939,10 +953,31 @@ Window {
                     color: row.tagRow ? row.modelData.tag.color : "transparent"
                     border.color: Qt.rgba(1, 1, 1, .35); border.width: 1
                 }
-                Rectangle {
-                    visible: row.item
-                    x: 22 * win.u; y: 9 * win.tu; width: 15 * win.tu; height: 13 * win.tu; radius: 3 * win.tu
-                    color: "transparent"; border.color: row.modelData.color || "transparent"; border.width: 1.6 * win.u
+                // The entry's icon: the section-coloured outline, or an emoji / app icon picked with Icon….
+                readonly property string glyph: row.item && !row.vol ? row.modelData.item.icon || "" : ""
+                K.Icon {   // the standard icon: the theme's symbolic one, in the section's colour (as in Finder)
+                    objectName: "placeStdIcon"
+                    visible: row.item && !row.glyph
+                    x: 21 * win.u; y: 6.5 * win.tu; width: 17 * win.tu; height: width
+                    source: visible ? (row.vol ? "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
+                    fallback: "folder-symbolic"
+                    isMask: true; color: row.modelData.color || "white"
+                    roundToIconSize: false
+                }
+                Text {
+                    objectName: "placeEmoji"
+                    visible: row.glyph.startsWith("emoji:")
+                    x: 20 * win.u; width: 19 * win.tu; y: 4 * win.tu
+                    horizontalAlignment: Text.AlignHCenter
+                    text: visible ? row.glyph.slice(6) : ""
+                    font.family: "Noto Color Emoji"; font.pixelSize: 15 * win.tu
+                }
+                K.Icon {
+                    objectName: "placeAppIcon"
+                    visible: !!row.glyph && !row.glyph.startsWith("emoji:")
+                    x: 21 * win.u; y: 6 * win.tu; width: 18 * win.tu; height: width
+                    source: visible ? row.glyph : ""
+                    roundToIconSize: false
                 }
                 Text {
                     visible: !(row.item && win.renamingPlace === row.key) && !(row.tagRow && win.renamingTag === row.modelData.tag.name)
@@ -2161,6 +2196,15 @@ Window {
     }
 
     // ---- menus -----------------------------------------------------------------
+    // Icon… on a sidebar entry: an emoji or an app icon instead of the outline (saved with the entry).
+    IconPicker {
+        id: iconPicker
+        property int si: 0
+        property int ii: 0
+        x: 200 * win.u; y: Math.max(40 * win.u, Math.min(win.height - height - 40 * win.u, 140 * win.u))
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        onPicked: icon => win.placeSetIcon(si, ii, icon)
+    }
     // Sidebar menus: `si`/`ii` say which section/entry was right-clicked (ii = -1 for a header).
     P.Menu {
         id: placeMenu
@@ -2170,6 +2214,14 @@ Window {
         P.MenuItem { text: "Open in New Tab"; visible: !!(placeMenu.entry && placeMenu.entry.path); onTriggered: win.newTab(win.expand(placeMenu.entry.path), true) }
         P.MenuItem { text: "Open in New Window"; visible: !!(placeMenu.entry && placeMenu.entry.path); onTriggered: Fm.newWindow(win.expand(placeMenu.entry.path)) }
         P.MenuItem { text: "Rename…"; onTriggered: win.renamingPlace = placeMenu.si + "/" + placeMenu.ii }
+        P.MenuItem {
+            text: "Icon…"
+            onTriggered: {
+                iconPicker.si = placeMenu.si; iconPicker.ii = placeMenu.ii
+                iconPicker.current = placeMenu.entry && placeMenu.entry.icon || ""
+                iconPicker.open()
+            }
+        }
         P.MenuSeparator {}
         P.MenuItem { text: "Move Up"; enabled: placeMenu.ii > 0; onTriggered: win.placeMove(placeMenu.si, placeMenu.ii, -1) }
         P.MenuItem { text: "Move Down"; enabled: !!win.places[placeMenu.si] && placeMenu.ii < win.places[placeMenu.si].items.length - 1; onTriggered: win.placeMove(placeMenu.si, placeMenu.ii, 1) }
@@ -2181,7 +2233,7 @@ Window {
                 text: "Move to " + (win.places[index] ? win.places[index].title : "")
                 onTriggered: win.placeMoveTo(placeMenu.si, placeMenu.ii, index)
             }
-            onObjectAdded: (i, o) => placeMenu.insertItem(5 + i, o)
+            onObjectAdded: (i, o) => placeMenu.insertItem(7 + i, o)   // after Move Down
             onObjectRemoved: (i, o) => placeMenu.removeItem(o)
         }
         P.MenuSeparator {}

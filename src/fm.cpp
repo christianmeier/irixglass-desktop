@@ -54,6 +54,7 @@
 
 #include <KDesktopFile>
 #include <KApplicationTrader>
+#include <QSet>
 #include <KFileItem>
 #include <KIO/CopyJob>
 #include <KIO/DirectorySizeJob>
@@ -263,6 +264,21 @@ QVariantList Fm::appsFor(const QString &path) const
         out << QVariantMap{{QStringLiteral("id"), app->storageId()}, {QStringLiteral("name"), app->name()}, {QStringLiteral("icon"), app->icon()}};
         if (out.size() >= 12)
             break;
+    }
+    return out;
+}
+
+QVariantList Fm::applications() const
+{
+    QList<KService::Ptr> apps = KApplicationTrader::query([](const KService::Ptr &s) { return !s->noDisplay() && !s->icon().isEmpty(); });
+    std::sort(apps.begin(), apps.end(), [](const KService::Ptr &a, const KService::Ptr &b) { return a->name().localeAwareCompare(b->name()) < 0; });
+    QVariantList out;
+    QSet<QString> seen;
+    for (const KService::Ptr &app : apps) {
+        if (seen.contains(app->icon()))
+            continue;
+        seen.insert(app->icon());
+        out << QVariantMap{{QStringLiteral("name"), app->name()}, {QStringLiteral("icon"), app->icon()}};
     }
     return out;
 }

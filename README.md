@@ -66,10 +66,16 @@ manager icon; the IRIX icons are only inside the window.
   of the split view. Shift+F4 opens Neovim on the selected file. It looks like the Alacritty setup
   (Noto Sans Mono 12, Nord colours, see-through); Ctrl+Shift+C / V copy and paste, the tab closes
   when the program exits. "Open Alacritty Window" in the >_ menu starts a real Alacritty there.
-  Pinch on the touchpad (or Ctrl+wheel, Ctrl++ / Ctrl+- / Ctrl+0) to change the font size live;
-  new terminals keep the last size. Drop files or folders onto a terminal to type their paths
-  (shell-quoted; nothing is moved).
+  It runs your login shell (fish), so tmux inside it gets fish too.
+  Pinch on the touchpad, roll the bottom thumbwheel, or Ctrl+wheel / Ctrl++ / Ctrl+- / Ctrl+0 to
+  change the text size live (saved). The button next to the thumbwheel picks the size at which the
+  output has no wrapped lines (at most 12 pt). Drop files or folders onto a terminal to type their
+  paths (shell-quoted; nothing is moved). Changing the folder (path bar, ‹ ↑) cds the shell there
+  when it's at its prompt.
 - The view buttons in the toolbar always show the active side's view (icons / list / previews).
+- Sidebar icons: the theme's own symbolic icons (home, desktop, documents, downloads, applications,
+  trash, network…) in the section's colour, like Finder. Right-click an entry ▸ **Icon…** to give it
+  an emoji or any installed app's icon instead (searchable); **Standard Icon** goes back.
   Each side has its own view (icons / list / previews), keyboard, Quick Look and preview pane —
   click into a side (blue line) and the view buttons, Ctrl+1/2/3, arrows, Space, Enter and Delete
   act on it. Each side has its own tabs: the tab keys (Ctrl+T, Ctrl+W, Ctrl+Tab, Alt+1…9, …) and sidebar
@@ -115,7 +121,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (241 checks, incl. split view and terminal tabs)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (262 checks, incl. split view and terminal tabs)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```

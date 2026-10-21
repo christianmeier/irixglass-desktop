@@ -373,3 +373,31 @@ See also [FINDER-FEATURES.md](FINDER-FEATURES.md) for the Finder feature plan.
   instead of Dolphin.
 - Quick Look (Space to preview), tabs, column view, network browsing.
 - Layout B of the mockups (classic IRIX fm layout) as an alternative view.
+
+### Sidebar icons
+
+An entry's icon is `item.icon` in the places JSON: `"emoji:🏠"` (drawn with Noto Color Emoji) or an
+icon-theme name (an app's icon, from `Fm::applications()`). Without one, `standardPlaceIcon(item)`
+picks a `-symbolic` theme icon from the path or action (`~` → user-home, `Downloads` →
+folder-download, trash, network, …; `folder-symbolic` otherwise), drawn with `isMask` in the
+section's colour. `IconPicker.qml` (Emoji / App Icons, search, Standard Icon) sets it through
+`placeSetIcon(si, ii, icon)`.
+
+### Terminal details
+
+- The shell is the **login shell** from the user database (`getpwuid`), not `$SHELL`: fm may be
+  started from another shell (a tool, a script) whose `$SHELL` differs. It's also exported as
+  `SHELL`, so tmux started inside uses it. `IRIXFM_SHELL` overrides it (the tests use bash).
+- The thumbwheel sizes the active terminal's text while one shows (6–30 pt); its button calls
+  `fitWidth()`: the largest size ≤ 12 pt at which the longest visible logical line (rows joined by
+  libvterm's `continuation` flag) fits, animated (`QVariantAnimation`) while libvterm re-flows
+  (`vterm_screen_enable_reflow`). `termFontSize` is saved for new terminals.
+- `go()` on a side with a terminal calls `changeDirectory(path)`: only when the shell itself is the
+  pty's foreground process group (`tcgetpgrp`), so nvim / tmux / a running command are left alone.
+- **Drops and pinches are taken at the window** (`eventFilter` on the `QQuickWindow`), before Qt
+  Quick's own delivery. Before that, a drop on a terminal tab could land on the folder `DropArea`
+  behind it and **move the file into the tab's folder**; those `DropArea`s are disabled while a
+  terminal shows, and the terminal answers drops with `CopyAction`.
+  `QT_LOGGING_RULES="irixfm.terminal.debug=true"` logs drags and pinches to the journal.
+- Offscreen Qt (the tests) has no real `QDrag`: `exec()` returns at once, so drops are tested with
+  synthetic `QDragEnterEvent` / `QDragMoveEvent` / `QDropEvent` sent to the window.

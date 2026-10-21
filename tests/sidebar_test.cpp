@@ -16,6 +16,7 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QTest>
+#include <functional>
 #include <QTimer>
 #include <cstdio>
 
@@ -125,6 +126,51 @@ int main(int argc, char *argv[])
         check(labels(win, 1).first().endsWith(QStringLiteral("/Music")), QStringLiteral("add to Indigo Magic at the top"), labels(win, 1).join(", "));
         call(win, "placeRename", {1, 0, QStringLiteral("Tunes")});
         check(labels(win, 1).first() == QStringLiteral("Tunes"), QStringLiteral("rename an entry"), labels(win, 1).join(", "));
+        // icons: an emoji or an app icon instead of the outline, saved with the entry
+        {
+            // the sidebar rows are visual children of the list's content item
+            auto *rows = list->property("contentItem").value<QQuickItem *>();
+            std::function<QQuickItem *(QQuickItem *, const QString &)> walk = [&](QQuickItem *at, const QString &name) -> QQuickItem * {
+                for (QQuickItem *c : at->childItems()) {
+                    if (c->objectName() == name && c->isVisible())
+                        return c;
+                    if (QQuickItem *hit = walk(c, name))
+                        return hit;
+                }
+                return nullptr;
+            };
+            auto findVisible = [&](const char *name) { return walk(rows, QString::fromLatin1(name)); };
+            call(win, "placeSetIcon", {1, 0, QStringLiteral("emoji:🎵")});
+            QTest::qWait(100);
+            QQuickItem *emoji = findVisible("placeEmoji");
+            check(emoji && emoji->property("text").toString() == QStringLiteral("🎵") && win->property("placesJson").toString().contains(QStringLiteral("emoji:🎵")),
+                  QStringLiteral("an entry can show an emoji (saved)"));
+            call(win, "placeSetIcon", {1, 0, QStringLiteral("firefox")});
+            QTest::qWait(100);
+            QQuickItem *appIcon = findVisible("placeAppIcon");
+            check(appIcon && appIcon->property("source").toString() == QStringLiteral("firefox") && !findVisible("placeEmoji"),
+                  QStringLiteral("…or an app's icon"));
+            auto *picker = win->findChild<QObject *>(QStringLiteral("iconPicker"));
+            QMetaObject::invokeMethod(picker, "open");
+            QTest::qWait(300);
+            auto *emojiGrid = win->findChild<QQuickItem *>(QStringLiteral("emojiGrid"));
+            check(emojiGrid && emojiGrid->property("count").toInt() > 50, QStringLiteral("Icon… offers emojis"));
+            picker->setProperty("page", 1);
+            QTest::qWait(300);
+            auto *appGrid = win->findChild<QQuickItem *>(QStringLiteral("appGrid"));
+            check(appGrid && appGrid->property("count").toInt() > 5, QStringLiteral("…and the installed apps' icons"),
+                  appGrid ? appGrid->property("count").toString() : QStringLiteral("no grid"));
+            picker->setProperty("si", 1);
+            picker->setProperty("ii", 0);
+            QMetaObject::invokeMethod(picker, "picked", Q_ARG(QString, QString()));
+            QMetaObject::invokeMethod(picker, "close");
+            QTest::qWait(100);
+            check(!findVisible("placeAppIcon") && !win->property("placesJson").toString().contains(QStringLiteral("firefox")),
+                  QStringLiteral("Standard Icon brings the standard icon back"));
+            QQuickItem *std = findVisible("placeStdIcon");   // the first row: the home folder
+            check(std && std->property("source").toString() == QStringLiteral("user-home-symbolic"),
+                  QStringLiteral("standard icons are the theme's (home, desktop, downloads…)"), std ? std->property("source").toString() : QString());
+        }
         call(win, "placeMove", {1, 0, 1});
         check(labels(win, 1).at(1) == QStringLiteral("Tunes"), QStringLiteral("move an entry down"), labels(win, 1).join(", "));
         call(win, "placeMoveTo", {1, 1, 2});
