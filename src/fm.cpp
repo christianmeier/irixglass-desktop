@@ -54,6 +54,7 @@
 
 #include <KDesktopFile>
 #include <KApplicationTrader>
+#include <QQuickWebEngineProfile>
 #include <QSet>
 #include <KFileItem>
 #include <KIO/CopyJob>
@@ -879,6 +880,17 @@ void Fm::openTerminal(const QString &dir)
 void Fm::openInFirefox(const QString &url)
 {
     QProcess::startDetached(QStringLiteral("firefox"), url.isEmpty() ? QStringList() : QStringList{url});
+}
+
+QObject *Fm::webProfile()
+{
+    if (!m_webProfile) {   // cookies, logins and cache kept between runs
+        auto *p = new QQuickWebEngineProfile(QStringLiteral("irixfm"), this);
+        p->setHttpCacheType(QQuickWebEngineProfile::DiskHttpCache);
+        p->setPersistentCookiesPolicy(QQuickWebEngineProfile::AllowPersistentCookies);
+        m_webProfile = p;
+    }
+    return m_webProfile;
 }
 
 void Fm::newWindow(const QString &dir)

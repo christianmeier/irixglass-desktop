@@ -133,12 +133,9 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
             id: view
             objectName: "webView"
             anchors.fill: parent
-            profile: WebEngineProfile {   // cookies, logins and cache kept between runs
-                storageName: "irixfm"
-                offTheRecord: false
-                httpCacheType: WebEngineProfile.DiskHttpCache
-                persistentCookiesPolicy: WebEngineProfile.AllowPersistentCookies
-            }
+            // One profile for all web tabs (Fm.webProfile): two profile objects on the same storage
+            // lock each other out, and the second tab couldn't load anything.
+            profile: Fm.webProfile()
             zoomFactor: b.fontPointSize / 12
             onNewWindowRequested: request => { url = request.requestedUrl }   // target=_blank: same tab
             settings.pluginsEnabled: true

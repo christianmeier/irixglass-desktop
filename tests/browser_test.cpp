@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
     QTemporaryDir tmp;
     const QString base = QDir(tmp.path()).canonicalPath();
-    write(base + QStringLiteral("/page.html"), "<html><head><title>Hello Page</title></head><body><a id=l href='two.html'>next</a></body></html>");
+    write(base + QStringLiteral("/page.html"), "<html><head><title>Hello Page</title><style>body{margin:0} a{display:block;width:200px;height:40px}</style></head><body><a id=l href='two.html'>next</a></body></html>");
     write(base + QStringLiteral("/two.html"), "<html><head><title>Second Page</title></head><body>two</body></html>");
 
     const QString assets = QStringLiteral(IRIXFM_SOURCE_DIR);
@@ -82,6 +82,31 @@ int main(int argc, char *argv[])
             QMetaObject::invokeMethod(win, "tabTitle", Q_RETURN_ARG(QVariant, title), Q_ARG(QVariant, 1));
             check(title.toString() == QStringLiteral("Hello Page"), QStringLiteral("the tab is named after the page"), title.toString());
 
+            // real input: click the address field, type a path, Enter
+            {
+                auto *addr = b->findChild<QQuickItem *>(QStringLiteral("browserAddress"));
+                const QPoint ap = addr->mapToScene(QPointF(addr->width() / 2, addr->height() / 2)).toPoint();
+                QTest::mouseClick(window, Qt::LeftButton, {}, ap);
+                QTest::qWait(200);
+                check(addr->hasActiveFocus(), QStringLiteral("clicking the address field gives it the keyboard"));
+                QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+                for (const QChar c : base + QStringLiteral("/two.html"))
+                    QTest::keyClick(window, c.toLatin1());
+                QTest::keyClick(window, Qt::Key_Return);
+                check(waitFor([&] { return b->property("title").toString() == QStringLiteral("Second Page"); }),
+                      QStringLiteral("typing an address and Enter goes there"), b->property("title").toString() + " | field: " + addr->property("text").toString());
+                QMetaObject::invokeMethod(win, "goBack");
+                waitFor([&] { return b->property("title").toString() == QStringLiteral("Hello Page"); });
+                // click the link in the page
+                auto *view = b->findChild<QQuickItem *>(QStringLiteral("webView"));
+                QTest::qWait(500);
+                const QPoint lp = view->mapToScene(QPointF(20, 15)).toPoint();
+                QTest::mouseClick(window, Qt::LeftButton, {}, lp);
+                check(waitFor([&] { return b->property("title").toString() == QStringLiteral("Second Page"); }, 5000),
+                      QStringLiteral("clicking a link in the page follows it"), b->property("title").toString());
+                QMetaObject::invokeMethod(win, "goBack");
+                waitFor([&] { return b->property("title").toString() == QStringLiteral("Hello Page"); });
+            }
             // the address field: a path goes to that file
             QMetaObject::invokeMethod(b, "go", Q_ARG(QVariant, base + QStringLiteral("/two.html")));
             check(waitFor([&] { return b->property("title").toString() == QStringLiteral("Second Page"); }),
@@ -104,6 +129,44 @@ int main(int argc, char *argv[])
                   QStringLiteral("Ctrl+Shift+W closes the web tab"));
         }
 
+        // several web tabs at once all load (they share one profile)
+        {
+            QStringList titles;
+            for (int i = 0; i < 3; ++i) {
+                win->setProperty("selection", QVariantMap{{base + (i % 2 ? QStringLiteral("/two.html") : QStringLiteral("/page.html")), true}});
+                QTest::keyClick(window, Qt::Key_F7);
+                QTest::qWait(200);
+                QQuickItem *w = active();
+                waitFor([&] { return w && !w->property("title").toString().startsWith(QStringLiteral("file:")) && !w->property("loading").toBool(); });
+                titles << (w ? w->property("title").toString() : QString());
+            }
+            check(titles == QStringList{QStringLiteral("Hello Page"), QStringLiteral("Second Page"), QStringLiteral("Hello Page")} && tabs().size() == 4,
+                  QStringLiteral("three web tabs open at once all load"), titles.join(", "));
+            // …also real sites, which use the profile's storage (cookies, quota database): with a
+            // profile per tab the second one found the storage locked. Skipped when offline.
+            if (qEnvironmentVariableIsSet("IRIXFM_TEST_NETWORK")) {
+                QStringList web;
+                for (int i = 1; i <= 3; ++i) {
+                    QMetaObject::invokeMethod(active(), "go", Q_ARG(QVariant, QStringLiteral("https://example.com/?tab=%1").arg(i)));
+                    QQuickItem *w = active();
+                    waitFor([&] { return w->property("title").toString() == QStringLiteral("Example Domain"); }, 20000);
+                    web << w->property("title").toString();
+                    if (i < 3) {
+                        QTest::keyClick(window, Qt::Key_F7);
+                        QTest::qWait(300);
+                    }
+                }
+                check(web.count(QStringLiteral("Example Domain")) == 3, QStringLiteral("three web tabs load real sites"), web.join(", "));
+                for (int i = 0; i < 2; ++i) {
+                    QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+                    QTest::qWait(150);
+                }
+            }
+            for (int i = 0; i < 3; ++i) {
+                QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+                QTest::qWait(150);
+            }
+        }
         // the split side
         QMetaObject::invokeMethod(win, "toggleSplit");
         QTest::qWait(300);

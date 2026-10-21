@@ -59,6 +59,7 @@ public:
     Q_INVOKABLE void openInDolphin(const QString &path);
     Q_INVOKABLE void openTerminal(const QString &dir);
     Q_INVOKABLE void openInFirefox(const QString &url);
+    Q_INVOKABLE QObject *webProfile();   // the web tabs' shared, persistent profile (created on first use)
     Q_INVOKABLE void newWindow(const QString &dir);
     Q_INVOKABLE void overview();
 
@@ -159,6 +160,7 @@ private:
     void saveSizeCacheSoon();
     static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
+    QObject *m_webProfile = nullptr;
     bool m_restoreSession = false;
     QString m_assetDir;
     QPointer<KWindowShadow> m_shadow;
