@@ -145,6 +145,23 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return exists(QStringLiteral("Right/ext.txt")); }) && exists(QStringLiteral("ext.txt")),
               QStringLiteral("a drag from another app copies"));
 
+        // drag the divider: the sides resize, and the share is kept; double-click centres it
+        {
+            auto *divider = win->findChild<QQuickItem *>(QStringLiteral("splitDivider"));
+            const double paneW = pane->width();
+            const QPoint from = divider->mapToScene(QPointF(divider->width() / 2, divider->height() / 2)).toPoint();
+            QTest::mousePress(window, Qt::LeftButton, {}, from);
+            for (int dx = 10; dx <= 120; dx += 10)
+                QTest::mouseMove(window, from + QPoint(dx, 0), 10);
+            QTest::mouseRelease(window, Qt::LeftButton, {}, from + QPoint(120, 0));
+            QTest::qWait(250);
+            check(pane->width() < paneW - 60 && win->property("splitRatio").toDouble() > .55, QStringLiteral("dragging the divider resizes the sides"),
+                  QString::number(pane->width()) + " ratio " + QString::number(win->property("splitRatio").toDouble()));
+            const QPoint now = divider->mapToScene(QPointF(divider->width() / 2, divider->height() / 2)).toPoint();
+            QTest::mouseDClick(window, Qt::LeftButton, {}, now);
+            QTest::qWait(300);
+            check(qAbs(win->property("splitRatio").toDouble() - .5) < .001, QStringLiteral("double-clicking the divider centres it"));
+        }
         auto *button = win->findChild<QQuickItem *>(QStringLiteral("splitButton"));
         QTest::mouseClick(window, Qt::LeftButton, {}, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
         QTest::qWait(400);

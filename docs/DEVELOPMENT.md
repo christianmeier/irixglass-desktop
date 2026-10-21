@@ -207,7 +207,9 @@ drag and drop); the main side gives up `splitW` of its width. `activePane` says 
 copy / move from (`sendToOtherSide` → `Fm::copyOrMove`). Drags that start inside fm set
 `internalDrag`; drops then go through `Fm::dropInternal`, which moves on the same disk and copies
 across disks or when Ctrl is held (`QGuiApplication::queryKeyboardModifiers`). Drags from other apps
-keep their proposed action. A narrow list (`compactList`) hides its Date column.
+keep their proposed action. A narrow list (`compactList`) hides its Date column. The divider
+(`splitDivider`) sets `splitRatio` (the main side's share, 0.22–0.78, saved); `splitW`'s animation
+is off while dragging (`draggingSplit`) so the sides follow the pointer.
 
 ### Sidebar sections
 

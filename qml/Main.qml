@@ -67,9 +67,11 @@ Window {
     property int activePane: 0                  // 0 = the main side, 1 = the split side (F5 / F6 go to the other)
     property bool internalDrag: false           // a drag that started inside fm (move by default)
     readonly property real contentAreaW: width - (240 * u - contentShift) - previewW - 10 * u
-    property real splitW: splitView ? contentAreaW / 2 : 0
+    property real splitRatio: .5                // the main side's share; drag the divider to change it
+    property bool draggingSplit: false
+    property real splitW: splitView ? contentAreaW * (1 - splitRatio) : 0
     readonly property bool compactList: list.width < 640 * u   // narrow list (split view): no Date column
-    Behavior on splitW { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+    Behavior on splitW { enabled: !win.draggingSplit; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     property var closedTabs: []                 // for Reopen Closed Tab
     property real pendingScrollY: -1
     property bool waitForLoad: false            // the folder model still shows the previous folder
@@ -146,6 +148,7 @@ Window {
         property alias folderTabs: win.folderTabs
         property alias splitView: win.splitView
         property alias splitDir: win.splitDir
+        property alias splitRatio: win.splitRatio
         property alias width: win.width
         property alias height: win.height
     }
@@ -1688,6 +1691,29 @@ Window {
         onDragStarted: on => win.internalDrag = on
         onOpenFile: p => Fm.open(p)
         onMenuRequested: splitMenu.open()
+    }
+
+    // Divider between the sides: drag to resize (each side keeps at least ~22 %), double-click to centre.
+    Item {
+        id: splitDivider
+        objectName: "splitDivider"
+        visible: splitPane.visible
+        x: splitPane.x - 13 * u; y: splitPane.y; width: 12 * u; height: splitPane.height
+        Rectangle {   // a short grip, brighter while hovered or dragged
+            anchors.centerIn: parent; width: 3 * win.u; height: Math.min(parent.height * .25, 60 * win.u); radius: width / 2
+            color: Qt.rgba(1, 1, 1, dividerDrag.active ? .7 : dividerHover.hovered ? .45 : .18)
+        }
+        HoverHandler { id: dividerHover; cursorShape: Qt.SplitHCursor }
+        property real startRatio: .5
+        DragHandler {
+            id: dividerDrag
+            target: null
+            yAxis.enabled: false
+            cursorShape: Qt.SplitHCursor
+            onActiveChanged: { win.draggingSplit = active; if (active) splitDivider.startRatio = win.splitRatio }
+            onTranslationChanged: win.splitRatio = Math.max(.22, Math.min(.78, splitDivider.startRatio + translation.x / win.contentAreaW))
+        }
+        TapHandler { onDoubleTapped: win.splitRatio = .5 }
     }
 
     // ---- preview pane (Ctrl+Shift+P) ----------------------------------------------------

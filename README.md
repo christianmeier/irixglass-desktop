@@ -59,6 +59,7 @@ manager icon; the IRIX icons are only inside the window.
 - Split view (F3, or the split button next to the view buttons): a second list with its own folder next to the main view. Drag files between the
   sides to move them (Ctrl while dropping copies; another disk copies, like Finder), drop onto a
   folder to put them inside, or press F5 / F6 to copy / move the active side's selection across.
+  Drag the divider between the sides to resize them (remembered); double-click it to centre it.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
   to the standard size.
 - Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
@@ -91,7 +92,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (182 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (184 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
