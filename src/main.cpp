@@ -12,6 +12,9 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QQuickItem>
+#include <cstdio>
 
 int main(int argc, char *argv[])
 {
@@ -47,9 +50,51 @@ int main(int argc, char *argv[])
     Fm fm(start, assets, nullptr, app.arguments().size() < 2);
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Fm"), &fm);
+    QElapsedTimer clock;
+    clock.start();
     engine.load(QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
     if (engine.rootObjects().isEmpty())
         return 1;
+    // IRIXFM_BENCH=1: print how long start-up takes (QML loaded, first frame, the folder's items in
+    // the view), then scroll the view to the end and back frame by frame, and quit. For measuring
+    // optimisations: run it a few times, off-screen (QT_QPA_PLATFORM=offscreen) for steady numbers.
+    if (qEnvironmentVariableIsSet("IRIXFM_BENCH")) {
+        auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+        const qint64 loaded = clock.elapsed();
+        auto *firstFrame = new qint64(-1);
+        QObject::connect(w, &QQuickWindow::frameSwapped, w, [&clock, firstFrame] { if (*firstFrame < 0) *firstFrame = clock.elapsed(); });
+        auto *poll = new QTimer(&app);
+        auto *lastCount = new int(-1);
+        auto *stableSince = new qint64(0);
+        poll->setInterval(5);
+        QObject::connect(poll, &QTimer::timeout, &app, [=, &engine, &clock, &app] {
+            QObject *root = engine.rootObjects().constFirst();
+            const bool list = root->property("viewMode").toInt() == 1;
+            auto *view = root->findChild<QQuickItem *>(list ? QStringLiteral("list") : QStringLiteral("grid"));
+            const int count = view ? view->property("count").toInt() : 0;
+            if (count != *lastCount) {
+                *lastCount = count;
+                *stableSince = clock.elapsed();
+            }
+            if (*firstFrame < 0 || clock.elapsed() - *stableSince < 400)
+                return;
+            poll->stop();
+            const qint64 ready = *stableSince;
+            // scroll: to the end and back in 60 steps each, rendering every step
+            QElapsedTimer s;
+            s.start();
+            const double end = std::max(0.0, view->property("contentHeight").toDouble() - view->height());
+            for (int i = 0; i <= 120; ++i) {
+                const double f = i <= 60 ? i / 60.0 : (120 - i) / 60.0;
+                view->setProperty("contentY", view->property("originY").toDouble() + end * f);
+                w->grabWindow();   // renders the frame
+            }
+            std::fprintf(stderr, "bench: items=%d qml-loaded=%lldms first-frame=%lldms items-ready=%lldms scroll-121-frames=%lldms\n",
+                         count, loaded, *firstFrame, ready, s.elapsed());
+            app.quit();
+        });
+        poll->start();
+    }
     // IRIXFM_SNAPSHOT=<file.png>: save the rendered window and quit (for checking the look).
     const QString snapshot = qEnvironmentVariable("IRIXFM_SNAPSHOT");
     if (!snapshot.isEmpty()) {
