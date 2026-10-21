@@ -59,8 +59,12 @@ int main(int argc, char *argv[])
     // IRIXFM_BENCH=1: print how long start-up takes (QML loaded, first frame, the folder's items in
     // the view), then scroll the view to the end and back frame by frame, and quit. For measuring
     // optimisations: run it a few times, off-screen (QT_QPA_PLATFORM=offscreen) for steady numbers.
+    // IRIXFM_BENCH=split opens the split view on the same folder and scrolls its side instead.
     if (qEnvironmentVariableIsSet("IRIXFM_BENCH")) {
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+        const bool split = qEnvironmentVariable("IRIXFM_BENCH") == QLatin1String("split");
+        if (split)
+            QMetaObject::invokeMethod(engine.rootObjects().constFirst(), "toggleSplit");
         const qint64 loaded = clock.elapsed();
         auto *firstFrame = new qint64(-1);
         QObject::connect(w, &QQuickWindow::frameSwapped, w, [&clock, firstFrame] { if (*firstFrame < 0) *firstFrame = clock.elapsed(); });
@@ -70,8 +74,9 @@ int main(int argc, char *argv[])
         poll->setInterval(5);
         QObject::connect(poll, &QTimer::timeout, &app, [=, &engine, &clock, &app] {
             QObject *root = engine.rootObjects().constFirst();
-            const bool list = root->property("viewMode").toInt() == 1;
-            auto *view = root->findChild<QQuickItem *>(list ? QStringLiteral("list") : QStringLiteral("grid"));
+            const bool list = root->property(split ? "splitViewMode" : "viewMode").toInt() == 1;
+            auto *view = root->findChild<QQuickItem *>(split ? (list ? QStringLiteral("splitList") : QStringLiteral("splitGrid"))
+                                                             : (list ? QStringLiteral("list") : QStringLiteral("grid")));
             const int count = view ? view->property("count").toInt() : 0;
             if (count != *lastCount) {
                 *lastCount = count;
