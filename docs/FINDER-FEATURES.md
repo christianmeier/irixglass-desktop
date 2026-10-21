@@ -21,6 +21,8 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Open folder in new tab/window (⌘-double-click) | ✅ opening a folder gives it a tab; middle-click = background tab; Ctrl+double-click = same tab | | |
 | Spring-loaded folders (hover while dragging opens) | ✅ icons, list rows and sidebar (0.9 s) | | DropArea + timer |
 | New window opens at… (Settings) | ⬜ | 3 | settings window |
+| (not in Finder) Split view, F3 / F5 / F6 | ✅ two sides, each with its own tabs, view and icon size | | `SplitPane.qml` |
+| (not in Finder) Terminal / Neovim tabs, F4 / Shift+F4 | ✅ on either side, Alacritty look | | libvterm + KPty, `src/terminal.cpp` |
 
 ## Sidebar
 
