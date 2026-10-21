@@ -177,4 +177,17 @@ private:
     class QFileSystemWatcher *m_panelWatcher = nullptr;
     QAtomicInt m_searchGen;     // bumped to cancel the running search
     QHash<QString, QStringList> m_tagIndex;   // path -> tags, for files fm has tagged
+    // kind() and desktopInfo() are asked for every item a view creates (again on every scroll), and
+    // kind() may have to read the file. Cached by path, valid while the file's ctime is the same
+    // (ctime changes on any write, chmod or rename onto the path).
+    struct KindEntry {
+        qint64 ctime = 0;
+        QString kind;
+    };
+    struct DesktopEntry {
+        qint64 ctime = 0;
+        QVariantMap info;
+    };
+    mutable QHash<QString, KindEntry> m_kindCache;
+    mutable QHash<QString, DesktopEntry> m_desktopCache;
 };

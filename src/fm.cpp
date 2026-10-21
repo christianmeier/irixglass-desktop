@@ -772,30 +772,65 @@ void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow)
     m_shadow->create();
 }
 
+namespace
+{
+constexpr int kMaxKindCache = 50000;   // entries; the caches are simply dropped when they grow past this
+
+// ms; -1 when the file is gone (never cached then)
+qint64 changeTime(const QFileInfo &fi)
+{
+    return fi.exists() ? fi.metadataChangeTime().toMSecsSinceEpoch() : -1;
+}
+} // namespace
+
 QString Fm::kind(const QString &path) const
 {
     const QFileInfo fi(path);
+    const qint64 ctime = changeTime(fi);
+    const auto it = m_kindCache.constFind(path);
+    if (it != m_kindCache.constEnd() && it->ctime == ctime)
+        return it->kind;
+    QString k;
     if (fi.isDir())
-        return QStringLiteral("folder");
-    if (fi.suffix() == QLatin1String("desktop"))
-        return QStringLiteral("app");
-    // By name first (no disk reads); look inside only when the name says nothing.
-    static const QMimeDatabase db;
-    QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
-    if (mime.isDefault())
-        mime = db.mimeTypeForFile(fi);
-    if (mime.name().startsWith(QLatin1String("image/")))
-        return QStringLiteral("image");
-    if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
-        || mime.inherits(QStringLiteral("application/x-shellscript")))
-        return QStringLiteral("exe");
-    return QStringLiteral("doc");
+        k = QStringLiteral("folder");
+    else if (fi.suffix() == QLatin1String("desktop"))
+        k = QStringLiteral("app");
+    else {
+        // By name first (no disk reads); look inside only when the name says nothing.
+        static const QMimeDatabase db;
+        QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
+        if (mime.isDefault())
+            mime = db.mimeTypeForFile(fi);
+        if (mime.name().startsWith(QLatin1String("image/")))
+            k = QStringLiteral("image");
+        else if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
+                 || mime.inherits(QStringLiteral("application/x-shellscript")))
+            k = QStringLiteral("exe");
+        else
+            k = QStringLiteral("doc");
+    }
+    if (ctime >= 0) {
+        if (m_kindCache.size() >= kMaxKindCache)
+            m_kindCache.clear();
+        m_kindCache.insert(path, {ctime, k});
+    }
+    return k;
 }
 
 QVariantMap Fm::desktopInfo(const QString &path) const
 {
+    const qint64 ctime = changeTime(QFileInfo(path));
+    const auto it = m_desktopCache.constFind(path);
+    if (it != m_desktopCache.constEnd() && it->ctime == ctime)
+        return it->info;
     const KDesktopFile df(path);
-    return {{QStringLiteral("name"), df.readName()}, {QStringLiteral("icon"), df.readIcon()}};
+    const QVariantMap info{{QStringLiteral("name"), df.readName()}, {QStringLiteral("icon"), df.readIcon()}};
+    if (ctime >= 0) {
+        if (m_desktopCache.size() >= kMaxKindCache)
+            m_desktopCache.clear();
+        m_desktopCache.insert(path, {ctime, info});
+    }
+    return info;
 }
 
 QString Fm::freeSpace(const QString &path) const
