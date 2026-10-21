@@ -133,8 +133,8 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
     Connections {
         target: b.webProfile
         enabled: b.visible
-        function onDownloadProgress(path, percent) { b.downloadPath = path; b.downloadText = path.split("/").pop() + "  " + percent + " %"; downloadHide.stop() }
-        function onDownloadFinished(path, ok) {
+        function onFileDownloadProgress(path, percent) { b.downloadPath = path; b.downloadText = path.split("/").pop() + "  " + percent + " %"; downloadHide.stop() }
+        function onFileDownloadFinished(path, ok) {
             b.downloadPath = path
             b.downloadText = path.split("/").pop() + (ok ? "  ✓  Show in Downloads" : "  — failed")
             downloadHide.restart()

@@ -10,16 +10,16 @@ WebEngineProfile {
     offTheRecord: false
     httpCacheType: WebEngineProfile.DiskHttpCache
     persistentCookiesPolicy: WebEngineProfile.AllowPersistentCookies
-    signal downloadProgress(string path, int percent)
-    signal downloadFinished(string path, bool ok)
+    signal fileDownloadProgress(string path, int percent)
+    signal fileDownloadFinished(string path, bool ok)
     // Downloads go to the Downloads folder under a free name; the tab's bar shows them.
     onDownloadRequested: download => {
         const path = Fm.downloadTarget(download.downloadFileName)
         download.downloadDirectory = path.substring(0, path.lastIndexOf("/"))
         download.downloadFileName = path.substring(path.lastIndexOf("/") + 1)
         download.accept()
-        downloadProgress(path, 0)
-        download.receivedBytesChanged.connect(() => { if (download.totalBytes > 0) downloadProgress(path, Math.round(100 * download.receivedBytes / download.totalBytes)) })
-        download.isFinishedChanged.connect(() => downloadFinished(path, download.state === WebEngineDownloadRequest.DownloadCompleted))
+        fileDownloadProgress(path, 0)
+        download.receivedBytesChanged.connect(() => { if (download.totalBytes > 0) fileDownloadProgress(path, Math.round(100 * download.receivedBytes / download.totalBytes)) })
+        download.isFinishedChanged.connect(() => fileDownloadFinished(path, download.state === WebEngineDownloadRequest.DownloadCompleted))
     }
 }
