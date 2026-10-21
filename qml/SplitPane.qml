@@ -60,8 +60,7 @@ Item {
     }
 
     // a glass panel of its own, lit when active
-    Rectangle { anchors.fill: parent; radius: 14 * pane.u; color: Qt.rgba(1, 1, 1, pane.active ? .06 : .025) }
-    EdgeRing { anchors.fill: parent; radius: 14 * pane.u; opacity: pane.active ? 1 : .45 }
+
     MouseArea {   // background: activate, clear the selection
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -72,62 +71,38 @@ Item {
         onDropped: d => { pane.dropRequested(d.urls, pane.dir, d.proposedAction === Qt.MoveAction); d.accept() }
     }
 
-    // path bar: ‹  ↑  / › home › …
-    Row {
+    // header (same as the main side's while split): ‹ ↑ path, then the column headings
+    PaneHeader {
         id: bar
-        x: 10 * pane.u; y: 6 * pane.u; height: 26 * pane.tu
-        spacing: 8 * pane.u
+        x: 6 * pane.u; y: 4 * pane.u; width: pane.width - 12 * pane.u
+        dir: pane.dir; canGoBack: pane.back.length > 0
+        u: pane.u; tu: pane.tu; fontFamily: pane.fontFamily
+        onActivated: pane.activated()
+        onBackRequested: pane.goBack()
+        onUpRequested: pane.goUp()
+        onPathClicked: p => pane.go(p)
+    }
+    Item {
+        id: columns
+        x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 22 * pane.tu
         Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "‹"; color: "white"; opacity: pane.back.length ? .9 : .3
-            font.family: pane.fontFamily; font.pixelSize: 19 * pane.tu
-            TapHandler { onTapped: { pane.activated(); pane.goBack() } }
+            x: pane.iconSize + 12 * pane.u; anchors.verticalCenter: parent.verticalCenter
+            text: "Name"; color: "white"; opacity: .45
+            font.family: pane.fontFamily; font.pixelSize: 11 * pane.tu; font.weight: Font.DemiBold
         }
         Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "↑"; color: "white"; opacity: pane.dir !== "/" ? .9 : .3
-            font.family: pane.fontFamily; font.pixelSize: 14 * pane.tu
-            TapHandler { onTapped: { pane.activated(); pane.goUp() } }
-        }
-        Item {
-            id: crumbsClip
-            width: pane.width - 80 * pane.u; height: parent.height; clip: true
-            Row {
-                x: Math.min(0, crumbsClip.width - width); height: parent.height
-                Repeater {
-                    model: {
-                        const out = [{ label: "/", path: "/" }]
-                        let acc = ""
-                        for (const p of pane.dir.split("/").filter(p => p.length)) { acc += "/" + p; out.push({ label: p, path: acc }) }
-                        return out
-                    }
-                    Row {
-                        required property var modelData
-                        readonly property bool last: modelData.path === pane.dir
-                        height: crumbsClip.height
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.label; color: "white"; opacity: parent.last ? 1 : .65
-                            font.family: pane.fontFamily; font.pixelSize: 12.5 * pane.tu
-                            font.weight: parent.last ? Font.DemiBold : Font.Normal
-                            TapHandler { onTapped: { pane.activated(); pane.go(parent.parent.modelData.path) } }
-                        }
-                        Text {
-                            visible: !parent.last; anchors.verticalCenter: parent.verticalCenter
-                            text: "  ›  "; color: "white"; opacity: .35
-                            font.family: pane.fontFamily; font.pixelSize: 12.5 * pane.tu
-                        }
-                    }
-                }
-            }
+            anchors.right: parent.right; anchors.rightMargin: 8 * pane.u; anchors.verticalCenter: parent.verticalCenter
+            text: "Size"; color: "white"; opacity: .45
+            font.family: pane.fontFamily; font.pixelSize: 11 * pane.tu; font.weight: Font.DemiBold
         }
     }
-    Rectangle { x: 8 * pane.u; y: bar.y + bar.height + 4 * pane.u; width: pane.width - 16 * pane.u; height: 1; color: Qt.rgba(1, 1, 1, .08) }
+    PaneFrame { anchors.fill: parent; u: pane.u; lineY: bar.y + bar.height; active: pane.active }
+    Rectangle { x: 8 * pane.u; y: columns.y + columns.height; width: pane.width - 16 * pane.u; height: 1; color: Qt.rgba(1, 1, 1, .06) }
 
     ListView {
         id: rows
         objectName: "splitList"
-        x: 6 * pane.u; y: bar.y + bar.height + 8 * pane.u
+        x: 6 * pane.u; y: columns.y + columns.height + 4 * pane.u
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
         model: model

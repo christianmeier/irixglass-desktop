@@ -202,6 +202,11 @@ How tabs work:
 
 ### Split view
 
+The two sides look the same on purpose: no frames (they read as a separate box), the same
+`PaneHeader` (‹ ↑ path) on both, the same column headings, and a `PaneFrame` marker line under the
+header that is blue on the active side. A thin full-height line divides them; its grip shows on
+hover.
+
 `qml/SplitPane.qml` is a self-contained second side (its own FolderListModel, path bar, selection,
 drag and drop); the main side gives up `splitW` of its width. `activePane` says which side F5 / F6
 copy / move from (`sendToOtherSide` → `Fm::copyOrMove`). Drags that start inside fm set

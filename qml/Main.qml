@@ -71,6 +71,9 @@ Window {
     property bool draggingSplit: false
     property real splitW: splitView ? contentAreaW * (1 - splitRatio) : 0
     readonly property bool compactList: list.width < 640 * u   // narrow list (split view): no Date column
+    // While split, the main side gets the same header as the split side (‹ ↑ path + marker line),
+    // so the two sides look the same; its views start that much lower.
+    readonly property real splitHeaderH: splitView ? 28 * tu - 8 * u : 0
     Behavior on splitW { enabled: !win.draggingSplit; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     property var closedTabs: []                 // for Reopen Closed Tab
     property real pendingScrollY: -1
@@ -1248,7 +1251,7 @@ Window {
         id: grid
         objectName: "grid"
         visible: win.viewMode !== 1
-        x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH
+        x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH + win.splitHeaderH
         width: parent.width - x - 20 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
@@ -1467,7 +1470,7 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
         }
-        x: 252 * u - win.contentShift; y: 80 * u + win.scopeH
+        x: 252 * u - win.contentShift; y: 80 * u + win.scopeH + win.splitHeaderH
         width: parent.width - x - 14 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
@@ -1693,15 +1696,40 @@ Window {
         onMenuRequested: splitMenu.open()
     }
 
+    // The main side's header while split (mirrors the split side's).
+    PaneHeader {
+        id: mainHeader
+        objectName: "mainPaneHeader"
+        visible: splitPane.visible
+        x: list.x + 6 * u; y: 66 * u + win.scopeH + 4 * u; width: list.width - 12 * u
+        dir: win.dir; canGoBack: win.backStack.length > 0
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        onActivated: win.activePane = 0
+        onBackRequested: win.goBack()
+        onUpRequested: win.goUp()
+        onPathClicked: p => win.go(p)
+    }
+    PaneFrame {
+        visible: splitPane.visible
+        x: list.x; y: 66 * u + win.scopeH; width: list.width; height: 40 * win.tu
+        u: win.u; lineY: 4 * win.u + mainHeader.height
+        active: win.activePane === 0
+    }
+
     // Divider between the sides: drag to resize (each side keeps at least ~22 %), double-click to centre.
     Item {
         id: splitDivider
         objectName: "splitDivider"
         visible: splitPane.visible
         x: splitPane.x - 13 * u; y: splitPane.y; width: 12 * u; height: splitPane.height
-        Rectangle {   // a short grip, brighter while hovered or dragged
+        Rectangle {   // the dividing line: thin, full height
+            anchors.horizontalCenter: parent.horizontalCenter; width: 1; height: parent.height
+            color: Qt.rgba(1, 1, 1, .10)
+        }
+        Rectangle {   // the grip: shows on hover, brighter while dragged
             anchors.centerIn: parent; width: 3 * win.u; height: Math.min(parent.height * .25, 60 * win.u); radius: width / 2
-            color: Qt.rgba(1, 1, 1, dividerDrag.active ? .7 : dividerHover.hovered ? .45 : .18)
+            color: Qt.rgba(1, 1, 1, dividerDrag.active ? .7 : .45)
+            visible: dividerHover.hovered || dividerDrag.active
         }
         HoverHandler { id: dividerHover; cursorShape: Qt.SplitHCursor }
         property real startRatio: .5
