@@ -145,6 +145,38 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return exists(QStringLiteral("Right/ext.txt")); }) && exists(QStringLiteral("ext.txt")),
               QStringLiteral("a drag from another app copies"));
 
+        // the split side has its own tabs, independent of the main side's
+        {
+            auto paneTabs = [&] { return pane->property("tabs").toList().size(); };
+            auto mainTabs = [&] { return win->property("tabs").toList().size(); };
+            auto *strip = win->findChild<QQuickItem *>(QStringLiteral("splitTabStrip"));
+            check(strip && strip->isVisible() && paneTabs() == 1, QStringLiteral("the split side has its own tab bar"));
+            win->setProperty("activePane", 1);
+            key(Qt::Key_T, Qt::ControlModifier);
+            check(paneTabs() == 2 && mainTabs() == 1, QStringLiteral("Ctrl+T on the split side adds a tab there only"),
+                  QString::number(paneTabs()) + "/" + QString::number(mainTabs()));
+            QMetaObject::invokeMethod(pane, "go", Q_ARG(QVariant, at(QStringLiteral("Right/Inner"))));
+            QTest::qWait(200);
+            key(Qt::Key_PageUp, Qt::ControlModifier);
+            check(pane->property("tabIndex").toInt() == 0 && pane->property("dir").toString() == at(QStringLiteral("Right"))
+                      && win->property("dir").toString() == base,
+                  QStringLiteral("Ctrl+PgUp switches the split side's tab, not the main one"), pane->property("dir").toString());
+            key(Qt::Key_PageDown, Qt::ControlModifier);
+            check(pane->property("dir").toString() == at(QStringLiteral("Right/Inner")), QStringLiteral("…and each split tab keeps its folder"));
+            QVariant fav = QVariantMap{{QStringLiteral("label"), QStringLiteral("base")}, {QStringLiteral("path"), base}};
+            QMetaObject::invokeMethod(win, "activatePlace", Q_ARG(QVariant, fav));
+            QTest::qWait(200);
+            check(paneTabs() == 3 && pane->property("dir").toString() == base && mainTabs() == 1,
+                  QStringLiteral("a sidebar place opens on the active (split) side"), QString::number(paneTabs()));
+            key(Qt::Key_W, Qt::ControlModifier);
+            key(Qt::Key_W, Qt::ControlModifier);
+            check(paneTabs() == 1 && win->property("splitView").toBool(), QStringLiteral("Ctrl+W closes split tabs"));
+            win->setProperty("activePane", 0);
+            key(Qt::Key_T, Qt::ControlModifier);
+            check(mainTabs() == 2 && paneTabs() == 1, QStringLiteral("Ctrl+T on the main side adds a main tab"));
+            key(Qt::Key_W, Qt::ControlModifier);
+        }
+
         // drag the divider: the sides resize, and the share is kept; double-click centres it
         {
             auto *divider = win->findChild<QQuickItem *>(QStringLiteral("splitDivider"));

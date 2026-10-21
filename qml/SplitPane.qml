@@ -26,10 +26,82 @@ Item {
     signal menuRequested()
     signal openFile(string path)
     signal dragStarted(bool on)
+    signal lastTabClosed()
+
+    // ---- this side's own tabs: the active one is live (dir, back, selection), others are snapshots
+    property var tabs: [{ dir: "", back: [] }]
+    property int tabIndex: 0
+    property var closedTabs: []
+    readonly property var tabModel: tabs.map((t, i) => {
+        const d = i === tabIndex ? dir : t.dir
+        return { title: d === "/" ? "/" : (d.split("/").pop() || d), dir: d }
+    })
+    function saveTab() {
+        if (tabIndex < 0 || tabIndex >= tabs.length) return
+        const t = tabs.slice(); t[tabIndex] = { dir: dir, back: back.slice(-20) }; tabs = t
+    }
+    function loadTab(i) {
+        const t = tabs[i]
+        if (!t) return
+        tabIndex = i
+        back = t.back || []
+        dir = t.dir
+        selection = ({}); anchorIndex = -1
+    }
+    function switchTab(i) { if (i !== tabIndex && i >= 0 && i < tabs.length) { saveTab(); loadTab(i) } }
+    function cycleTab(d) { if (tabs.length > 1) switchTab((tabIndex + d + tabs.length) % tabs.length) }
+    function newTab(path, activate) {
+        saveTab()
+        tabs = tabs.concat([{ dir: path, back: [] }])
+        if (activate) loadTab(tabs.length - 1)
+    }
+    function openInNewTab(paths, activate) {
+        const dirs = paths.filter(p => Fm.kind(p) === "folder")
+        dirs.forEach((p, k) => newTab(p, activate && k === dirs.length - 1))
+    }
+    // A sidebar place on this side: its existing tab, or a new one.
+    function openTabFor(path) {
+        for (let i = 0; i < tabs.length; ++i)
+            if ((i === tabIndex ? dir : tabs[i].dir) === path) { switchTab(i); return }
+        newTab(path, true)
+    }
+    function closeTab(i) {
+        if (tabs.length <= 1) { pane.lastTabClosed(); return }
+        saveTab()
+        closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
+        const t = tabs.slice(); t.splice(i, 1)
+        const wasActive = i === tabIndex
+        const next = tabIndex > i ? tabIndex - 1 : tabIndex
+        tabs = t
+        if (wasActive) { tabIndex = -1; loadTab(Math.min(i, t.length - 1)) } else tabIndex = next
+    }
+    function closeOtherTabs(i) {
+        saveTab()
+        tabs = [tabs[i]]
+        tabIndex = -1
+        loadTab(0)
+    }
+    function reopenClosedTab() {
+        if (!closedTabs.length) return
+        const t = closedTabs[closedTabs.length - 1]
+        closedTabs = closedTabs.slice(0, -1)
+        saveTab()
+        tabs = tabs.concat([t])
+        loadTab(tabs.length - 1)
+    }
+    function moveTab(from, to) {
+        if (from === to || from < 0 || to < 0 || from >= tabs.length || to >= tabs.length) return
+        saveTab()
+        const t = tabs.slice(), [x] = t.splice(from, 1)
+        t.splice(to, 0, x)
+        tabIndex = tabIndex === from ? to : (from < tabIndex && to >= tabIndex ? tabIndex - 1 : from > tabIndex && to <= tabIndex ? tabIndex + 1 : tabIndex)
+        tabs = t
+    }
 
     readonly property alias count: model.count
     function paths() { return Object.keys(selection) }
     function go(path) { if (path && path !== dir) { back = back.concat([dir]); dir = path; selection = ({}); anchorIndex = -1; rows.positionViewAtBeginning() } }
+    onDirChanged: Qt.callLater(saveTab)
     function goBack() { if (back.length) { const p = back[back.length - 1]; back = back.slice(0, -1); dir = p; selection = ({}); anchorIndex = -1 } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
     function select(i, mods) {
@@ -166,15 +238,20 @@ Item {
             MouseArea {
                 id: rowMouse
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 drag.target: dragProxy
                 onPressed: m => {
                     pane.activated()
+                    if (m.button === Qt.MiddleButton) { if (r.fileIsDir) pane.newTab(r.filePath, false); return }
                     if (!r.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) pane.select(r.index, m.modifiers)
                     if (m.button === Qt.RightButton) pane.menuRequested()
                 }
                 onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
-                onDoubleClicked: m => { if (m.button === Qt.LeftButton) pane.activateRow(r.index) }
+                onDoubleClicked: m => {
+                    if (m.button !== Qt.LeftButton) return
+                    if (r.fileIsDir && m.modifiers & Qt.ControlModifier) pane.newTab(r.filePath, true)
+                    else pane.activateRow(r.index)
+                }
             }
             DropArea {   // onto a folder: into it
                 id: rowDrop

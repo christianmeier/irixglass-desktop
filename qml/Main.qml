@@ -64,6 +64,8 @@ Window {
     // ---- split view (F3): a second side with its own folder; drag between them moves (Ctrl copies)
     property bool splitView: false
     property string splitDir: ""
+    property string splitTabsJson: ""           // the split side's tabs, saved like the main side's
+    property int splitTabIndex: 0
     property int activePane: 0                  // 0 = the main side, 1 = the split side (F5 / F6 go to the other)
     property bool internalDrag: false           // a drag that started inside fm (move by default)
     readonly property real contentAreaW: width - (240 * u - contentShift) - previewW - 10 * u
@@ -152,6 +154,8 @@ Window {
         property alias splitView: win.splitView
         property alias splitDir: win.splitDir
         property alias splitRatio: win.splitRatio
+        property alias splitTabs: win.splitTabsJson
+        property alias splitTab: win.splitTabIndex
         property alias width: win.width
         property alias height: win.height
     }
@@ -226,7 +230,10 @@ Window {
 
     // ---- split view ------------------------------------------------------------------
     function toggleSplit() {
-        if (!splitView && !(splitDir && Fm.resolvePath(splitDir, "/").ok)) { splitDir = dir; splitPane.dir = dir }
+        if (!splitView && !(splitDir && Fm.resolvePath(splitDir, "/").ok)) {
+            splitDir = dir
+            splitPane.tabs = [{ dir: dir, back: [] }]; splitPane.tabIndex = -1; splitPane.loadTab(0)
+        }
         splitView = !splitView
         activePane = 0
     }
@@ -241,6 +248,24 @@ Window {
         if (!splitView) return
         if (activePane === 0) { if (paths().length) Fm.copyOrMove(paths(), splitPane.dir, move) }
         else if (splitPane.paths().length) Fm.copyOrMove(splitPane.paths(), dir, move)
+    }
+
+    // Tab keys and menu entries act on the active side (the split side has its own tabs).
+    readonly property bool splitActive: splitView && activePane === 1
+    function activeNewTab() { splitActive ? splitPane.newTab(splitPane.dir, true) : newTab(dir, true) }
+    function activeCloseTab() { splitActive ? splitPane.closeTab(splitPane.tabIndex) : closeTab(tabIndex) }
+    function activeCycleTab(d) { splitActive ? splitPane.cycleTab(d) : cycleTab(d) }
+    function activeJumpTab(i) {
+        if (splitActive) splitPane.switchTab(i < 0 ? splitPane.tabs.length - 1 : i)
+        else switchTab(i < 0 ? tabs.length - 1 : i)
+    }
+    function activeReopenTab() { splitActive ? splitPane.reopenClosedTab() : reopenClosedTab() }
+    function persistSplitTabs() {
+        if (!Fm.restoreSession) return
+        splitTabsJson = JSON.stringify(splitPane.tabModel.map((t, i) => ({ dir: t.dir,
+            back: (i === splitPane.tabIndex ? splitPane.back : (splitPane.tabs[i].back || [])).slice(-20) })))
+        splitTabIndex = splitPane.tabIndex
+        settings.sync()
     }
 
     // ---- tabs ----------------------------------------------------------------------
@@ -515,6 +540,11 @@ Window {
         setPlaces(p)
     }
     function activatePlace(item) {
+        if (splitActive) {   // the split side: its own tab (or folder)
+            const p = item.udi !== undefined ? (item.mounted ? item.path : "") : item.action === "trash" ? Fm.trashDir : item.path ? expand(item.path) : ""
+            if (p) { folderTabs ? splitPane.openTabFor(p) : splitPane.go(p); return }
+            if (item.udi !== undefined) { Fm.mountVolume(item.udi); return }
+        }
         if (item.udi !== undefined) { item.mounted ? openFolder(item.path, false) : Fm.mountVolume(item.udi); return }
         if (item.action === "trash") { openFolder(Fm.trashDir, false); return }
         if (item.path) openFolder(expand(item.path), false)
@@ -1679,8 +1709,18 @@ Window {
         visible: win.splitW > 4
         x: parent.width - win.previewW - win.splitW + 4 * u; y: 66 * u
         width: Math.max(0, win.splitW - 14 * u); height: parent.height - y - win.bottomH - 4 * u
-        // set once (from the saved split folder), then the side navigates on its own and saves it
-        Component.onCompleted: dir = win.splitDir || win.dir
+        // set once (saved tabs, or the saved split folder), then the side navigates on its own
+        Component.onCompleted: {
+            let saved = []
+            if (Fm.restoreSession && win.splitTabsJson) { try { saved = JSON.parse(win.splitTabsJson) } catch (e) {} }
+            saved = saved.filter(t => t && t.dir && Fm.resolvePath(t.dir, "/").ok)
+            tabs = saved.length ? saved : [{ dir: win.splitDir || win.dir, back: [] }]
+            tabIndex = -1
+            loadTab(Math.max(0, Math.min(tabs.length - 1, win.splitTabIndex)))
+        }
+        onTabsChanged: Qt.callLater(win.persistSplitTabs)
+        onTabIndexChanged: Qt.callLater(win.persistSplitTabs)
+        onLastTabClosed: win.toggleSplit()
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
         active: win.activePane === 1
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
@@ -1781,6 +1821,28 @@ Window {
             if (!target) return
             if (target === Fm.trashDir || target.startsWith(Fm.trashDir + "/")) Fm.trash(win.urlsToPaths(urls))
             else Fm.drop(urls, target, move)
+        }
+    }
+
+    TabStrip {
+        id: splitTabStrip
+        objectName: "splitTabStrip"
+        visible: splitPane.visible && win.tabBarShown
+        x: splitPane.x + 6 * u; y: parent.height - win.bottomH
+        width: splitPane.width - 6 * u; height: win.tabBarH
+        tabs: splitPane.tabModel
+        current: splitPane.tabIndex
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        springDelay: win.springDelay
+        onActivated: i => { win.activePane = 1; splitPane.switchTab(i) }
+        onCloseRequested: i => splitPane.closeTab(i)
+        onMiddleClicked: i => splitPane.closeTab(i)
+        onMenuRequested: i => { win.activePane = 1; splitTabMenu.index = i; splitTabMenu.open() }
+        onNewRequested: { win.activePane = 1; splitPane.newTab(splitPane.dir, true) }
+        onOverflowRequested: splitTabListMenu.open()
+        onFilesDropped: (i, urls, move) => {
+            const target = i === splitPane.tabIndex ? splitPane.dir : (splitPane.tabs[i] ? splitPane.tabs[i].dir : "")
+            if (target) win.dropFiles(urls, target, move)
         }
     }
 
@@ -2135,12 +2197,45 @@ Window {
         P.MenuItem { text: "Close Split View\tF3"; onTriggered: win.toggleSplit() }
     }
     P.Menu {
+        id: splitTabMenu
+        property int index: 0
+        P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: splitPane.newTab(splitPane.dir, true) }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Move Tab Left"; enabled: splitTabMenu.index > 0; onTriggered: splitPane.moveTab(splitTabMenu.index, splitTabMenu.index - 1) }
+        P.MenuItem { text: "Move Tab Right"; enabled: splitTabMenu.index < splitPane.tabs.length - 1; onTriggered: splitPane.moveTab(splitTabMenu.index, splitTabMenu.index + 1) }
+        P.MenuItem { text: "Move Tab to the Other Side"; onTriggered: { const d = splitPane.tabModel[splitTabMenu.index].dir; win.newTab(d, true); splitPane.closeTab(splitTabMenu.index) } }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Close Tab"; onTriggered: splitPane.closeTab(splitTabMenu.index) }
+        P.MenuItem { text: "Close Other Tabs"; enabled: splitPane.tabs.length > 1; onTriggered: splitPane.closeOtherTabs(splitTabMenu.index) }
+        P.MenuItem { text: "Reopen Closed Tab\tCtrl+Shift+T"; enabled: splitPane.closedTabs.length > 0; onTriggered: splitPane.reopenClosedTab() }
+    }
+    P.Menu {
+        id: splitTabListMenu
+        Instantiator {
+            model: splitPane.tabModel
+            delegate: P.MenuItem {
+                required property var modelData
+                required property int index
+                text: modelData.title
+                checkable: true
+                checked: index === splitPane.tabIndex
+                onTriggered: splitPane.switchTab(index)
+            }
+            onObjectAdded: (i, o) => splitTabListMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => splitTabListMenu.removeItem(o)
+        }
+    }
+    P.Menu {
         id: tabMenu
         property int index: 0
         P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: win.newTab(win.tabs[tabMenu.index] ? (tabMenu.index === win.tabIndex ? win.dir : win.tabs[tabMenu.index].dir) : win.dir, true) }
         P.MenuSeparator {}
         P.MenuItem { text: "Move Tab Left"; enabled: tabMenu.index > 0; onTriggered: win.moveTab(tabMenu.index, tabMenu.index - 1) }
         P.MenuItem { text: "Move Tab Right"; enabled: tabMenu.index < win.tabs.length - 1; onTriggered: win.moveTab(tabMenu.index, tabMenu.index + 1) }
+        P.MenuItem {
+            text: "Move Tab to the Other Side"; visible: win.splitView; enabled: win.tabs.length > 1
+            onTriggered: { const i = tabMenu.index; splitPane.newTab(i === win.tabIndex ? win.dir : win.tabs[i].dir, true); win.closeTab(i) }
+        }
         P.MenuItem {
             text: "Move Tab to New Window"; enabled: win.tabs.length > 1
             onTriggered: { const i = tabMenu.index; Fm.newWindow(i === win.tabIndex ? win.dir : win.tabs[i].dir); win.closeTab(i) }
@@ -2216,7 +2311,7 @@ Window {
         P.Menu {
             title: "File"
             P.MenuItem { text: "New Window\tCtrl+N"; onTriggered: Fm.newWindow(win.dir) }
-            P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: win.newTab(win.dir, true) }
+            P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: win.activeNewTab() }
             P.MenuItem { text: "New Folder\tCtrl+Shift+N"; onTriggered: win.newFolder() }
             P.MenuItem { text: "Open\tCtrl+O"; onTriggered: win.openSelection() }
             P.MenuSeparator {}
@@ -2236,9 +2331,9 @@ Window {
             P.MenuItem { text: "Put Back"; enabled: win.inTrash; onTriggered: win.putBack() }
             P.MenuItem { text: "Empty Trash…\tCtrl+Shift+Del"; onTriggered: emptyDialog.open() }
             P.MenuSeparator {}
-            P.MenuItem { text: "Close Tab\tCtrl+W"; onTriggered: win.closeTab(win.tabIndex) }
+            P.MenuItem { text: "Close Tab\tCtrl+W"; onTriggered: win.activeCloseTab() }
             P.MenuItem { text: "Close Window\tCtrl+Shift+W"; onTriggered: win.close() }
-            P.MenuItem { text: "Reopen Closed Tab\tCtrl+Shift+T"; enabled: win.closedTabs.length > 0; onTriggered: win.reopenClosedTab() }
+            P.MenuItem { text: "Reopen Closed Tab\tCtrl+Shift+T"; onTriggered: win.activeReopenTab() }
         }
         P.Menu {
             title: "Edit"
@@ -2316,8 +2411,8 @@ Window {
         P.Menu {
             title: "Window"
             P.MenuItem { text: "Minimize\tCtrl+M"; onTriggered: win.showMinimized() }
-            P.MenuItem { text: "Next Tab\tCtrl+PgDown"; onTriggered: win.cycleTab(1) }
-            P.MenuItem { text: "Previous Tab\tCtrl+PgUp"; onTriggered: win.cycleTab(-1) }
+            P.MenuItem { text: "Next Tab\tCtrl+PgDown"; onTriggered: win.activeCycleTab(1) }
+            P.MenuItem { text: "Previous Tab\tCtrl+PgUp"; onTriggered: win.activeCycleTab(-1) }
             P.MenuItem { text: "Zoom"; onTriggered: win.maximized ? win.showNormal() : win.showMaximized() }
             P.MenuItem { text: "Desks Overview"; onTriggered: Fm.overview() }
         }
@@ -2329,22 +2424,22 @@ Window {
 
     Shortcut { sequence: "Ctrl+N"; onActivated: Fm.newWindow(win.dir) }
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: win.newFolder() }
-    Shortcut { sequence: "Ctrl+W"; onActivated: win.closeTab(win.tabIndex) }
+    Shortcut { sequence: "Ctrl+W"; onActivated: win.activeCloseTab() }
     Shortcut { sequence: "Ctrl+Shift+W"; onActivated: win.close() }
-    Shortcut { sequence: "Ctrl+T"; onActivated: win.newTab(win.dir, true) }
+    Shortcut { sequence: "Ctrl+T"; onActivated: win.activeNewTab() }
     Shortcut { sequence: "F3"; onActivated: win.toggleSplit() }
     Shortcut { sequence: "F5"; enabled: win.splitView; onActivated: win.sendToOtherSide(false) }
     Shortcut { sequence: "F6"; enabled: win.splitView; onActivated: win.sendToOtherSide(true) }
-    Shortcut { sequence: "Ctrl+Shift+T"; onActivated: win.reopenClosedTab() }
+    Shortcut { sequence: "Ctrl+Shift+T"; onActivated: win.activeReopenTab() }
     // Next / previous tab (IRIX used Page Down / Page Up for Icon Catalog pages).
-    Shortcut { sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: win.cycleTab(1) }
-    Shortcut { sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+Shift+Backtab", "Ctrl+PgUp"]; onActivated: win.cycleTab(-1) }
+    Shortcut { sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: win.activeCycleTab(1) }
+    Shortcut { sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+Shift+Backtab", "Ctrl+PgUp"]; onActivated: win.activeCycleTab(-1) }
     // Alt+1…8 jump to a tab, Alt+9 to the last one (Ctrl+digit is views, Ctrl+Alt+digit is tags).
     Repeater {
         model: 9
         Item {
             required property int index
-            Shortcut { sequence: "Alt+" + (index + 1); onActivated: win.switchTab(index === 8 ? win.tabs.length - 1 : index) }
+            Shortcut { sequence: "Alt+" + (index + 1); onActivated: win.activeJumpTab(index === 8 ? -1 : index) }
         }
     }
     Shortcut { sequence: "Ctrl+M"; onActivated: win.showMinimized() }

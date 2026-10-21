@@ -216,6 +216,13 @@ keep their proposed action. A narrow list (`compactList`) hides its Date column.
 (`splitDivider`) sets `splitRatio` (the main side's share, 0.22–0.78, saved); `splitW`'s animation
 is off while dragging (`draggingSplit`) so the sides follow the pointer.
 
+The split side has **its own tabs** (`SplitPane.tabs` / `tabIndex`, same snapshot idea as the
+main side, simpler state: folder + back history) and its own `TabStrip` at the same height as the
+main one. Tab keys, the File menu and sidebar places go through `activeNewTab`, `activeCloseTab`,
+`activeCycleTab`, `activeJumpTab`, `activeReopenTab` and `activatePlace`, which pick the active
+side (`splitActive`). Closing the split side's last tab closes the split view. Its tabs are saved
+as `splitTabsJson` (session window only).
+
 ### Sidebar sections
 
 Sections are part of `places` (title, colour, items) and can be created, renamed, moved and
