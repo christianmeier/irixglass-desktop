@@ -70,7 +70,11 @@ int main(int argc, char *argv[])
         return 2;
     QObject *win = engine.rootObjects().constFirst();
     auto *window = qobject_cast<QQuickWindow *>(win);
-    auto *ql = win->findChild<QQuickItem *>(QStringLiteral("quickLook"));
+    // Quick Look is loaded on first use.
+    auto qlKind = [&] {
+        auto *ql = win->findChild<QQuickItem *>(QStringLiteral("quickLook"));
+        return ql ? ql->property("kind").toString() : QStringLiteral("(not loaded)");
+    };
 
     // Through QTest, so key combinations reach QML Shortcuts like real key presses do.
     auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) {
@@ -115,14 +119,14 @@ int main(int argc, char *argv[])
         // --- Quick Look (after the type-to-select pause; Space while typing is part of the name)
         QTest::qWait(1100);
         key(Qt::Key_Space);
-        check(win->property("quickLook").toString() == at("pic.png") && ql->property("kind").toString() == QStringLiteral("image"),
-              QStringLiteral("Space opens Quick Look with the picture"), ql->property("kind").toString());
+        check(win->property("quickLook").toString() == at("pic.png") && qlKind() == QStringLiteral("image"),
+              QStringLiteral("Space opens Quick Look with the picture"), qlKind());
         key(Qt::Key_Left);   // by name: Sub, a.txt, notes.md, pic.png
-        check(win->property("quickLook").toString() == at("notes.md") && ql->property("kind").toString() == QStringLiteral("text"),
+        check(win->property("quickLook").toString() == at("notes.md") && qlKind() == QStringLiteral("text"),
               QStringLiteral("arrow keys step through items in Quick Look (text)"), win->property("quickLook").toString());
         key(Qt::Key_Left);
         key(Qt::Key_Left);
-        check(ql->property("kind").toString() == QStringLiteral("folder"), QStringLiteral("Quick Look of a folder"), ql->property("kind").toString());
+        check(qlKind() == QStringLiteral("folder"), QStringLiteral("Quick Look of a folder"), qlKind());
         key(Qt::Key_Escape);
         check(win->property("quickLook").toString().isEmpty(), QStringLiteral("Esc closes Quick Look"));
 

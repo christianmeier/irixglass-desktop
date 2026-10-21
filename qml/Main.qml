@@ -37,6 +37,8 @@ Window {
     property int sortField: FolderListModel.Name   // Name, Time, Size, Type
     property bool sortReversed: false
     property string quickLook: ""               // path shown in Quick Look ("" = closed)
+    property bool quickLookUsed: false          // Quick Look has been opened once (it stays loaded)
+    onQuickLookChanged: if (quickLook) quickLookUsed = true
     property var pendingSelect: []              // paths to select once they appear (duplicate, alias, typed file)
     property string typeAhead: ""               // type-to-select buffer
     // Phase 2
@@ -2178,15 +2180,25 @@ Window {
         ToolTip.text: win.activeTerminal ? "Fit the text: no wrapped lines (at most 12 pt)" : "Standard icon size"
     }
 
-    QuickLook {
+    // Quick Look is loaded on first use, by URL: naming the type here would compile it (and import
+    // QtMultimedia) at start, and with both QtMultimedia and QtQuick.Pdf in the start-up graph Qt's
+    // QML disk cache never matches for Main.qml, so it was recompiled from source on every start.
+    Loader {
+        id: quickLookLoader
         anchors.fill: parent
         z: 20
         visible: win.quickLook !== ""
-        path: win.quickLook
-        u: win.u; tu: win.tu; fontFamily: win.fontFamily
-        assetFor: win.asset
-        onCloseRequested: { win.quickLook = ""; keys.forceActiveFocus() }
-        onOpenRequested: p => { win.quickLook = ""; Fm.open(p) }
+        active: win.quickLookUsed
+        source: "QuickLook.qml"
+        onLoaded: {
+            item.path = Qt.binding(() => win.quickLook)
+            item.u = Qt.binding(() => win.u)
+            item.tu = Qt.binding(() => win.tu)
+            item.fontFamily = Qt.binding(() => win.fontFamily)
+            item.assetFor = win.asset
+            item.closeRequested.connect(() => { win.quickLook = ""; keys.forceActiveFocus() })
+            item.openRequested.connect(p => { win.quickLook = ""; Fm.open(p) })
+        }
     }
     Component { id: infoComponent; InfoWindow {} }
 
