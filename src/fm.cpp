@@ -796,11 +796,12 @@ QString Fm::kind(const QString &path) const
     else if (fi.suffix() == QLatin1String("desktop"))
         k = QStringLiteral("app");
     else {
-        // By name first (no disk reads); look inside only when the name says nothing.
+        // By name first (no disk reads); look inside only when the name says nothing. MatchContent,
+        // not MatchDefault: the name was just matched, and doing it again took half the time.
         static const QMimeDatabase db;
         QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
         if (mime.isDefault())
-            mime = db.mimeTypeForFile(fi);
+            mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchContent);
         if (mime.name().startsWith(QLatin1String("image/")))
             k = QStringLiteral("image");
         else if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
