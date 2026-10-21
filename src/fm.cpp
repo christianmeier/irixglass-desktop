@@ -270,6 +270,22 @@ QVariantList Fm::appsFor(const QString &path) const
     return out;
 }
 
+QVariantMap Fm::fileMeta(const QString &path) const
+{
+    const QFileInfo fi(path);
+    const QFile::Permissions p = fi.permissions();
+    QString perms;
+    for (const auto &[bit, ch] : {std::pair{QFile::ReadOwner, 'r'}, {QFile::WriteOwner, 'w'}, {QFile::ExeOwner, 'x'},
+                                  {QFile::ReadGroup, 'r'}, {QFile::WriteGroup, 'w'}, {QFile::ExeGroup, 'x'},
+                                  {QFile::ReadOther, 'r'}, {QFile::WriteOther, 'w'}, {QFile::ExeOther, 'x'}})
+        perms += QLatin1Char(p & bit ? ch : '-');
+    return {{QStringLiteral("created"), fi.birthTime()},
+            {QStringLiteral("opened"), fi.lastRead()},
+            {QStringLiteral("changed"), fi.metadataChangeTime()},
+            {QStringLiteral("permissions"), perms},
+            {QStringLiteral("owner"), fi.owner()}};
+}
+
 QVariantList Fm::applications() const
 {
     QList<KService::Ptr> apps = KApplicationTrader::query([](const KService::Ptr &s) { return !s->noDisplay() && !s->icon().isEmpty(); });

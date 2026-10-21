@@ -109,7 +109,9 @@ public:
 
     // Open With: apps for the item's type (default first); an empty id shows KDE's "Open With" dialog.
     Q_INVOKABLE QVariantList appsFor(const QString &path) const;
-    Q_INVOKABLE QVariantList applications() const;   // every visible app with an icon: {name, icon}, by name
+    Q_INVOKABLE QVariantList applications() const;
+    // list view columns: {created, opened, changed (QDateTime), permissions ("rwxr-xr-x"), owner}
+    Q_INVOKABLE QVariantMap fileMeta(const QString &path) const;   // every visible app with an icon: {name, icon}, by name
     Q_INVOKABLE void openWith(const QStringList &paths, const QString &appId);
 
     // Removable drives (Solid): mount on click, eject.
