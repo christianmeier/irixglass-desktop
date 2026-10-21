@@ -9,7 +9,7 @@ CXX      ?= g++
 BUILD    := build
 MOC      := $(shell pkg-config --variable=libexecdir Qt6Core 2>/dev/null || echo /usr/lib/qt6)/moc
 
-PKGS     := Qt6WebEngineQuick Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
+PKGS     := Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
 KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \

@@ -1,7 +1,6 @@
 #include "fm.h"
 
 #include <QApplication>
-#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <KSignalHandler>
 #include <csignal>
 #include <QIcon>
@@ -18,7 +17,11 @@
 
 int main(int argc, char *argv[])
 {
-    QtWebEngineQuick::initialize();   // web tabs (BrowserView.qml); must come before the application
+    // Web tabs (BrowserView.qml, Qt WebEngine) need shared OpenGL contexts, set before the application.
+    // This is all QtWebEngineQuick::initialize() amounts to here; calling it would link Qt WebEngine
+    // into fm, and loading that library costs ~35 ms before main() on every start. Qt WebEngine now
+    // loads with the QtWebEngine QML module, on the first web tab.
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("irixfm"));
     app.setOrganizationName(QStringLiteral("irixfm"));

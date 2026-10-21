@@ -13,7 +13,6 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
-#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <cstdio>
 #include <functional>
 
@@ -43,7 +42,7 @@ int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --no-sandbox");
-    QtWebEngineQuick::initialize();
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);   // as main.cpp does
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("irixfm-test"));
     QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
