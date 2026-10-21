@@ -192,8 +192,9 @@ How tabs work:
   history and search, re-selects the saved selection once the folder model has the items
   (`selectWhenReady`) and restores the scroll position (`pendingScrollY`, applied when the model is
   Ready and the selection is done).
-- `openFolder(path)` gives a folder a tab: `findTab` (same folder, same search) or `newTab`. `go()`
-  stays inside the tab and is what back/forward, crumbs, typed paths and spring-loading use.
+- `openFolder(path)` gives a sidebar place a tab: `findTab` (same folder, same search) or `newTab`.
+  Everything opened inside a tab uses `go()` and stays in the tab (double-click, Enter, back/forward,
+  crumbs, typed paths, spring-loading); Ctrl+double-click and middle-click use `openInNewTab`.
 - `onDirChanged` refreshes the active snapshot and `persistTabs()` writes `{dir, back, fwd,
   search}` to the settings immediately. `Fm.restoreSession` (no folder argument) restores them.
 - `TabStrip.qml` is a non-interactive horizontal `ListView` of `NotebookTab`s (`spacing: -s`, so

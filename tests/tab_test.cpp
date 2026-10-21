@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
     QTemporaryDir tmp;
     const QString base = QDir(tmp.path()).canonicalPath();
     auto at = [&](const QString &n) { return base + QLatin1Char('/') + n; };
-    for (const char *d : {"A", "B", "C", "Many"})
+    for (const char *d : {"A", "B", "C", "D", "Many"})
         QDir(base).mkdir(QString::fromLatin1(d));
     for (int i = 0; i < 160; ++i) {
         QFile f(at(QStringLiteral("Many/file%1.txt").arg(i, 3, 10, QLatin1Char('0'))));
@@ -166,25 +166,29 @@ int main(int argc, char *argv[])
         QTest::qWait(200);
         check(tabs() == 4 && idx() == 0 && win->property("tabs").toList().last().toMap().value(QStringLiteral("dir")) == at(QStringLiteral("C")),
               QStringLiteral("middle-click on a folder opens it in a background tab"));
-        // Opening a folder gives it a tab: here C already has one (the middle-click), so fm switches to it.
+        // Opening a folder inside a tab stays in that tab.
         QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cp);
         QTest::qWait(300);
-        check(tabs() == 4 && idx() == 3 && dir() == at(QStringLiteral("C")), QStringLiteral("opening a folder that has a tab switches to that tab"), dir());
-        key(Qt::Key_1, Qt::AltModifier);
-        call("closeTab", {3});
-        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cp);
+        check(tabs() == 4 && idx() == 0 && dir() == at(QStringLiteral("C")), QStringLiteral("opening a folder in a tab stays in that tab"), dir());
+        call("go", {base, false});
+        waitFor([&] { return cellFor(at(QStringLiteral("C"))) != nullptr; });
+        QTest::qWait(200);
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::ControlModifier, cp);
         QTest::qWait(300);
-        check(tabs() == 4 && idx() == 3 && dir() == at(QStringLiteral("C")), QStringLiteral("opening a folder adds a tab for it"), dir());
+        check(tabs() == 5 && idx() == 4 && dir() == at(QStringLiteral("C")), QStringLiteral("Ctrl+double-click opens it in a new tab"), dir());
+        call("closeTab", {4});
+        // A sidebar place gets a tab: the one already showing it (B, tab 2), or a new one.
         key(Qt::Key_1, Qt::AltModifier);
         QVariant fav = QVariantMap{{QStringLiteral("label"), QStringLiteral("B")}, {QStringLiteral("path"), at(QStringLiteral("B"))}};
         QMetaObject::invokeMethod(win, "activatePlace", Q_ARG(QVariant, fav));
         QTest::qWait(200);
-        check(dir() == at(QStringLiteral("B")) && idx() == 2, QStringLiteral("a sidebar favourite switches to its existing tab"), QString::number(idx()));
+        check(dir() == at(QStringLiteral("B")) && idx() == 2 && tabs() == 4, QStringLiteral("a sidebar favourite switches to its existing tab"), QString::number(idx()));
+        QVariant favD = QVariantMap{{QStringLiteral("label"), QStringLiteral("D")}, {QStringLiteral("path"), at(QStringLiteral("D"))}};
+        QMetaObject::invokeMethod(win, "activatePlace", Q_ARG(QVariant, favD));
+        QTest::qWait(200);
+        check(dir() == at(QStringLiteral("D")) && tabs() == 5 && idx() == 4, QStringLiteral("…or opens a new tab for it"), QString::number(tabs()));
+        call("closeTab", {4});
         key(Qt::Key_1, Qt::AltModifier);
-        const int before = tabs();
-        QTest::mouseDClick(window, Qt::LeftButton, Qt::ControlModifier, cp);
-        QTest::qWait(300);
-        check(tabs() == before && idx() == 0 && dir() == at(QStringLiteral("C")), QStringLiteral("Ctrl+double-click opens it in the same tab"), dir());
         call("go", {base, false});
         call("openInNewTab", {QVariantList{at(QStringLiteral("C"))}, true});
         check(tabs() == 5 && idx() == 4 && dir() == at(QStringLiteral("C")), QStringLiteral("Open in New Tab always adds one"), dir());

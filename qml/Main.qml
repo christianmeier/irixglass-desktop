@@ -60,7 +60,7 @@ Window {
     property var tabs: [{ dir: Fm.startDir, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0 }]
     property int tabIndex: 0
     property bool tabBarShown: true
-    property bool folderTabs: true              // opening a folder / place adds a tab (or switches to its tab)
+    property bool folderTabs: true              // a sidebar place opens in its own tab (or switches to it)
     // ---- split view (F3): a second side with its own folder; drag between them moves (Ctrl copies)
     property bool splitView: false
     property string splitDir: ""
@@ -194,9 +194,9 @@ Window {
     function goBack() { if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
     function goForward() { if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
-    function activate(path, isDir) { isDir ? openFolder(path, false) : Fm.open(path) }
-    // Opening a folder or a sidebar place gives it a tab: an existing tab showing it, or a new one.
-    // Moving around inside a tab (back, path bar, crumbs, spring-loading) stays in the tab (go()).
+    // Opening a folder inside a tab stays in that tab; sidebar places get a tab of their own
+    // (openFolder). Ctrl+double-click / middle-click open a folder in a new tab.
+    function activate(path, isDir) { isDir ? go(path) : Fm.open(path) }
     function openFolder(path, sameTab) {
         if (folderTabs && !sameTab) openTabFor(path, "")
         else go(path)
@@ -1102,8 +1102,29 @@ Window {
 
     Pill {
         id: viewPill
-        width: 128 * u; height: 36 * u; y: 18 * u
+        width: 176 * u; height: 36 * u; y: 18 * u
         x: searchPill.x - 14 * u - width
+        // Split view toggle, after a thin divider (it's on/off, not one of the three views).
+        Rectangle { x: 127 * win.u; y: 9 * win.u; width: 1; height: 18 * win.u; color: Qt.rgba(1, 1, 1, .18) }
+        Item {
+            id: splitButton
+            objectName: "splitButton"
+            x: 132 * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u
+            Rectangle {
+                anchors.fill: parent; radius: 14 * win.u
+                color: Qt.rgba(1, 1, 1, win.splitView ? .18 : splitHover.hovered ? .08 : 0)
+            }
+            Rectangle {   // two side-by-side panes
+                anchors.centerIn: parent; width: 17 * win.u; height: 14 * win.u; radius: 3 * win.u
+                color: "transparent"; border.color: Qt.rgba(1, 1, 1, .85); border.width: 1.5 * win.u
+                Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 2; width: 1.5 * win.u; height: parent.height - 4; color: Qt.rgba(1, 1, 1, .85) }
+            }
+            HoverHandler { id: splitHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: win.toggleSplit() }
+            ToolTip.visible: splitHover.hovered
+            ToolTip.delay: 700
+            ToolTip.text: (win.splitView ? "Close" : "Open") + " Split View (F3)"
+        }
         Rectangle {
             x: (4 + win.viewMode * 41) * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u; radius: 14 * win.u
             color: Qt.rgba(1, 1, 1, .18)
@@ -1418,7 +1439,7 @@ Window {
                 onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
                 onDoubleClicked: m => {
                     if (m.button !== Qt.LeftButton) return
-                    if (cell.fileIsDir && m.modifiers & Qt.ControlModifier) win.folderTabs ? win.go(cell.filePath) : win.openInNewTab([cell.filePath], true)
+                    if (cell.fileIsDir && m.modifiers & Qt.ControlModifier) win.openInNewTab([cell.filePath], true)
                     else win.activate(cell.filePath, cell.fileIsDir)
                 }
             }
@@ -1572,7 +1593,7 @@ Window {
                 onReleased: { rowDrag.x = 0; rowDrag.y = 0 }
                 onDoubleClicked: m => {
                     if (m.button !== Qt.LeftButton) return
-                    if (row.fileIsDir && m.modifiers & Qt.ControlModifier) win.folderTabs ? win.go(row.filePath) : win.openInNewTab([row.filePath], true)
+                    if (row.fileIsDir && m.modifiers & Qt.ControlModifier) win.openInNewTab([row.filePath], true)
                     else win.activate(row.filePath, row.fileIsDir)
                 }
             }
@@ -2202,7 +2223,7 @@ Window {
             P.MenuItem { text: (win.previewShown ? "Hide" : "Show") + " Preview\tCtrl+Shift+P"; onTriggered: win.previewShown = !win.previewShown }
             P.MenuItem { text: (win.tabBarShown ? "Hide" : "Show") + " Tab Bar"; onTriggered: win.tabBarShown = !win.tabBarShown }
             P.MenuItem { text: "Split View\tF3"; checkable: true; checked: win.splitView; onTriggered: win.toggleSplit() }
-            P.MenuItem { text: "Open Folders in New Tabs"; checkable: true; checked: win.folderTabs; onTriggered: win.folderTabs = !win.folderTabs }
+            P.MenuItem { text: "Open Sidebar Places in Tabs"; checkable: true; checked: win.folderTabs; onTriggered: win.folderTabs = !win.folderTabs }
             P.MenuItem { text: "Standard Icon Size"; onTriggered: win.wheelValue = win.defaultWheel }
         }
         P.Menu {

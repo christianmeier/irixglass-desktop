@@ -49,13 +49,14 @@ manager icon; the IRIX icons are only inside the window.
   be renamed, recoloured, reordered, hidden or deleted there. Stored as `user.xdg.tags`, so Dolphin
   and Baloo share them. Details: [docs/TAGS.md](docs/TAGS.md).
 - Tabs, drawn as IRIX notebook tabs along the bottom of the page (like IRIX 6.2's Icon Catalog
-  pages), working like Finder tabs: opening a folder or a sidebar place gives it a tab (or switches
-  to the tab that already shows it); Ctrl+double-click stays in the same tab. Close with ×, Ctrl+W
+  pages), working like Finder tabs: a sidebar place opens in its own tab (or switches to the tab
+  that already shows it); opening a folder inside a tab stays in that tab, Ctrl+double-click or a
+  middle-click opens it in a new one. Close with ×, Ctrl+W
   or a middle-click; Ctrl+T new tab, Ctrl+Shift+T reopen, Ctrl+Tab / Ctrl+PgUp/PgDn switch, Alt+1…9
   jump; middle-click a folder for a background tab; drag files onto a tab to switch to it / drop
   into its folder; "////" lists tabs that don't fit. Each tab keeps its folder, history, selection,
   scroll position and search, and the tabs come back the next time fm starts.
-- Split view (F3): a second list with its own folder next to the main view. Drag files between the
+- Split view (F3, or the split button next to the view buttons): a second list with its own folder next to the main view. Drag files between the
   sides to move them (Ctrl while dropping copies; another disk copies, like Finder), drop onto a
   folder to put them inside, or press F5 / F6 to copy / move the active side's selection across.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
@@ -90,7 +91,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (180 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (183 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```

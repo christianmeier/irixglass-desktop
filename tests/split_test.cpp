@@ -145,6 +145,13 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return exists(QStringLiteral("Right/ext.txt")); }) && exists(QStringLiteral("ext.txt")),
               QStringLiteral("a drag from another app copies"));
 
+        auto *button = win->findChild<QQuickItem *>(QStringLiteral("splitButton"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTest::qWait(400);
+        check(!win->property("splitView").toBool() && qAbs(grid->width() - gridW) < 1, QStringLiteral("the split button in the toolbar closes it again"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTest::qWait(300);
+        check(win->property("splitView").toBool(), QStringLiteral("…and opens it"));
         key(Qt::Key_F3);
         QTest::qWait(400);
         check(!win->property("splitView").toBool() && qAbs(grid->width() - gridW) < 1, QStringLiteral("F3 closes the split view again"));
