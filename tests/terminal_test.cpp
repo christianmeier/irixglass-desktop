@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     qputenv("SHELL", "/bin/bash");                 // a plain, predictable shell for the test
     qputenv("PS1", "fm$ ");
+    qputenv("HISTFILE", "/dev/null");             // keep the test out of the user's shell history
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("irixfm-test"));
     QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
