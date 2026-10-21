@@ -150,6 +150,7 @@ int main(int argc, char *argv[])
             QQuickItem *appIcon = findVisible("placeAppIcon");
             check(appIcon && appIcon->property("source").toString() == QStringLiteral("firefox") && !findVisible("placeEmoji"),
                   QStringLiteral("…or an app's icon"));
+            call(win, "iconPicker", {});   // created on first use
             auto *picker = win->findChild<QObject *>(QStringLiteral("iconPicker"));
             QMetaObject::invokeMethod(picker, "open");
             QTest::qWait(300);

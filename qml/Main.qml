@@ -2232,13 +2232,20 @@ Window {
 
     // ---- menus -----------------------------------------------------------------
     // Icon… on a sidebar entry: an emoji or an app icon instead of the outline (saved with the entry).
-    IconPicker {
-        id: iconPicker
-        property int si: 0
-        property int ii: 0
-        x: 200 * win.u; y: Math.max(40 * win.u, Math.min(win.height - height - 40 * win.u, 140 * win.u))
-        u: win.u; tu: win.tu; fontFamily: win.fontFamily
-        onPicked: icon => win.placeSetIcon(si, ii, icon)
+    // Created on first use: its 100+ cells and the Controls TextField cost ~50 ms at start.
+    property var iconPickerPopup: null
+    function iconPicker() {
+        if (!iconPickerPopup) {
+            const p = Qt.createComponent("IconPicker.qml").createObject(win.contentItem)
+            p.x = Qt.binding(() => 200 * win.u)
+            p.y = Qt.binding(() => Math.max(40 * win.u, Math.min(win.height - p.height - 40 * win.u, 140 * win.u)))
+            p.u = Qt.binding(() => win.u)
+            p.tu = Qt.binding(() => win.tu)
+            p.fontFamily = Qt.binding(() => win.fontFamily)
+            p.picked.connect(icon => win.placeSetIcon(p.si, p.ii, icon))
+            iconPickerPopup = p
+        }
+        return iconPickerPopup
     }
     // Sidebar menus: `si`/`ii` say which section/entry was right-clicked (ii = -1 for a header).
     P.Menu {
@@ -2252,9 +2259,10 @@ Window {
         P.MenuItem {
             text: "Icon…"
             onTriggered: {
-                iconPicker.si = placeMenu.si; iconPicker.ii = placeMenu.ii
-                iconPicker.current = placeMenu.entry && placeMenu.entry.icon || ""
-                iconPicker.open()
+                const picker = win.iconPicker()
+                picker.si = placeMenu.si; picker.ii = placeMenu.ii
+                picker.current = placeMenu.entry && placeMenu.entry.icon || ""
+                picker.open()
             }
         }
         P.MenuSeparator {}
