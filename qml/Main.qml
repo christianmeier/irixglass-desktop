@@ -1583,25 +1583,31 @@ Window {
                 }
                 // Tagged: the IRIX magic carpet takes the (first) tag's Nord colour. Same outline as
                 // icons/carpet*.svg (points 6,84 58,97 98,80 46,68 in a -10..110 view box).
-                Shape {
+                // Loaders here and below: most items have no tag, app icon or preview, and a Shape or
+                // K.Icon per delegate made scrolling a big folder slow.
+                Loader {
                     id: carpetTint
                     objectName: "carpetTint"
                     anchors.fill: parent
-                    visible: cell.tags.length > 0 && !cell.sel && !drop.containsDrag
-                    preferredRendererType: Shape.CurveRenderer
-                    readonly property color tint: win.tagColor(cell.tags[0] || "")
-                    ShapePath {
-                        strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
-                        fillGradient: LinearGradient {
-                            x1: 16 * cell.k; y1: 78 * cell.k; x2: 108 * cell.k; y2: 107 * cell.k
-                            GradientStop { position: 0; color: Qt.lighter(carpetTint.tint, 1.25) }
-                            GradientStop { position: 1; color: carpetTint.tint }
+                    active: cell.tags.length > 0
+                    visible: active && !cell.sel && !drop.containsDrag
+                    sourceComponent: Shape {
+                        id: tintShape
+                        preferredRendererType: Shape.CurveRenderer
+                        readonly property color tint: win.tagColor(cell.tags[0] || "")
+                        ShapePath {
+                            strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
+                            fillGradient: LinearGradient {
+                                x1: 16 * cell.k; y1: 78 * cell.k; x2: 108 * cell.k; y2: 107 * cell.k
+                                GradientStop { position: 0; color: Qt.lighter(tintShape.tint, 1.25) }
+                                GradientStop { position: 1; color: tintShape.tint }
+                            }
+                            startX: 16 * cell.k; startY: 94 * cell.k
+                            PathLine { x: 68 * cell.k; y: 107 * cell.k }
+                            PathLine { x: 108 * cell.k; y: 90 * cell.k }
+                            PathLine { x: 56 * cell.k; y: 78 * cell.k }
+                            PathLine { x: 16 * cell.k; y: 94 * cell.k }
                         }
-                        startX: 16 * cell.k; startY: 94 * cell.k
-                        PathLine { x: 68 * cell.k; y: 107 * cell.k }
-                        PathLine { x: 108 * cell.k; y: 90 * cell.k }
-                        PathLine { x: 56 * cell.k; y: 78 * cell.k }
-                        PathLine { x: 16 * cell.k; y: 94 * cell.k }
                     }
                 }
                 Image {
@@ -1610,24 +1616,30 @@ Window {
                     source: win.asset(cell.kind === "app" ? "doc" : cell.kind)
                     sourceSize: icon.src; smooth: true
                 }
-                K.Icon {
-                    visible: cell.kind === "app"
+                Loader {
+                    active: cell.kind === "app"
                     x: 32 * cell.k; y: 22 * cell.k; width: 58 * cell.k; height: width
-                    roundToIconSize: false
-                    source: cell.info ? cell.info.icon : ""
+                    sourceComponent: K.Icon {
+                        roundToIconSize: false
+                        source: cell.info ? cell.info.icon : ""
+                    }
                 }
-                Rectangle {   // previews mode: the real picture on a white mount
+                Loader {   // previews mode: the real picture on a white mount
                     id: preview
-                    visible: win.viewMode === 2 && cell.kind === "image" && thumb.status === Image.Ready
+                    active: win.viewMode === 2 && cell.kind === "image"
+                    visible: active && item.ready
                     x: 30 * cell.k; y: 18 * cell.k; width: 62 * cell.k; height: 62 * cell.k
-                    color: "white"; border.color: "#1d1d1d"; border.width: 1
-                    rotation: 4
-                    Image {
-                        id: thumb
-                        anchors.fill: parent; anchors.margins: 3 * cell.k
-                        source: win.viewMode === 2 && cell.kind === "image" ? cell.fileUrl : ""
-                        asynchronous: true; fillMode: Image.PreserveAspectCrop
-                        sourceSize: Qt.size(256, 256)
+                    sourceComponent: Rectangle {
+                        readonly property bool ready: thumb.status === Image.Ready
+                        color: "white"; border.color: "#1d1d1d"; border.width: 1
+                        rotation: 4
+                        Image {
+                            id: thumb
+                            anchors.fill: parent; anchors.margins: 3 * cell.k
+                            source: cell.fileUrl
+                            asynchronous: true; fillMode: Image.PreserveAspectCrop
+                            sourceSize: Qt.size(256, 256)
+                        }
                     }
                 }
             }
@@ -1649,11 +1661,12 @@ Window {
                 font.family: win.fontFamily; font.pixelSize: 13 * win.tu
                 font.weight: cell.sel ? Font.Medium : Font.Normal
             }
-            TagDots {
-                tags: cell.tags; colorFor: win.tagColor; size: 9 * win.tu
-                visible: cell.tags.length > 0 && label.visible
+            Loader {
+                active: cell.tags.length > 0
+                visible: label.visible
                 x: label.x + (label.width + Math.min(label.contentWidth, label.width)) / 2 + (cell.sel ? 10 : 4) * win.u
                 y: label.y + (label.height - height) / 2
+                sourceComponent: TagDots { tags: cell.tags; colorFor: win.tagColor; size: 9 * win.tu }
             }
             Rename {
                 active: win.renaming === cell.filePath
@@ -1668,7 +1681,6 @@ Window {
                 Drag.active: mouse.drag.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-                Drag.mimeData: ({ "text/uri-list": Fm.uriList(win.paths()) })
                 Drag.onActiveChanged: win.internalDrag = Drag.active
             }
             MouseArea {
@@ -1680,8 +1692,11 @@ Window {
                 onPressed: m => {
                     keys.forceActiveFocus()
                     win.activePane = 0
+                    if (m.button !== Qt.MiddleButton && (!cell.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        win.select(cell.index, cell.filePath, m.modifiers)
+                    // what a drag from here carries (set now, not bound: a binding per delegate re-ran on every selection change)
+                    dragProxy.Drag.mimeData = { "text/uri-list": Fm.uriList(win.paths()) }
                     if (m.button === Qt.MiddleButton) { if (cell.fileIsDir) win.openInNewTab([cell.filePath], false); return }
-                    if (!cell.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(cell.index, cell.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
                 }
                 onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
@@ -1772,12 +1787,14 @@ Window {
                 source: win.asset(row.kind === "app" ? "doc" : row.kind)
                 sourceSize: Qt.size(width * 2, height * 2); smooth: true
             }
-            K.Icon {
+            Loader {   // only apps have one (a K.Icon per row made scrolling slow)
                 x: 8 * win.u + win.listIcon * .15; y: (row.height - height) / 2
                 width: win.listIcon * .7; height: width
-                roundToIconSize: false
-                visible: row.kind === "app"
-                source: row.info ? row.info.icon : ""
+                active: row.kind === "app"
+                sourceComponent: K.Icon {
+                    roundToIconSize: false
+                    source: row.info ? row.info.icon : ""
+                }
             }
             Row {
                 x: win.listTextX; height: parent.height
@@ -1788,10 +1805,11 @@ Window {
                     text: row.info && row.info.name ? row.info.name : row.fileName
                     elide: Text.ElideRight; color: "white"
                     font.family: win.fontFamily; font.pixelSize: 13 * win.tu
-                    TagDots {
-                        tags: row.tags; colorFor: win.tagColor; size: 9 * win.tu
+                    Loader {
+                        active: row.tags.length > 0
                         x: Math.min(rowName.contentWidth, rowName.width) + 6 * win.u
                         anchors.verticalCenter: parent.verticalCenter
+                        sourceComponent: TagDots { tags: row.tags; colorFor: win.tagColor; size: 9 * win.tu }
                     }
                 }
                 Rename {
@@ -1800,22 +1818,31 @@ Window {
                     path: row.filePath; name: row.fileName; u: win.tu; fontFamily: win.fontFamily
                     onDone: { win.renaming = ""; keys.forceActiveFocus() }
                 }
-                Repeater {
-                    model: [
-                        [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), win.compactList ? 0 : 180],
-                        // folder sizes: the fresh count, else the cached one (shown at once), else "…"
-                        [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--")
-                                       : Fm.humanSize(row.fileSize), 90],
-                        [win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
-                         : row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document", 110]
-                    ]
-                    Text {
-                        required property var modelData
-                        width: modelData[1] * win.u; visible: width > 0; anchors.verticalCenter: parent.verticalCenter
-                        text: modelData[0]; color: "white"; opacity: row.sel ? .9 : .55
-                        elide: Text.ElideRight
-                        font.family: win.fontFamily; font.pixelSize: 12 * win.tu
-                    }
+                // Date, Size, Kind (Where while searching): plain Texts, as a Repeater per row cost a
+                // model and three more incubations on every scroll.
+                Text {
+                    width: (win.compactList ? 0 : 180) * win.u
+                    text: Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm")
+                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
+                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
+                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+                }
+                Text {
+                    width: 90 * win.u
+                    // folder sizes: the fresh count, else the cached one (shown at once), else "…"
+                    text: row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--")
+                                        : Fm.humanSize(row.fileSize)
+                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
+                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
+                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+                }
+                Text {
+                    width: 110 * win.u
+                    text: win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
+                          : row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document"
+                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
+                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
+                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
                 }
             }
             Item {
@@ -1823,7 +1850,6 @@ Window {
                 Drag.active: rowMouse.drag.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-                Drag.mimeData: ({ "text/uri-list": Fm.uriList(win.paths()) })
                 Drag.onActiveChanged: win.internalDrag = Drag.active
             }
             MouseArea {
@@ -1834,8 +1860,10 @@ Window {
                 onPressed: m => {
                     keys.forceActiveFocus()
                     win.activePane = 0
+                    if (m.button !== Qt.MiddleButton && (!row.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        win.select(row.index, row.filePath, m.modifiers)
+                    rowDrag.Drag.mimeData = { "text/uri-list": Fm.uriList(win.paths()) }   // set now, as in the icon view
                     if (m.button === Qt.MiddleButton) { if (row.fileIsDir) win.openInNewTab([row.filePath], false); return }
-                    if (!row.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(row.index, row.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
                 }
                 onReleased: { rowDrag.x = 0; rowDrag.y = 0 }
