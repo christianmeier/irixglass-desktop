@@ -11,6 +11,7 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
     id: b
     objectName: "browserView"
     property url startUrl: ""
+    property var webProfile                  // Main's one WebProfile
     property real u: 1
     property real tu: 1
     property string fontFamily
@@ -130,7 +131,7 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
     signal showFileRequested(string path)
     Timer { id: downloadHide; interval: 8000; onTriggered: b.downloadText = "" }
     Connections {
-        target: Fm
+        target: b.webProfile
         enabled: b.visible
         function onDownloadProgress(path, percent) { b.downloadPath = path; b.downloadText = path.split("/").pop() + "  " + percent + " %"; downloadHide.stop() }
         function onDownloadFinished(path, ok) {
@@ -164,9 +165,7 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
             id: view
             objectName: "webView"
             anchors.fill: parent
-            // One profile for all web tabs (Fm.webProfile): two profile objects on the same storage
-            // lock each other out, and the second tab couldn't load anything.
-            profile: Fm.webProfile()
+            profile: b.webProfile   // shared by all web tabs (WebProfile.qml)
             zoomFactor: b.fontPointSize / 12
             onNewWindowRequested: request => { url = request.requestedUrl }   // target=_blank: same tab
             settings.pluginsEnabled: true

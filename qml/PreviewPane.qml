@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Pdf
 
 // Preview pane (View ▸ Show Preview, Ctrl+Shift+P): the focused item (or the folder) with a
 // preview on top and its details below, like Finder's preview column.
@@ -39,12 +38,8 @@ Item {
         Loader {   // first page of a PDF
             anchors.fill: parent
             active: pane.kind === "pdf"
-            sourceComponent: PdfPageImage {
-                document: PdfDocument { source: "file://" + pane.path }
-                currentFrame: 0
-                fillMode: Image.PreserveAspectFit
-                sourceSize: Qt.size(width * 2, height * 2)
-            }
+            source: "PdfPage.qml"
+            onLoaded: item.path = Qt.binding(() => pane.path)
         }
         Rectangle {   // the start of the text: Markdown rendered, code highlighted (Nord)
             visible: pane.kind === "text"

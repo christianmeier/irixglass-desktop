@@ -11,6 +11,8 @@ Popup {
     property real tu: 1
     property string fontFamily
     property string current
+    property int si: 0                   // the sidebar entry it's for (section, item)
+    property int ii: 0
     signal picked(string icon)
 
     property int page: 0                 // 0 emoji, 1 apps

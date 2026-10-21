@@ -37,6 +37,8 @@ Window {
     property int sortField: FolderListModel.Name   // Name, Time, Size, Type
     property bool sortReversed: false
     property string quickLook: ""               // path shown in Quick Look ("" = closed)
+    property bool quickLookUsed: false          // Quick Look has been opened once (it stays loaded)
+    onQuickLookChanged: if (quickLook) quickLookUsed = true
     property var pendingSelect: []              // paths to select once they appear (duplicate, alias, typed file)
     property string typeAhead: ""               // type-to-select buffer
     // Phase 2
@@ -343,13 +345,15 @@ Window {
         return f ? ["file://" + f] : []
     }
     property var webComponent: null              // BrowserView.qml, loaded on first use (Qt WebEngine)
+    property var webProfile: null                // WebProfile.qml: the one profile all web tabs share
     function createTerminal(kind, cwd, args, layer) {
         const id = nextTermId++
         let t
         if (kind === "web") {
             if (!webComponent) webComponent = Qt.createComponent("BrowserView.qml")
+            if (!webProfile) webProfile = Qt.createComponent("WebProfile.qml").createObject(win)
             if (webComponent.status !== Component.Ready) { console.warn(webComponent.errorString()); return 0 }
-            t = webComponent.createObject(layer, { startUrl: args[0] || "", u: win.u, tu: win.tu, fontFamily: win.fontFamily })
+            t = webComponent.createObject(layer, { startUrl: args[0] || "", webProfile: webProfile, u: win.u, tu: win.tu, fontFamily: win.fontFamily })
             t.anchors.fill = layer
             t.visible = Qt.binding(() => win.activeTermId === id || splitPane.activeTermId === id)
             t.activeFocusChanged.connect(() => { if (t.activeFocus) win.activePane = layer === splitPane.termLayer ? 1 : 0 })
@@ -2080,8 +2084,9 @@ Window {
         x: parent.width - win.previewW; y: 72 * u
         width: 270 * u; height: parent.height - 72 * u - win.bottomH - 8 * u
         clip: true
-        // the active side's item (or its folder)
-        path: win.activeFocusedPath() || (win.splitActive ? splitPane.dir : win.dir)
+        // the active side's item (or its folder); none while hidden, so a hidden pane doesn't read
+        // files, highlight code or count folder sizes (the whole home folder at start) for nothing
+        path: visible ? win.activeFocusedPath() || (win.splitActive ? splitPane.dir : win.dir) : ""
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
         assetFor: win.asset
         sizes: win.folderSizes
@@ -2236,15 +2241,25 @@ Window {
         ToolTip.text: win.activeTerminal ? "Fit the text: no wrapped lines (at most 12 pt)" : "Standard icon size"
     }
 
-    QuickLook {
+    // Quick Look is loaded on first use, by URL: naming the type here would compile it (and import
+    // QtMultimedia) at start, and with both QtMultimedia and QtQuick.Pdf in the start-up graph Qt's
+    // QML disk cache never matches for Main.qml, so it was recompiled from source on every start.
+    Loader {
+        id: quickLookLoader
         anchors.fill: parent
         z: 20
         visible: win.quickLook !== ""
-        path: win.quickLook
-        u: win.u; tu: win.tu; fontFamily: win.fontFamily
-        assetFor: win.asset
-        onCloseRequested: { win.quickLook = ""; keys.forceActiveFocus() }
-        onOpenRequested: p => { win.quickLook = ""; Fm.open(p) }
+        active: win.quickLookUsed
+        source: "QuickLook.qml"
+        onLoaded: {
+            item.path = Qt.binding(() => win.quickLook)
+            item.u = Qt.binding(() => win.u)
+            item.tu = Qt.binding(() => win.tu)
+            item.fontFamily = Qt.binding(() => win.fontFamily)
+            item.assetFor = win.asset
+            item.closeRequested.connect(() => { win.quickLook = ""; keys.forceActiveFocus() })
+            item.openRequested.connect(p => { win.quickLook = ""; Fm.open(p) })
+        }
     }
     Component { id: infoComponent; InfoWindow {} }
 
@@ -2278,13 +2293,20 @@ Window {
 
     // ---- menus -----------------------------------------------------------------
     // Icon… on a sidebar entry: an emoji or an app icon instead of the outline (saved with the entry).
-    IconPicker {
-        id: iconPicker
-        property int si: 0
-        property int ii: 0
-        x: 200 * win.u; y: Math.max(40 * win.u, Math.min(win.height - height - 40 * win.u, 140 * win.u))
-        u: win.u; tu: win.tu; fontFamily: win.fontFamily
-        onPicked: icon => win.placeSetIcon(si, ii, icon)
+    // Created on first use: its 100+ cells and the Controls TextField cost ~50 ms at start.
+    property var iconPickerPopup: null
+    function iconPicker() {
+        if (!iconPickerPopup) {
+            const p = Qt.createComponent("IconPicker.qml").createObject(win.contentItem)
+            p.x = Qt.binding(() => 200 * win.u)
+            p.y = Qt.binding(() => Math.max(40 * win.u, Math.min(win.height - p.height - 40 * win.u, 140 * win.u)))
+            p.u = Qt.binding(() => win.u)
+            p.tu = Qt.binding(() => win.tu)
+            p.fontFamily = Qt.binding(() => win.fontFamily)
+            p.picked.connect(icon => win.placeSetIcon(p.si, p.ii, icon))
+            iconPickerPopup = p
+        }
+        return iconPickerPopup
     }
     // Sidebar menus: `si`/`ii` say which section/entry was right-clicked (ii = -1 for a header).
     P.Menu {
@@ -2298,9 +2320,10 @@ Window {
         P.MenuItem {
             text: "Icon…"
             onTriggered: {
-                iconPicker.si = placeMenu.si; iconPicker.ii = placeMenu.ii
-                iconPicker.current = placeMenu.entry && placeMenu.entry.icon || ""
-                iconPicker.open()
+                const picker = win.iconPicker()
+                picker.si = placeMenu.si; picker.ii = placeMenu.ii
+                picker.current = placeMenu.entry && placeMenu.entry.icon || ""
+                picker.open()
             }
         }
         P.MenuSeparator {}
