@@ -6,9 +6,13 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontMetricsF>
+#include <QKeyEvent>
 #include <QMimeData>
+#include <QPainter>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -34,11 +38,143 @@ bool waitFor(const std::function<bool()> &cond, int ms = 8000)
         QTest::qWait(50);
     return cond();
 }
+// IRIXFM_TERM_BENCH=<dir>: timings instead of the tests. Throughput (big outputs until the prompt
+// is back), paint() time for a full 200×60 screen, scrollback memory, and PNGs of the painted
+// screens in <dir> to compare before / after a change.
+class BenchTerm : public TerminalView
+{
+public:
+    int paints = 0;
+    qint64 paintNs = 0;
+    void paint(QPainter *p) override
+    {
+        QElapsedTimer t;
+        t.start();
+        TerminalView::paint(p);
+        paintNs += t.nsecsElapsed();
+        ++paints;
+    }
+};
+
+long rssKb()
+{
+    QFile f(QStringLiteral("/proc/self/status"));
+    if (!f.open(QIODevice::ReadOnly))
+        return 0;
+    for (const QByteArray &l : f.readAll().split('\n'))
+        if (l.startsWith("VmRSS:"))
+            return l.mid(6).trimmed().split(' ').value(0).toLong();
+    return 0;
+}
+
+int runBench(const QString &out)
+{
+    QDir().mkpath(out);
+    QQuickWindow window;
+    QFont font(QStringLiteral("Noto Sans Mono"));
+    font.setPointSizeF(12);
+    const QFontMetricsF fm(font);
+    const qreal cw = fm.horizontalAdvance(QLatin1Char('M')), ch = std::ceil(fm.lineSpacing());
+    const QSize size(int(8 + 200 * cw + 1), int(6 + 60 * ch + 1));   // 200×60 cells
+    window.resize(size);
+    window.show();
+    int seqNo = 0;
+    auto newTerm = [&] {
+        auto *t = new BenchTerm;
+        t->setParentItem(window.contentItem());
+        t->setSize(size);
+        t->setProperty("program", QStringLiteral("/bin/bash"));
+        t->setProperty("arguments", QStringList{QStringLiteral("--norc"), QStringLiteral("--noprofile")});
+        t->start();
+        waitFor([&] { return t->screenText().contains(QStringLiteral("fm$")); });
+        return t;
+    };
+    // Runs a command and waits (polling every ms) until the marker it prints after it shows.
+    auto run = [&](BenchTerm *t, const QString &cmd, int ms = 60000) {
+        const int n = ++seqNo;
+        const QString mark = QStringLiteral("DONE%1X").arg(n + 1);
+        t->sendText(cmd + QStringLiteral("; echo DONE$((%1+1))X\r").arg(n));
+        QElapsedTimer e;
+        e.start();
+        while (e.elapsed() < ms && !t->screenText().contains(mark))
+            QTest::qWait(1);
+        return e.elapsed();
+    };
+    auto paintAvg = [&](BenchTerm *t, const QString &name) {
+        QImage img(size, QImage::Format_ARGB32_Premultiplied);
+        const int n = 200;
+        QElapsedTimer e;
+        e.start();
+        for (int i = 0; i < n; ++i) {
+            img.fill(Qt::transparent);
+            QPainter p(&img);
+            t->TerminalView::paint(&p);
+        }
+        const double us = e.nsecsElapsed() / 1000.0 / n;
+        img.save(out + QLatin1Char('/') + name + QStringLiteral(".png"));
+        return us;
+    };
+    std::printf("bench: %d×%d cells, %dx%d px\n", 200, 60, size.width(), size.height());
+
+    // memory: 12000 lines of colourful output (ls --color) fill the 10000-line scrollback
+    {
+        auto *t = newTerm();
+        const long started = rssKb();
+        run(t, QStringLiteral("for i in $(seq 1 30); do ls --color=always -la /usr/bin; done | head -n 12000"));
+        QTest::qWait(200);
+        std::printf("bench: memory, 10000-line scrollback (ls --color, %d cols): %+ld KB RSS\n", t->columns(), rssKb() - started);
+        delete t;
+    }
+    QTemporaryDir tmp;
+    const QString big = tmp.path() + QStringLiteral("/big.txt");
+    {
+        QFile f(big);
+        if (f.open(QIODevice::WriteOnly))
+            for (int i = 0; i < 100000; ++i)
+                f.write(QStringLiteral("%1 the quick brown fox jumps over the lazy dog, again and again and again\n").arg(i, 6).toUtf8());
+    }
+    auto *t = newTerm();
+    struct Case { const char *name; QString cmd; };
+    const QList<Case> cases = {
+        {"seq 1 200000", QStringLiteral("seq 1 200000")},
+        {"cat 100000 lines (8 MB)", QStringLiteral("cat ") + big},
+        {"ls --color -la /usr/bin x5", QStringLiteral("for i in 1 2 3 4 5; do ls --color=always -la /usr/bin; done")},
+    };
+    for (const Case &c : cases) {
+        t->paints = 0;
+        t->paintNs = 0;
+        const qint64 ms = run(t, c.cmd);
+        std::printf("bench: throughput %-28s %6lld ms  (%d paints, %.0f us each)\n", c.name, ms, t->paints,
+                    t->paints ? t->paintNs / 1000.0 / t->paints : 0.0);
+    }
+    // paint: a typical colourful screen, the worst case (colours change every cell), plain text
+    run(t, QStringLiteral("clear; ls --color=always -la /usr/bin | tail -n 58"));
+    std::printf("bench: paint, ls --color -la /usr/bin screen: %.0f us\n", paintAvg(t, QStringLiteral("ls")));
+    run(t, QStringLiteral("clear; for r in $(seq 0 57); do for c in $(seq 0 199); do printf '\\e[3%d;4%d%sm%x' $((c%8)) $(((c/8+r)%8)) $([ $((c%3)) = 0 ] && echo ';1') $((c%16)); done; printf '\\e[0m\\n'; done"));
+    std::printf("bench: paint, every cell a different colour: %.0f us\n", paintAvg(t, QStringLiteral("grid")));
+    run(t, QStringLiteral("clear; for i in $(seq 1 57); do printf '%0.s-' $(seq 1 199); echo; done"));
+    std::printf("bench: paint, plain text: %.0f us\n", paintAvg(t, QStringLiteral("plain")));
+    run(t, QStringLiteral("clear; fastfetch --pipe false"));
+    paintAvg(t, QStringLiteral("fastfetch"));
+    // scrolled back into the history (painted from the scrollback, not the screen)
+    for (int i = 0; i < 20; ++i) {
+        QKeyEvent k(QEvent::KeyPress, Qt::Key_PageUp, Qt::ShiftModifier);
+        QCoreApplication::sendEvent(t, &k);
+    }
+    std::printf("bench: paint, scrolled back %d lines: %.0f us\n", t->scrollOffset(), paintAvg(t, QStringLiteral("history")));
+    delete t;
+    return 0;
+}
 } // namespace
 
 int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    if (qEnvironmentVariableIsSet("IRIXFM_TERM_BENCH")) {
+        qputenv("PS1", "fm$ ");
+        QApplication app(argc, argv);
+        return runBench(qEnvironmentVariable("IRIXFM_TERM_BENCH"));
+    }
     qputenv("IRIXFM_SHELL", "/bin/bash");          // a plain, predictable shell for the test
     qputenv("PS1", "fm$ ");
     qputenv("HISTFILE", "/dev/null");             // keep the test out of the user's shell history
