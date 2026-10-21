@@ -405,3 +405,19 @@ section's colour. `IconPicker.qml` (Emoji / App Icons, search, Standard Icon) se
   `QT_LOGGING_RULES="irixfm.terminal.debug=true"` logs drags and pinches to the journal.
 - Offscreen Qt (the tests) has no real `QDrag`: `exec()` returns at once, so drops are tested with
   synthetic `QDragEnterEvent` / `QDragMoveEvent` / `QDropEvent` sent to the window.
+
+### Web tabs
+
+`qml/BrowserView.qml` (Qt WebEngine; `QtWebEngineQuick::initialize()` runs first thing in
+`main()`). It is created lazily with `Qt.createComponent` the first time a web tab opens, and
+lives in the same `terminals` map as the terminals: it offers the same small API (`title`,
+`start()`, `fontPointSize` / `setFontSize` / `fitWidth`, `finished`, `changeDirectory` → false), so
+tabs, titles, Ctrl+Shift+W and the thumbwheel (zoom = pt / 12) need no special cases.
+`browserActive` routes Ctrl+L and Back / Forward to the page. The profile is persistent
+(`storageName: "irixfm"`, under `~/.local/share/irixfm/QtWebEngine/`). `Fm::openInFirefox`
+starts Firefox with the page's URL. Tests: `tests/browser_test.cpp` (off-screen works with
+`--disable-gpu`).
+
+Terminal touchpad scrolling adds up `pixelDelta` (`m_wheelRest`) and scrolls a line per cell
+height; dividing every small delta by the cell height on its own gave 0 lines, so touchpad
+scrolling did nothing.

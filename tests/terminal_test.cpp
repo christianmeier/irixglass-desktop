@@ -140,6 +140,25 @@ int main(int argc, char *argv[])
                 t->setFontSize(12);
                 t->forceActiveFocus();
             }
+            // two-finger touchpad scrolling: many small pixel deltas scroll back through the history
+            {
+                t->sendText(QStringLiteral("for i in $(seq 1 150); do echo line-$i; done\r"));
+                QTest::qWait(600);
+                const QPointF mid = t->mapToScene(QPointF(t->width() / 2, t->height() / 2));
+                QPointingDevice touchpad(QStringLiteral("touchpad"), 42, QInputDevice::DeviceType::TouchPad, QPointingDevice::PointerType::Finger,
+                                         QInputDevice::Capability::Position | QInputDevice::Capability::PixelScroll, 2, 3);
+                auto swipe = [&](int dy, int n) {
+                    for (int i = 0; i < n; ++i) {
+                        QWheelEvent ev(mid, window->mapToGlobal(mid), QPoint(0, dy), QPoint(0, dy * 3), Qt::NoButton, Qt::NoModifier,
+                                       i == 0 ? Qt::ScrollBegin : Qt::ScrollUpdate, false, Qt::MouseEventNotSynthesized, &touchpad);
+                        QCoreApplication::sendEvent(window, &ev);
+                    }
+                };
+                swipe(4, 60);   // 240 px of small steps
+                check(t->scrollOffset() >= 10, QStringLiteral("touchpad scrolling goes back through the output"), QString::number(t->scrollOffset()));
+                swipe(-4, 200);
+                check(t->scrollOffset() == 0, QStringLiteral("…and forward to the prompt again"), QString::number(t->scrollOffset()));
+            }
             // navigating the folder view (path bar, ‹ ↑) moves the shell there
             {
                 const QString sub = base + QStringLiteral("/sub dir");

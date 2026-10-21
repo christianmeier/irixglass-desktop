@@ -876,6 +876,11 @@ void Fm::openTerminal(const QString &dir)
     QProcess::startDetached(QStringLiteral("alacritty"), {QStringLiteral("--working-directory"), dir});
 }
 
+void Fm::openInFirefox(const QString &url)
+{
+    QProcess::startDetached(QStringLiteral("firefox"), url.isEmpty() ? QStringList() : QStringList{url});
+}
+
 void Fm::newWindow(const QString &dir)
 {
     QProcess::startDetached(QCoreApplication::applicationFilePath(), {dir});

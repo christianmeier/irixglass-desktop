@@ -141,6 +141,7 @@ Window {
         const id = splitActive ? splitPane.activeTermId : activeTermId
         return id ? terminals[id] || null : null
     }
+    readonly property bool browserActive: !!activeTerminal && activeTerminal.objectName === "browserView"
     readonly property real activeWheel: activeTerminal ? Math.max(0, Math.min(1, (activeTerminal.fontPointSize - 6) / 24))
                                         : splitActive ? splitWheelValue : wheelValue
     function setActiveWheel(v) {
@@ -248,8 +249,8 @@ Window {
         view().positionViewAtBeginning()
         if (termActive && terminals[activeTermId]) terminals[activeTermId].changeDirectory(path)   // the shell follows
     }
-    function goBack() { if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
-    function goForward() { if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
+    function goBack() { if (browserActive) { activeTerminal.goBack(); return } if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
+    function goForward() { if (browserActive) { activeTerminal.goForward(); return } if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
     // Opening a folder inside a tab stays in that tab; sidebar places get a tab of their own
     // (openFolder). Ctrl+double-click / middle-click open a folder in a new tab.
@@ -321,17 +322,33 @@ Window {
     function openTerminal(kind) {
         if (splitActive) { splitPane.openTerminal(kind); return }
         const files = paths().filter(p => Fm.kind(p) !== "folder")
-        const id = createTerminal(kind, dir, kind === "nvim" ? (files.length ? files : ["."]) : [], termLayer)
+        const id = createTerminal(kind, dir, kind === "nvim" ? (files.length ? files : ["."]) : kind === "web" ? webStart(files) : [], termLayer)
         saveTab()
         tabs = tabs.concat([{ dir: dir, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0, term: kind, termId: id }])
         tabBarShown = true
         loadTab(tabs.length - 1)
     }
+    // A web tab starts on the selected .html / .pdf / image file, else on the start page.
+    function webStart(files) {
+        const f = files.find(p => /\.(html?|xhtml|svg|pdf|png|jpe?g|gif|webp|txt|md)$/i.test(p))
+        return f ? ["file://" + f] : []
+    }
+    property var webComponent: null              // BrowserView.qml, loaded on first use (Qt WebEngine)
     function createTerminal(kind, cwd, args, layer) {
         const id = nextTermId++
-        const t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
-                                                      workingDirectory: cwd, termId: id, fontPointSize: termFontSize })
-        t.fontChanged.connect(() => termFontSize = t.fontPointSize)   // pinch / Ctrl+± size, kept for new terminals
+        let t
+        if (kind === "web") {
+            if (!webComponent) webComponent = Qt.createComponent("BrowserView.qml")
+            if (webComponent.status !== Component.Ready) { console.warn(webComponent.errorString()); return 0 }
+            t = webComponent.createObject(layer, { startUrl: args[0] || "", u: win.u, tu: win.tu, fontFamily: win.fontFamily })
+            t.anchors.fill = layer
+            t.visible = Qt.binding(() => win.activeTermId === id || splitPane.activeTermId === id)
+            t.activeFocusChanged.connect(() => { if (t.activeFocus) win.activePane = layer === splitPane.termLayer ? 1 : 0 })
+        } else {
+            t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
+                                                   workingDirectory: cwd, termId: id, fontPointSize: termFontSize })
+            t.fontChanged.connect(() => termFontSize = t.fontPointSize)   // pinch / Ctrl+± size, kept for new terminals
+        }
         const all = Object.assign({}, terminals); all[id] = t; terminals = all
         t.titleChanged.connect(() => termTitleRev++)
         t.currentDirectoryChanged.connect(() => terminalCwdChanged(id, t.currentDirectory))
@@ -382,7 +399,7 @@ Window {
     function termTitle(t) {
         termTitleRev
         const term = terminals[t.termId]
-        const base = t.term === "nvim" ? "nvim" : "Terminal"
+        const base = t.term === "nvim" ? "nvim" : t.term === "web" ? "Web" : "Terminal"
         return term && term.title ? term.title : base + " — " + (t.dir.split("/").pop() || "/")
     }
     function tabTitle(i) {
@@ -1925,7 +1942,7 @@ Window {
         onTabIndexChanged: Qt.callLater(win.persistSplitTabs)
         onLastTabClosed: win.toggleSplit()
         termTitleFor: win.termTitle
-        onTerminalRequested: (kind, args) => splitPane.addTerminalTab(kind, win.createTerminal(kind, splitPane.dir, args, splitPane.termLayer))
+        onTerminalRequested: (kind, args) => splitPane.addTerminalTab(kind, win.createTerminal(kind, splitPane.dir, kind === "web" ? win.webStart(args) : args, splitPane.termLayer))
         onTerminalClosed: id => win.destroyTerminal(id)
         onTerminalCdRequested: (id, path) => { if (win.terminals[id]) win.terminals[id].changeDirectory(path) }
         Connections { target: win; function onTermTitleRevChanged() { splitPane.titleRev++ } }
@@ -2458,6 +2475,9 @@ Window {
         P.MenuItem { text: "Neovim Tab\tShift+F4"; onTriggered: win.openTerminal("nvim") }
         P.MenuSeparator {}
         P.MenuItem { text: "Open Alacritty Window"; onTriggered: win.openAlacritty() }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Web Tab\tF7"; onTriggered: win.openTerminal("web") }
+        P.MenuItem { text: "Open Firefox Window"; onTriggered: Fm.openInFirefox(win.browserActive ? win.activeTerminal.url.toString() : "") }
     }
     P.Menu {
         id: splitTabMenu
@@ -2587,6 +2607,7 @@ Window {
             P.MenuItem { text: "New Terminal Tab\tF4"; onTriggered: win.openTerminal("shell") }
             P.MenuItem { text: "New Neovim Tab\tShift+F4"; onTriggered: win.openTerminal("nvim") }
             P.MenuItem { text: "Open Alacritty Window"; onTriggered: win.openAlacritty() }
+            P.MenuItem { text: "New Web Tab\tF7"; onTriggered: win.openTerminal("web") }
             P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
             P.MenuSeparator {}
             P.MenuItem { text: "Compress\tCtrl+Alt+Z"; onTriggered: win.compressSelected() }
@@ -2775,7 +2796,8 @@ Window {
     Shortcut { sequences: [StandardKey.Paste]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.paste(win.dir) }
     Shortcut { sequences: [StandardKey.SelectAll]; enabled: !search.activeFocus && !win.renaming; onActivated: win.splitActive ? splitPane.selectAll() : win.selectAll() }
     Shortcut { sequence: "Ctrl+F"; onActivated: search.forceActiveFocus() }
-    Shortcut { sequences: ["Ctrl+L", "Ctrl+Shift+G"]; onActivated: win.editPath() }
+    Shortcut { sequences: ["Ctrl+L", "Ctrl+Shift+G"]; onActivated: win.browserActive ? win.activeTerminal.focusAddress() : win.editPath() }
+    Shortcut { sequence: "F7"; onActivated: win.openTerminal("web") }
     Shortcut { sequences: ["Ctrl+H", "Ctrl+Shift+>", "Ctrl+Shift+."]; onActivated: win.showHidden = !win.showHidden }
     Shortcut { sequence: "Ctrl+O"; onActivated: win.openSelection() }
     Shortcut { sequence: "Ctrl+I"; onActivated: win.getInfo() }

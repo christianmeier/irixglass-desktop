@@ -729,7 +729,19 @@ void TerminalView::wheelEvent(QWheelEvent *e)
         e->accept();
         return;
     }
-    const int steps = e->pixelDelta().y() ? e->pixelDelta().y() / int(m_cellH) : e->angleDelta().y() / 40;
+    // Touchpads send many small pixel deltas: add them up and scroll a line per cell height
+    // (dividing each delta on its own rounded every one of them down to 0). Wheels: 3 lines a notch.
+    int steps;
+    if (!e->pixelDelta().isNull()) {
+        m_wheelRest += e->pixelDelta().y();
+        steps = int(m_wheelRest / m_cellH);
+        m_wheelRest -= steps * m_cellH;
+    } else {
+        m_wheelRest += e->angleDelta().y() / 40.0;
+        steps = int(m_wheelRest);
+        m_wheelRest -= steps;
+    }
+    e->accept();
     if (!steps)
         return;
     if (m_mouseMode) {   // e.g. nvim with mouse=a

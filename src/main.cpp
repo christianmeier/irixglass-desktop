@@ -1,6 +1,7 @@
 #include "fm.h"
 
 #include <QApplication>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <KSignalHandler>
 #include <csignal>
 #include <QIcon>
@@ -14,6 +15,7 @@
 
 int main(int argc, char *argv[])
 {
+    QtWebEngineQuick::initialize();   // web tabs (BrowserView.qml); must come before the application
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("irixfm"));
     app.setOrganizationName(QStringLiteral("irixfm"));

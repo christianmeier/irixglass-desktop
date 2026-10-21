@@ -23,6 +23,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | New window opens at… (Settings) | ⬜ | 3 | settings window |
 | (not in Finder) Split view, F3 / F5 / F6 | ✅ two sides, each with its own tabs, view and icon size | | `SplitPane.qml` |
 | (not in Finder) Terminal / Neovim tabs, F4 / Shift+F4 | ✅ on either side, Alacritty look | | libvterm + KPty, `src/terminal.cpp` |
+| (not in Finder) Web tabs, F7 | ✅ on either side, Open in Firefox | | Qt WebEngine, `qml/BrowserView.qml` |
 
 ## Sidebar
 

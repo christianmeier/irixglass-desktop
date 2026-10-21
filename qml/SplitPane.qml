@@ -45,7 +45,7 @@ Item {
     property int titleRev: 0
     function openTerminal(kind) {
         const files = paths().filter(p => Fm.kind(p) !== "folder")
-        terminalRequested(kind, kind === "nvim" ? (files.length ? files : ["."]) : [])
+        terminalRequested(kind, kind === "nvim" ? (files.length ? files : ["."]) : kind === "web" ? files : [])
     }
     function addTerminalTab(kind, id) {
         saveTab()

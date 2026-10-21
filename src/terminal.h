@@ -30,6 +30,7 @@ class TerminalView : public QQuickPaintedItem
     Q_PROPERTY(int columns READ columns NOTIFY sizeChanged)
     Q_PROPERTY(int rows READ rows NOTIFY sizeChanged)
     Q_PROPERTY(qreal fontPointSize MEMBER m_pointSize NOTIFY fontChanged)
+    Q_PROPERTY(int scrollOffset READ scrollOffset)   // lines scrolled back into the history (tests)
 
 public:
     explicit TerminalView(QQuickItem *parent = nullptr);
@@ -42,6 +43,7 @@ public:
     bool running() const;
     int columns() const { return m_cols; }
     int rows() const { return m_rows; }
+    int scrollOffset() const { return m_scrollOffset; }
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void sendText(const QString &text);     // typed / pasted text
@@ -122,7 +124,8 @@ private:
     bool m_cursorVisible = true, m_focused = false, m_altScreen = false;
     int m_mouseMode = 0;                        // VTERM_PROP_MOUSE_*
     std::deque<std::vector<VTermScreenCell>> m_scrollback;
-    int m_scrollOffset = 0;                     // lines scrolled back into the history
+    int m_scrollOffset = 0;
+    qreal m_wheelRest = 0;                     // wheel / touchpad movement not yet a whole line                     // lines scrolled back into the history
     bool m_selecting = false;
     VTermPos m_selA{-1, -1}, m_selB{-1, -1};
 };

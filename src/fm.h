@@ -58,6 +58,7 @@ public:
     Q_INVOKABLE void open(const QString &path);
     Q_INVOKABLE void openInDolphin(const QString &path);
     Q_INVOKABLE void openTerminal(const QString &dir);
+    Q_INVOKABLE void openInFirefox(const QString &url);
     Q_INVOKABLE void newWindow(const QString &dir);
     Q_INVOKABLE void overview();
 

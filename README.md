@@ -72,6 +72,11 @@ manager icon; the IRIX icons are only inside the window.
   output has no wrapped lines (at most 12 pt). Drop files or folders onto a terminal to type their
   paths (shell-quoted; nothing is moved). Changing the folder (path bar, ‹ ↑) cds the shell there
   when it's at its prompt, and a `cd` in the shell moves the path bar along.
+- Web tabs (F7, or the >_ menu): a web page in a tab, on either side, like the terminal tabs.
+  Firefox can't be embedded on Wayland, so this is Qt WebEngine (Chromium) with its own saved
+  profile (cookies, logins); **Open in Firefox** hands the page over. ‹ › ↻ and an address field
+  that takes URLs, paths or search words (DuckDuckGo); Ctrl+L focuses it, Back / Forward act on the
+  page, the thumbwheel zooms it (its button: 100 %). With an .html / .pdf / image selected, F7 opens it.
 - The view buttons in the toolbar always show the active side's view (icons / list / previews).
 - Sidebar icons: the theme's own symbolic icons (home, desktop, documents, downloads, applications,
   trash, network…) in the section's colour, like Finder. Right-click an entry ▸ **Icon…** to give it
@@ -121,7 +126,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (258 checks, incl. split view and terminal tabs)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (268 checks, incl. split view and terminal tabs)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -174,6 +179,7 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Alt+1…8 / Alt+9 | Go to tab 1…8 / the last tab |
 | F3 / F5 / F6 | Split view / copy / move to the other side |
 | F4 / Shift+F4 | Terminal tab / Neovim tab (selected file) |
+| F7 | Web tab |
 
 ## Layout of the code
 
@@ -185,7 +191,7 @@ src/            C++: window blur, input mask and shadow (KWindowEffects, KWindow
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 
