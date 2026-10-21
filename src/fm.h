@@ -89,6 +89,11 @@ public:
     Q_INVOKABLE void folderSize(const QString &path);
     Q_INVOKABLE QString cachedFolderSize(const QString &path) const;
     Q_INVOKABLE QString textPreview(const QString &path, int maxBytes = 262144) const;  // "" for binary files
+    // Rich preview of a text file: {kind: "markdown" | "code" | "plain", html, language}.
+    // Markdown is rendered; code (and fenced code in Markdown) is highlighted with the Nord theme
+    // when KSyntaxHighlighting knows the language.
+    Q_INVOKABLE QVariantMap richPreview(const QString &path, int maxBytes = 262144) const;
+    Q_INVOKABLE QStringList highlightThemes() const;
 
     // Trash: the home trash is listed directly (trashDir); Put Back and Empty go through KIO.
     Q_INVOKABLE void restoreFromTrash(const QStringList &paths);

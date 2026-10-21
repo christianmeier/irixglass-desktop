@@ -14,9 +14,9 @@ KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \
             -I$(KF6INC)/KIOCore -I$(KF6INC)/KIOGui -I$(KF6INC)/KIOWidgets -I$(KF6INC)/KIO \
-            -I$(KF6INC)/KConfigCore -I$(KF6INC)/KConfig -I$(KF6INC)/KService -I$(KF6INC)/KJobWidgets -I$(KF6INC)/Solid
+            -I$(KF6INC)/KConfigCore -I$(KF6INC)/KConfig -I$(KF6INC)/KService -I$(KF6INC)/KJobWidgets -I$(KF6INC)/Solid -I$(KF6INC)/KSyntaxHighlighting
 LDLIBS   += $(shell pkg-config --libs $(PKGS)) \
-            -lKF6KIOCore -lKF6KIOGui -lKF6KIOWidgets -lKF6ConfigCore -lKF6Service -lKF6Solid
+            -lKF6KIOCore -lKF6KIOGui -lKF6KIOWidgets -lKF6ConfigCore -lKF6Service -lKF6Solid -lKF6SyntaxHighlighting
 
 SRC := src/main.cpp src/fm.cpp $(BUILD)/moc_fm.cpp
 
@@ -58,8 +58,11 @@ $(BUILD)/split_test: tests/split_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.
 $(BUILD)/dock_test: tests/dock_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/dock_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
 
+$(BUILD)/preview_test: tests/preview_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/preview_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test
 test: $(TESTS)
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc

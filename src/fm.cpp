@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QLocale>
 #include <QMimeData>
 #include <QMimeDatabase>
@@ -14,6 +15,14 @@
 #include <QQuickWindow>
 #include <QRegion>
 #include <QDirIterator>
+#include <QRegularExpression>
+#include <QTextDocument>
+#include <KSyntaxHighlighting/AbstractHighlighter>
+#include <KSyntaxHighlighting/Definition>
+#include <KSyntaxHighlighting/Format>
+#include <KSyntaxHighlighting/Repository>
+#include <KSyntaxHighlighting/State>
+#include <KSyntaxHighlighting/Theme>
 #include <QFileSystemWatcher>
 #include <KConfig>
 #include <KConfigGroup>
@@ -1122,4 +1131,171 @@ void Fm::renameTagEverywhere(const QString &from, const QString &to)
 void Fm::deleteTagEverywhere(const QString &tag)
 {
     removeTag(taggedCandidates(tag), tag);
+}
+
+// ---- Rich previews: Markdown and syntax highlighting (Nord) ---------------------------------------
+
+namespace
+{
+// Nord palette for the text around code.
+const char kNordText[] = "#D8DEE9";
+const char kNordDim[] = "#4C566A";
+const char kNordFrost[] = "#88C0D0";
+const char kNordCodeBg[] = "#2E3440";
+
+KSyntaxHighlighting::Repository &repository()
+{
+    static KSyntaxHighlighting::Repository repo;
+    return repo;
+}
+
+KSyntaxHighlighting::Theme nordTheme()
+{
+    auto &repo = repository();
+    for (const auto &t : repo.themes())
+        if (t.name().compare(QLatin1String("Nord"), Qt::CaseInsensitive) == 0)
+            return t;
+    return repo.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
+}
+
+// Turns code into HTML spans coloured by the theme, line by line.
+class HtmlHighlighter : public KSyntaxHighlighting::AbstractHighlighter
+{
+public:
+    QString html;
+    QString line;
+    int done = 0;
+    void highlight(const QString &code)
+    {
+        KSyntaxHighlighting::State state;
+        const QStringList lines = code.split(QLatin1Char('\n'));
+        for (int i = 0; i < lines.size(); ++i) {
+            line = lines[i];
+            done = 0;
+            state = highlightLine(line, state);
+            if (done < line.size())
+                html += line.mid(done).toHtmlEscaped();
+            if (i + 1 < lines.size())
+                html += QLatin1Char('\n');
+        }
+    }
+
+protected:
+    void applyFormat(int offset, int length, const KSyntaxHighlighting::Format &format) override
+    {
+        if (offset > done)
+            html += line.mid(done, offset - done).toHtmlEscaped();
+        const QString text = line.mid(offset, length).toHtmlEscaped();
+        const QColor c = format.textColor(theme());
+        if (format.isDefaultTextStyle(theme()) || !c.isValid()) {
+            html += text;
+        } else {
+            QString style = QStringLiteral("color:%1;").arg(c.name());
+            if (format.isBold(theme()))
+                style += QStringLiteral("font-weight:600;");
+            if (format.isItalic(theme()))
+                style += QStringLiteral("font-style:italic;");
+            html += QStringLiteral("<span style=\"%1\">%2</span>").arg(style, text);
+        }
+        done = offset + length;
+    }
+};
+
+QString codeBlock(const QString &code, const KSyntaxHighlighting::Definition &def)
+{
+    QString body;
+    if (def.isValid()) {
+        HtmlHighlighter h;
+        h.setDefinition(def);
+        h.setTheme(nordTheme());
+        h.highlight(code);
+        body = h.html;
+    } else {
+        body = code.toHtmlEscaped();
+    }
+    return QStringLiteral("<table width=\"100%\" cellpadding=\"8\" style=\"background-color:%1;\"><tr><td>"
+                          "<pre style=\"color:%2; font-family:'SF Mono','Noto Sans Mono',monospace;\">%3</pre></td></tr></table>")
+        .arg(QLatin1String(kNordCodeBg), QLatin1String(kNordText), body);
+}
+
+// Markdown → HTML body (Qt's own renderer), without the document wrapper.
+QString markdownFragment(const QString &md)
+{
+    QTextDocument doc;
+    doc.setMarkdown(md, QTextDocument::MarkdownDialectGitHub);
+    QString html = doc.toHtml();
+    const int b = html.indexOf(QLatin1String("<body"));
+    const int s = b >= 0 ? html.indexOf(QLatin1Char('>'), b) + 1 : 0;
+    const int e = html.lastIndexOf(QLatin1String("</body>"));
+    return html.mid(s, e > s ? e - s : -1);
+}
+} // namespace
+
+QStringList Fm::highlightThemes() const
+{
+    QStringList names;
+    for (const auto &t : repository().themes())
+        names << t.name();
+    return names;
+}
+
+QVariantMap Fm::richPreview(const QString &path, int maxBytes) const
+{
+    const QString text = textPreview(path, maxBytes);
+    if (text.isEmpty())
+        return {{QStringLiteral("kind"), QStringLiteral("plain")}, {QStringLiteral("html"), QString()}};
+    const QMimeType mime = QMimeDatabase().mimeTypeForFile(path);
+    const QString wrapStart = QStringLiteral("<div style=\"color:%1;\">").arg(QLatin1String(kNordText));
+
+    if (mime.inherits(QStringLiteral("text/markdown")) || path.endsWith(QLatin1String(".md"), Qt::CaseInsensitive)) {
+        // Fenced code blocks are highlighted by their language; the rest goes through Qt's Markdown.
+        static const QRegularExpression fence(QStringLiteral("^(```|~~~)[ \\t]*([\\w+#.-]*)[^\\n]*\\n(.*?)^\\1[ \\t]*$"),
+                                              QRegularExpression::MultilineOption | QRegularExpression::DotMatchesEverythingOption);
+        QString html = wrapStart;
+        int pos = 0;
+        auto it = fence.globalMatch(text);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            html += markdownFragment(text.mid(pos, m.capturedStart() - pos));
+            const QString lang = m.captured(2);
+            auto def = repository().definitionForName(lang);
+            if (!def.isValid() && !lang.isEmpty())
+                def = repository().definitionForFileName(QStringLiteral("x.") + lang);
+            QString code = m.captured(3);
+            if (code.endsWith(QLatin1Char('\n')))
+                code.chop(1);
+            html += codeBlock(code, def);
+            pos = m.capturedEnd();
+        }
+        html += markdownFragment(text.mid(pos)) + QStringLiteral("</div>");
+        // Pictures: relative paths are relative to the Markdown file; wide ones are scaled down.
+        static const QRegularExpression img(QStringLiteral("<img src=\"([^\"]+)\"([^>]*)>"));
+        const QString base = QFileInfo(path).absolutePath();
+        QString out;
+        int last = 0;
+        auto im = img.globalMatch(html);
+        while (im.hasNext()) {
+            const auto m = im.next();
+            QString src = m.captured(1);
+            if (!src.contains(QLatin1String("://")) && !src.startsWith(QLatin1String("data:")))
+                src = QUrl::fromLocalFile(QDir(base).absoluteFilePath(src)).toString();
+            const QSize size = QImageReader(QUrl(src).toLocalFile()).size();
+            const QString width = size.width() > 640 ? QStringLiteral(" width=\"640\" height=\"%1\"").arg(size.height() * 640 / size.width()) : QString();
+            out += html.mid(last, m.capturedStart() - last) + QStringLiteral("<img src=\"%1\"%2>").arg(src, width);
+            last = m.capturedEnd();
+        }
+        html = out + html.mid(last);
+        // Nord accents for links and rules.
+        html.replace(QLatin1String("<a href"), QStringLiteral("<a style=\"color:%1;\" href").arg(QLatin1String(kNordFrost)));
+        return {{QStringLiteral("kind"), QStringLiteral("markdown")}, {QStringLiteral("html"), html}};
+    }
+
+    const auto def = repository().definitionForFileName(path);
+    const auto byMime = def.isValid() ? def : repository().definitionForMimeType(mime.name());
+    if (byMime.isValid() && byMime.name() != QLatin1String("None"))
+        return {{QStringLiteral("kind"), QStringLiteral("code")},
+                {QStringLiteral("language"), byMime.name()},
+                {QStringLiteral("html"), codeBlock(text, byMime)}};
+    return {{QStringLiteral("kind"), QStringLiteral("plain")},
+            {QStringLiteral("html"), QStringLiteral("<pre style=\"color:%1;\">%2</pre>").arg(QLatin1String(kNordText), text.toHtmlEscaped())}};
 }

@@ -28,6 +28,8 @@ Item {
     readonly property string textBody: path && !info.isDir && !info.mime.startsWith("image/") && !info.mime.startsWith("video/")
                                        && !info.mime.startsWith("audio/") && info.mime !== "application/pdf"
                                        ? Fm.textPreview(path) : ""
+    // Markdown rendered, code highlighted in Nord (Fm.richPreview); plain text otherwise.
+    readonly property var rich: kind === "text" ? Fm.richPreview(path) : null
     property string folderSizeText: ""
     onPathChanged: {
         folderSizeText = ""
@@ -64,6 +66,13 @@ Item {
             horizontalAlignment: Text.AlignHCenter; elide: Text.ElideMiddle
             text: ql.info.name || ""; color: "white"
             font.family: ql.fontFamily; font.pixelSize: 13.5 * ql.tu; font.weight: Font.DemiBold
+        }
+        Text {   // "Markdown" / the code's language
+            visible: !!ql.rich && ql.rich.kind !== "plain"
+            x: 40 * ql.u; y: 14 * ql.u
+            text: ql.rich ? (ql.rich.kind === "markdown" ? "Markdown" : ql.rich.language || "") : ""
+            color: "#88c0d0"; opacity: .9
+            font.family: ql.fontFamily; font.pixelSize: 11.5 * ql.tu; font.weight: Font.DemiBold
         }
         Pill {
             visible: !ql.info.isDir && !!ql.info.openWith
@@ -128,12 +137,21 @@ Item {
             ScrollView {
                 visible: ql.kind === "text"
                 anchors.fill: parent
+                ScrollBar.vertical: GlassScrollBar { u: ql.u; parent: textView; x: textView.width - width; height: textView.height }
+                ScrollBar.horizontal: GlassScrollBar { u: ql.u; parent: textView; y: textView.height - height; width: textView.width }
+                id: textView
                 TextArea {
+                    objectName: "quickLookText"
                     readOnly: true; selectByMouse: true
-                    text: ql.textBody
-                    color: "#e5e9f0"; wrapMode: TextArea.NoWrap
-                    font.family: "SF Mono"; font.pixelSize: 12 * ql.tu
-                    background: Rectangle { color: Qt.rgba(0, 0, 0, .25); radius: 10 * ql.u }
+                    textFormat: TextEdit.RichText
+                    text: ql.rich ? ql.rich.html : ""
+                    readonly property bool markdown: !!ql.rich && ql.rich.kind === "markdown"
+                    color: "#d8dee9"
+                    wrapMode: markdown ? TextArea.Wrap : TextArea.NoWrap
+                    leftPadding: (markdown ? 22 : 10) * ql.u; rightPadding: leftPadding; topPadding: (markdown ? 16 : 8) * ql.u
+                    font.family: markdown ? ql.fontFamily : "SF Mono"; font.pixelSize: (markdown ? 14 : 12) * ql.tu
+                    onLinkActivated: link => Qt.openUrlExternally(link)
+                    background: Rectangle { color: "#2e3440"; opacity: .85; radius: 10 * ql.u }
                 }
             }
             // Folders and anything without a preview: big icon and the details.

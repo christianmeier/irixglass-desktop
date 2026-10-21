@@ -64,6 +64,9 @@ manager icon; the IRIX icons are only inside the window.
   places work on the active side (the one with the blue line under its header).
 - Maximized or full screen, fm keeps the floating dock's height free at the bottom, so tabs, status
   bar and sidebar end above it; the height is read from Plasma's panel settings and follows changes.
+- Quick Look and the preview pane render Markdown (headings, lists, tables, links, pictures) and
+  highlight code with the Nord theme (KSyntaxHighlighting, the engine Kate uses) — both code files
+  and fenced code blocks in Markdown whose language is known.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
   to the standard size.
 - Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
@@ -84,7 +87,7 @@ KDE Plasma 6 on Wayland (KWin draws the blur and the shadow), Qt 6.8 or newer, K
 On Arch / CachyOS:
 
 ```
-sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid plasma-integration
+sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting plasma-integration
 ```
 
 The text uses **SF Pro Text** if it's installed and falls back to the system font otherwise.
@@ -96,7 +99,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (198 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (207 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -158,7 +161,7 @@ src/            C++: window blur, input mask and shadow (KWindowEffects, KWindow
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

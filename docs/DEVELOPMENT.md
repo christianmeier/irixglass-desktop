@@ -233,6 +233,16 @@ on save), so resizing the dock updates fm at once. `win.dockInset` applies it on
 full screen: on Wayland a window doesn't know its position, so a merely large window can't be
 detected. The tab bar, status bar, sidebar and panes all end `dockInset` higher.
 
+### Rich previews
+
+`Fm::richPreview(path)` returns `{kind, html, language}`. Markdown: fenced code blocks are cut out
+and highlighted by their language, the rest goes through Qt's own Markdown renderer
+(`QTextDocument::setMarkdown`, GitHub dialect) and is stitched back together; links get Nord frost,
+pictures resolve next to the file and are scaled to 640 px. Code files: KSyntaxHighlighting picks
+the definition by file name (then MIME type) and a small `AbstractHighlighter` subclass writes
+coloured `<span>`s with the **Nord** theme. Quick Look shows it in a `TextArea` (RichText); the
+preview pane shows the first 4 KB without pictures.
+
 ### Sidebar sections
 
 Sections are part of `places` (title, colour, items) and can be created, renamed, moved and

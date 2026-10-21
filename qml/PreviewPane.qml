@@ -46,13 +46,18 @@ Item {
                 sourceSize: Qt.size(width * 2, height * 2)
             }
         }
-        Rectangle {
+        Rectangle {   // the start of the text: Markdown rendered, code highlighted (Nord)
             visible: pane.kind === "text"
-            anchors.fill: parent; radius: 8 * pane.u; color: Qt.rgba(0, 0, 0, .25); clip: true
+            anchors.fill: parent; radius: 8 * pane.u; color: "#2e3440"; opacity: .9; clip: true
             Text {
+                objectName: "previewText"
+                readonly property var rich: pane.kind === "text" ? Fm.richPreview(pane.path, 4096) : null
+                readonly property bool markdown: !!rich && rich.kind === "markdown"
                 x: 8 * pane.u; y: 6 * pane.u; width: parent.width - 16 * pane.u
-                text: pane.textBody; color: "#e5e9f0"; wrapMode: Text.WrapAnywhere
-                font.family: "SF Mono"; font.pixelSize: 9.5 * pane.tu
+                textFormat: Text.RichText
+                text: rich ? rich.html.replace(/<img[^>]*>/g, "") : ""   // no pictures in the small preview
+                color: "#d8dee9"; wrapMode: Text.Wrap
+                font.family: markdown ? pane.fontFamily : "SF Mono"; font.pixelSize: (markdown ? 10.5 : 9.5) * pane.tu
             }
         }
         Image {
