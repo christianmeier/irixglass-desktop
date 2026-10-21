@@ -41,7 +41,8 @@ public:
     int dockReserve() const { return m_dockReserve; }
 
     // Blur behind + input mask in the window's rounded shape, plus a compositor-drawn shadow.
-    Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow);
+    // clear: rects (QRectF) left out of the blur behind the window (terminals, like Alacritty)
+    Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow, const QVariantList &clear = {});
 
     Q_INVOKABLE QString kind(const QString &path) const;  // folder | app | image | exe | doc
     Q_INVOKABLE QVariantMap desktopInfo(const QString &path) const;  // {name, icon}

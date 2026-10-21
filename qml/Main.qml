@@ -208,7 +208,16 @@ Window {
     }
 
     function asset(name) { return "file://" + Fm.assetDir + "/icons/" + name + ".svg" }
-    function shape() { Fm.updateWindow(win, Math.round(r), !maximized) }
+    // Where a terminal (not a web tab) shows, on each side: no tint and no blur behind it.
+    function isTerminal(id) { const t = id ? terminals[id] : null; return !!t && t.objectName !== "browserView" }
+    readonly property var termHoles: [
+        isTerminal(activeTermId) ? Qt.rect(termLayer.x, termLayer.y, termLayer.width, termLayer.height) : Qt.rect(0, 0, 0, 0),
+        splitPane.visible && isTerminal(splitPane.activeTermId)
+            ? Qt.rect(splitPane.x + splitPane.termLayer.x, splitPane.y + splitPane.termLayer.y, splitPane.termLayer.width, splitPane.termLayer.height)
+            : Qt.rect(0, 0, 0, 0)
+    ]
+    onTermHolesChanged: Qt.callLater(shape)
+    function shape() { Fm.updateWindow(win, Math.round(r), !maximized, termHoles) }
     onWidthChanged: shape()
     onHeightChanged: shape()
     onVisibilityChanged: shape()
@@ -903,6 +912,9 @@ Window {
             PathRectangle { x: navPill.x; y: navPill.y; width: navPill.width; height: navPill.height; radius: navPill.height / 2 }
             PathRectangle { x: pathPill.x; y: pathPill.y; width: pathPill.width; height: pathPill.height; radius: pathPill.height / 2 }
             PathRectangle { x: viewPill.x; y: viewPill.y; width: viewPill.width; height: viewPill.height; radius: viewPill.height / 2 }
+            // Terminals sit straight on the wallpaper, like Alacritty (its 0.8 opacity, no tint, no blur).
+            PathRectangle { x: win.termHoles[0].x; y: win.termHoles[0].y; width: win.termHoles[0].width; height: win.termHoles[0].height }
+            PathRectangle { x: win.termHoles[1].x; y: win.termHoles[1].y; width: win.termHoles[1].width; height: win.termHoles[1].height }
             PathRectangle { x: searchPill.x; y: searchPill.y; width: searchPill.width; height: searchPill.height; radius: searchPill.height / 2 }
         }
     }

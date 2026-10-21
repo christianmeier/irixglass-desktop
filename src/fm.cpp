@@ -718,12 +718,15 @@ QString Fm::userName() const
     return QDir::home().dirName();
 }
 
-void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow)
+void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow, const QVariantList &clear)
 {
     if (!window)
         return;
     const QRegion shape = roundedRegion(window->width(), window->height(), radius);
-    KWindowEffects::enableBlurBehind(window, true, shape);
+    QRegion blur = shape;
+    for (const QVariant &r : clear)
+        blur -= r.toRectF().toAlignedRect();
+    KWindowEffects::enableBlurBehind(window, true, blur);
     window->setMask(shape);
 
     if (!shadow) {
