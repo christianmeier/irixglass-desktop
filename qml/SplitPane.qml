@@ -33,23 +33,48 @@ Item {
     signal openFile(string path)
     signal dragStarted(bool on)
     signal lastTabClosed()
+    signal terminalRequested(string kind, var args)   // the window creates it in termLayer
+    signal terminalClosed(int termId)
+
+    // terminal tabs on this side
+    property int activeTermId: 0
+    readonly property bool termActive: activeTermId !== 0
+    property alias termLayer: termLayer
+    property int titleRev: 0
+    function openTerminal(kind) {
+        const files = paths().filter(p => Fm.kind(p) !== "folder")
+        terminalRequested(kind, kind === "nvim" ? (files.length ? files : ["."]) : [])
+    }
+    function addTerminalTab(kind, id) {
+        saveTab()
+        tabs = tabs.concat([{ dir: dir, back: [], term: kind, termId: id }])
+        loadTab(tabs.length - 1)
+    }
+    function closeTerminalTab(id) {
+        const i = tabs.findIndex(t => t.termId === id)
+        if (i >= 0) closeTab(i)
+    }
 
     // ---- this side's own tabs: the active one is live (dir, back, selection), others are snapshots
     property var tabs: [{ dir: "", back: [] }]
     property int tabIndex: 0
     property var closedTabs: []
+    property var termTitleFor: null      // function(tab) -> title (from the window, which owns the terminals)
     readonly property var tabModel: tabs.map((t, i) => {
+        titleRev
         const d = i === tabIndex ? dir : t.dir
+        if (t.term && termTitleFor) return { title: termTitleFor(t), dir: d }
         return { title: d === "/" ? "/" : (d.split("/").pop() || d), dir: d }
     })
     function saveTab() {
         if (tabIndex < 0 || tabIndex >= tabs.length) return
-        const t = tabs.slice(); t[tabIndex] = { dir: dir, back: back.slice(-20) }; tabs = t
+        const t = tabs.slice(); t[tabIndex] = Object.assign({}, tabs[tabIndex], { dir: dir, back: back.slice(-20) }); tabs = t
     }
     function loadTab(i) {
         const t = tabs[i]
         if (!t) return
         tabIndex = i
+        activeTermId = t.termId || 0
         back = t.back || []
         dir = t.dir
         selection = ({}); anchorIndex = -1
@@ -72,9 +97,11 @@ Item {
         newTab(path, true)
     }
     function closeTab(i) {
-        if (tabs.length <= 1) { pane.lastTabClosed(); return }
+        const closing = tabs[i]
+        if (closing && closing.term) terminalClosed(closing.termId)   // ends its program
+        if (tabs.length <= 1) { if (closing && closing.term) { tabs = [{ dir: dir, back: [] }]; tabIndex = -1; loadTab(0) } pane.lastTabClosed(); return }
         saveTab()
-        closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
+        if (!(closing && closing.term)) closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
         const t = tabs.slice(); t.splice(i, 1)
         const wasActive = i === tabIndex
         const next = tabIndex > i ? tabIndex - 1 : tabIndex
@@ -176,7 +203,7 @@ Item {
     }
     Item {
         id: columns
-        visible: pane.viewMode === 1
+        visible: pane.viewMode === 1 && !pane.termActive
         // the same height as the main side's list header, so rows line up across the sides
         x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 26 * pane.tu
         Text {
@@ -196,7 +223,7 @@ Item {
     ListView {
         id: rows
         objectName: "splitList"
-        visible: pane.viewMode === 1
+        visible: pane.viewMode === 1 && !pane.termActive
         x: 6 * pane.u; y: columns.y + columns.height
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
@@ -288,7 +315,7 @@ Item {
     GridView {
         id: grid
         objectName: "splitGrid"
-        visible: pane.viewMode !== 1
+        visible: pane.viewMode !== 1 && !pane.termActive
         x: 6 * pane.u; y: columns.y + 6 * pane.u
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
@@ -417,5 +444,12 @@ Item {
                 onDropped: d => { pane.dropRequested(d.urls, c.filePath, d.proposedAction === Qt.MoveAction); d.accept() }
             }
         }
+    }
+
+    Item {   // terminal tabs of this side are shown here
+        id: termLayer
+        objectName: "splitTermLayer"
+        x: 0; y: bar.y + bar.height + 4 * pane.u; width: pane.width; height: pane.height - y
+        visible: pane.termActive
     }
 }

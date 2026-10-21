@@ -6,6 +6,7 @@ import QtCore
 import Qt.labs.folderlistmodel
 import Qt.labs.platform as P
 import org.kde.kirigami as K
+import IrixFm
 
 // fm: the IRIX Indigo Magic file manager, rebuilt with a macOS Tahoe glass skin.
 // Geometry follows the mockup (docs/mockup.png) in mockup pixels times `u`.
@@ -82,6 +83,12 @@ Window {
     readonly property real splitHeaderH: splitView ? 26 * tu - 8 * u : 0   // = split side's header (4u + 26tu + 2u) - 6u
     Behavior on splitW { enabled: !win.draggingSplit; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
     property var closedTabs: []                 // for Reopen Closed Tab
+    // ---- terminal tabs: a tab can hold a terminal (fish or nvim) instead of a folder
+    property var terminals: ({})                // termId -> TerminalView (kept alive while its tab exists)
+    property int nextTermId: 1
+    property int termTitleRev: 0                // bumped when a terminal's title changes
+    property int activeTermId: 0                // the main side's visible terminal (0 = a folder)
+    readonly property bool termActive: activeTermId !== 0
     property real pendingScrollY: -1
     property bool waitForLoad: false            // the folder model still shows the previous folder
     property string tabsJson: ""                // saved: [{dir, back, fwd, search}]
@@ -289,6 +296,52 @@ Window {
         settings.sync()
     }
 
+    // ---- terminal tabs ---------------------------------------------------------------
+    // kind: "shell" (the login shell, fish) or "nvim"; in the active side's folder. Neovim opens the
+    // selected files, or the folder.
+    function openTerminal(kind) {
+        if (splitActive) { splitPane.openTerminal(kind); return }
+        const files = paths().filter(p => Fm.kind(p) !== "folder")
+        const id = createTerminal(kind, dir, kind === "nvim" ? (files.length ? files : ["."]) : [], termLayer)
+        saveTab()
+        tabs = tabs.concat([{ dir: dir, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0, term: kind, termId: id }])
+        tabBarShown = true
+        loadTab(tabs.length - 1)
+    }
+    function createTerminal(kind, cwd, args, layer) {
+        const id = nextTermId++
+        const t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
+                                                      workingDirectory: cwd, termId: id })
+        const all = Object.assign({}, terminals); all[id] = t; terminals = all
+        t.titleChanged.connect(() => termTitleRev++)
+        t.finished.connect(() => Qt.callLater(() => terminalFinished(id)))
+        t.start()
+        return id
+    }
+    function destroyTerminal(id) {
+        const t = terminals[id]
+        if (!t) return
+        const all = Object.assign({}, terminals); delete all[id]; terminals = all
+        t.destroy()
+        if (activeTermId === id) activeTermId = 0
+    }
+    // The program ended (exit, :q): its tab closes, on whichever side it was.
+    function terminalFinished(id) {
+        const i = tabs.findIndex(t => t.termId === id)
+        if (i >= 0) closeTab(i)
+        else splitPane.closeTerminalTab(id)
+    }
+    function openAlacritty() { Fm.openTerminal(splitActive ? splitPane.dir : dir) }
+    Component {
+        id: termComponent
+        TerminalView {
+            property int termId: 0
+            anchors.fill: parent
+            visible: win.activeTermId === termId || splitPane.activeTermId === termId
+            onActiveFocusChanged: if (activeFocus) win.activePane = parent === splitPane.termLayer ? 1 : 0
+        }
+    }
+
     // ---- tabs ----------------------------------------------------------------------
     function tabTitleOf(t) {
         const s = t.search || ""
@@ -300,7 +353,15 @@ Window {
         if (t.dir === "/") return "cachyOS"
         return t.dir.split("/").pop()
     }
+    function termTitle(t) {
+        termTitleRev
+        const term = terminals[t.termId]
+        const base = t.term === "nvim" ? "nvim" : "Terminal"
+        return term && term.title ? term.title : base + " — " + (t.dir.split("/").pop() || "/")
+    }
     function tabTitle(i) {
+        const tt = tabs[i]
+        if (tt && tt.term) return termTitle(tt)
         if (i === tabIndex) return tabTitleOf({ dir: dir, search: search.text })
         return tabs[i] ? tabTitleOf(tabs[i]) : ""
     }
@@ -310,11 +371,11 @@ Window {
     }
     function saveTab() {
         if (tabIndex < 0 || tabIndex >= tabs.length) return
-        const t = tabs.slice(); t[tabIndex] = snapshot(); tabs = t
+        const t = tabs.slice(); t[tabIndex] = Object.assign({}, tabs[tabIndex], snapshot()); tabs = t
     }
     function persistTabs() {
         if (!Fm.restoreSession) return    // a window opened on a folder (xdg-open, Ctrl+N) leaves the saved tabs alone
-        tabsJson = JSON.stringify(tabs.map((t, i) => {
+        tabsJson = JSON.stringify(tabs.filter(t => !t.term).map((t, i) => {
             const x = i === tabIndex ? snapshot() : t
             return { dir: x.dir, back: x.back.slice(-20), fwd: x.fwd.slice(0, 20), search: x.search }
         }))
@@ -329,6 +390,7 @@ Window {
         if (editingPath) cancelPath()
         pendingSelect = []; pendingScrollY = -1; selection = ({}); anchorIndex = -1
         tabIndex = i
+        activeTermId = t.termId || 0
         backStack = t.back || []; fwdStack = t.fwd || []
         // A different folder: the model reports Ready for the old one until it starts loading.
         waitForLoad = t.dir !== dir
@@ -343,7 +405,8 @@ Window {
             applyPendingScroll()
         }
         persistTabs()
-        keys.forceActiveFocus()
+        if (activeTermId && terminals[activeTermId]) terminals[activeTermId].forceActiveFocus()
+        else keys.forceActiveFocus()
     }
     function applyPendingScroll() {
         if (pendingScrollY < 0 || pendingSelect.length || waitForLoad) return
@@ -371,9 +434,14 @@ Window {
         dirs.forEach((p, k) => newTab(p, activate && k === dirs.length - 1))
     }
     function closeTab(i) {
-        if (tabs.length <= 1) { win.close(); return }
+        const closing = tabs[i]
+        if (tabs.length <= 1 && !(closing && closing.term)) { win.close(); return }
+        if (closing && closing.term) {   // a terminal tab: end its program, never "reopen" it
+            destroyTerminal(closing.termId)
+            if (tabs.length <= 1) { tabs = [{ dir: dir, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0 }]; tabIndex = -1; loadTab(0); return }
+        }
         saveTab()
-        closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
+        if (!(closing && closing.term)) closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
         const t = tabs.slice(); t.splice(i, 1)
         const wasActive = i === tabIndex
         let next = tabIndex > i ? tabIndex - 1 : tabIndex
@@ -1166,7 +1234,7 @@ Window {
         id: viewPill
         objectName: "viewPill"
         tint: win.pillTint
-        width: 176 * u; height: 36 * u; y: 18 * u
+        width: 218 * u; height: 36 * u; y: 18 * u
         x: searchPill.x - 14 * u - width
         // Split view toggle, after a thin divider (it's on/off, not one of the three views).
         Rectangle { x: 127 * win.u; y: 9 * win.u; width: 1; height: 18 * win.u; color: Qt.rgba(1, 1, 1, .18) }
@@ -1188,6 +1256,25 @@ Window {
             ToolTip.visible: splitHover.hovered
             ToolTip.delay: 700
             ToolTip.text: (win.splitView ? "Close" : "Open") + " Split View (F3)"
+        }
+        Item {   // terminal: a menu with Terminal Tab, Neovim Tab, Alacritty window
+            id: termButton
+            objectName: "termButton"
+            x: 174 * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u
+            Rectangle {
+                anchors.fill: parent; radius: 14 * win.u
+                color: Qt.rgba(1, 1, 1, win.termActive || splitPane.termActive ? .18 : termHover.hovered ? .08 : 0)
+            }
+            Text {
+                anchors.centerIn: parent
+                text: ">_"; color: "white"; opacity: .85
+                font.family: "Noto Sans Mono"; font.pixelSize: 12 * win.tu; font.bold: true
+            }
+            HoverHandler { id: termHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: termMenu.open() }
+            ToolTip.visible: termHover.hovered
+            ToolTip.delay: 700
+            ToolTip.text: "Terminal (F4), Neovim (Shift+F4)"
         }
         Rectangle {
             x: (4 + win.activeViewMode * 41) * win.u; y: 4 * win.u; width: 40 * win.u; height: 28 * win.u; radius: 14 * win.u
@@ -1324,7 +1411,7 @@ Window {
     GridView {
         id: grid
         objectName: "grid"
-        visible: win.viewMode !== 1
+        visible: !win.termActive && win.viewMode !== 1
         x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH + win.splitHeaderH
         width: parent.width - x - 20 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
@@ -1539,7 +1626,7 @@ Window {
     ListView {
         id: list
         objectName: "list"
-        visible: win.viewMode === 1
+        visible: !win.termActive && win.viewMode === 1
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
@@ -1695,7 +1782,7 @@ Window {
     Row {
         id: scopeBar
         objectName: "scopeBar"
-        visible: win.searchActive
+        visible: win.searchActive && !win.termActive
         x: 262 * u - win.contentShift; y: 66 * u
         height: 28 * win.tu
         spacing: 6 * u
@@ -1747,6 +1834,14 @@ Window {
         font.family: win.fontFamily; font.pixelSize: 15 * win.tu
     }
 
+    Item {
+        id: termLayer
+        objectName: "termLayer"
+        x: 246 * u - win.contentShift; y: 66 * u
+        width: parent.width - x - win.previewW - win.splitW - 8 * u; height: parent.height - y - win.bottomH - 4 * u
+        visible: win.termActive
+    }
+
     // ---- split view: the second side ---------------------------------------------------
     SplitPane {
         id: splitPane
@@ -1765,6 +1860,10 @@ Window {
         onTabsChanged: Qt.callLater(win.persistSplitTabs)
         onTabIndexChanged: Qt.callLater(win.persistSplitTabs)
         onLastTabClosed: win.toggleSplit()
+        termTitleFor: win.termTitle
+        onTerminalRequested: (kind, args) => splitPane.addTerminalTab(kind, win.createTerminal(kind, splitPane.dir, args, splitPane.termLayer))
+        onTerminalClosed: id => win.destroyTerminal(id)
+        Connections { target: win; function onTermTitleRevChanged() { splitPane.titleRev++ } }
         onSelectionChanged: if (win.quickLook && win.splitActive && paths().length) win.quickLook = focusedPath()
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
         active: win.activePane === 1
@@ -1788,7 +1887,7 @@ Window {
     PaneHeader {
         id: mainHeader
         objectName: "mainPaneHeader"
-        visible: splitPane.visible
+        visible: splitPane.visible && !win.termActive
         x: list.x + 6 * u; y: 66 * u + win.scopeH + 4 * u; width: list.width - 12 * u
         dir: win.dir; canGoBack: win.backStack.length > 0
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
@@ -2272,6 +2371,13 @@ Window {
         P.MenuItem { text: "Close Split View\tF3"; onTriggered: win.toggleSplit() }
     }
     P.Menu {
+        id: termMenu
+        P.MenuItem { text: "Terminal Tab\tF4"; onTriggered: win.openTerminal("shell") }
+        P.MenuItem { text: "Neovim Tab\tShift+F4"; onTriggered: win.openTerminal("nvim") }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Open Alacritty Window"; onTriggered: win.openAlacritty() }
+    }
+    P.Menu {
         id: splitTabMenu
         property int index: 0
         P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: splitPane.newTab(splitPane.dir, true) }
@@ -2396,7 +2502,9 @@ Window {
             P.MenuItem { text: "Make Alias"; onTriggered: win.aliasSelected() }
             P.MenuItem { text: "Show Original\tCtrl+R"; onTriggered: win.showOriginal() }
             P.MenuSeparator {}
-            P.MenuItem { text: "Open Terminal Here"; onTriggered: Fm.openTerminal(win.dir) }
+            P.MenuItem { text: "New Terminal Tab\tF4"; onTriggered: win.openTerminal("shell") }
+            P.MenuItem { text: "New Neovim Tab\tShift+F4"; onTriggered: win.openTerminal("nvim") }
+            P.MenuItem { text: "Open Alacritty Window"; onTriggered: win.openAlacritty() }
             P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.dir) }
             P.MenuSeparator {}
             P.MenuItem { text: "Compress\tCtrl+Alt+Z"; onTriggered: win.compressSelected() }
@@ -2560,9 +2668,12 @@ Window {
     Shortcut { sequence: "Ctrl+N"; onActivated: Fm.newWindow(win.dir) }
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: win.newFolder() }
     Shortcut { sequence: "Ctrl+W"; onActivated: win.activeCloseTab() }
-    Shortcut { sequence: "Ctrl+Shift+W"; onActivated: win.close() }
+    // Ctrl+Shift+W: in a terminal tab it closes the tab (Ctrl+W belongs to the terminal), else the window.
+    Shortcut { sequence: "Ctrl+Shift+W"; onActivated: (win.splitActive ? splitPane.termActive : win.termActive) ? win.activeCloseTab() : win.close() }
     Shortcut { sequence: "Ctrl+T"; onActivated: win.activeNewTab() }
     Shortcut { sequence: "F3"; onActivated: win.toggleSplit() }
+    Shortcut { sequence: "F4"; onActivated: win.openTerminal("shell") }
+    Shortcut { sequence: "Shift+F4"; onActivated: win.openTerminal("nvim") }
     Shortcut { sequence: "F5"; enabled: win.splitView; onActivated: win.sendToOtherSide(false) }
     Shortcut { sequence: "F6"; enabled: win.splitView; onActivated: win.sendToOtherSide(true) }
     Shortcut { sequence: "Ctrl+Shift+T"; onActivated: win.activeReopenTab() }

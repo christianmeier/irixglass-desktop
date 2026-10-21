@@ -1,4 +1,7 @@
 #include "fm.h"
+#include "terminal.h"
+
+#include <QQmlEngine>
 
 #include <QClipboard>
 #include <QDir>
@@ -180,6 +183,9 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent, bool r
     refreshVolumes();
     loadTagIndex();
     loadSizeCache();
+    // The terminal used by terminal tabs (import IrixFm).
+    static const bool registered = (qmlRegisterType<TerminalView>("IrixFm", 1, 0, "TerminalView"), true);
+    Q_UNUSED(registered)
     // The dock's size: from Plasma's panel settings, re-read whenever they change.
     m_panelWatcher = new QFileSystemWatcher(this);
     const QString cfg = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
