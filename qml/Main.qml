@@ -1499,10 +1499,15 @@ Window {
         clip: true
         cellWidth: 168 * u * win.iconScale / .92
         cellHeight: 168 * u * win.iconScale / .92
-        model: win.searchActive ? resultsModel : folder
         // Delegates scrolled out are kept and refilled with the next items instead of being destroyed
         // and created again (the delegates hold no state of their own that outlives an item).
         reuseItems: true
+        // The folder or the search results. Qt (6.12) keeps the pool of reusable delegates when a
+        // view's model changes, and a delegate reused for the other model reads the wrong roles
+        // (blank names), so the pool is emptied (reuseItems off) before switching.
+        readonly property var shownModel: win.searchActive ? resultsModel : folder
+        Component.onCompleted: model = shownModel
+        onShownModelChanged: { reuseItems = false; model = shownModel; reuseItems = true }
         interactive: false
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
@@ -1735,8 +1740,10 @@ Window {
         width: parent.width - x - 14 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
-        model: win.searchActive ? resultsModel : folder
-        reuseItems: true   // as in the icon view
+        reuseItems: true   // as in the icon view, and the same care when switching to the results
+        readonly property var shownModel: win.searchActive ? resultsModel : folder
+        Component.onCompleted: model = shownModel
+        onShownModelChanged: { reuseItems = false; model = shownModel; reuseItems = true }
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
         headerPositioning: ListView.OverlayHeader
