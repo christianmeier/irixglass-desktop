@@ -39,7 +39,7 @@ bool waitFor(const std::function<bool()> &cond, int ms = 8000)
 int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
-    qputenv("SHELL", "/bin/bash");                 // a plain, predictable shell for the test
+    qputenv("IRIXFM_SHELL", "/bin/bash");          // a plain, predictable shell for the test
     qputenv("PS1", "fm$ ");
     qputenv("HISTFILE", "/dev/null");             // keep the test out of the user's shell history
     QApplication app(argc, argv);
@@ -110,8 +110,50 @@ int main(int argc, char *argv[])
             QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
             const qreal afterMinus = t->property("fontPointSize").toReal();
             QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
+            check(qAbs(win->property("termFontSize").toReal() - 12) < .01, QStringLiteral("the size is kept in the settings"),
+                  QString::number(win->property("termFontSize").toReal()));
             check(afterMinus < pt * 1.5 * 1.1 && qAbs(t->property("fontPointSize").toReal() - 12) < .01,
                   QStringLiteral("Ctrl+- / Ctrl+0 shrink and reset the font"), QString::number(afterMinus));
+            // the bottom thumbwheel sizes the terminal's text while it shows (not the icons)
+            {
+                auto *wheel = win->findChild<QQuickItem *>(QStringLiteral("thumbwheel"));
+                const double icons = win->property("wheelValue").toDouble();
+                wheel->setProperty("value", .5);
+                QTest::qWait(100);
+                check(qAbs(t->property("fontPointSize").toReal() - 18) < .05 && qAbs(win->property("wheelValue").toDouble() - icons) < 1e-6,
+                      QStringLiteral("the thumbwheel sets the terminal's text size, not the icon size"),
+                      QString::number(t->property("fontPointSize").toReal()));
+                auto *home = win->findChild<QQuickItem *>(QStringLiteral("homeButton"));
+                QTest::mouseClick(window, Qt::LeftButton, {}, home->mapToScene(QPointF(home->width() / 2, home->height() / 2)).toPoint());
+                QTest::qWait(100);
+                QTest::qWait(400);
+                check(qAbs(t->property("fontPointSize").toReal() - 12) < .05 && qAbs(wheel->property("value").toDouble() - .25) < 1e-3,
+                      QStringLiteral("…its home button: 12 pt when the output is narrow"), QString::number(t->property("fontPointSize").toReal()));
+                t->sendText(QStringLiteral("clear; printf '%0.s=' $(seq 1 180); echo\r"));
+                QTest::qWait(500);
+                check(t->columns() < 180, QStringLiteral("(a 180-character line wraps at 12 pt)"), QString::number(t->columns()));
+                QTest::mouseClick(window, Qt::LeftButton, {}, home->mapToScene(QPointF(home->width() / 2, home->height() / 2)).toPoint());
+                QTest::qWait(600);
+                check(t->columns() >= 181 && t->property("fontPointSize").toReal() < 12 && t->screenText().contains(QString(180, QLatin1Char('='))),
+                      QStringLiteral("…and smaller, so the output fits without line breaks"),
+                      QString::number(t->columns()) + " cols, " + QString::number(t->property("fontPointSize").toReal()) + " pt");
+                t->setFontSize(12);
+                t->forceActiveFocus();
+            }
+            // navigating the folder view (path bar, ‹ ↑) moves the shell there
+            {
+                const QString sub = base + QStringLiteral("/sub dir");
+                QDir().mkpath(sub);
+                QMetaObject::invokeMethod(win, "go", Q_ARG(QVariant, sub), Q_ARG(QVariant, false));
+                t->sendText(QStringLiteral("clear; pwd\r"));
+                check(waitFor([&] { return t->screenText().contains(QStringLiteral("\n") + sub) || t->screenText().startsWith(sub); }),
+                      QStringLiteral("changing the folder cds the shell there"), t->screenText());
+                t->sendText(QStringLiteral("sleep 3\r"));
+                QTest::qWait(300);
+                check(!t->changeDirectory(base), QStringLiteral("…but not while a program runs in it"));
+                QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+                QTest::qWait(300);
+            }
             // dropping files types their paths, quoted; nothing is moved
             const QString odd = base + QStringLiteral("/it's a folder");
             QDir().mkpath(odd);
@@ -129,6 +171,25 @@ int main(int argc, char *argv[])
             check(waitFor([&] { return t->screenText().contains("<" + odd + ">") && t->screenText().contains("<" + base + "/hello.txt>"); }),
                   QStringLiteral("dropping files onto the terminal types their quoted paths"), t->screenText());
             check(QFileInfo::exists(odd) && QFileInfo::exists(base + QStringLiteral("/hello.txt")), QStringLiteral("…and leaves the files where they are"));
+            // as a real drag arrives: it enters the window elsewhere (the sidebar), then moves over the terminal
+            {
+                QMimeData m2;
+                m2.setUrls({QUrl::fromLocalFile(odd)});
+                t->sendText(QStringLiteral("clear; printf '{%s}\\n' "));
+                const QPoint side(60, 300);
+                QDragEnterEvent e1(side, Qt::CopyAction | Qt::MoveAction, &m2, Qt::LeftButton, {});
+                QCoreApplication::sendEvent(window, &e1);
+                for (const QPoint p : {side + QPoint(100, 0), at - QPoint(50, 0), at}) {
+                    QDragMoveEvent mv(p, Qt::CopyAction | Qt::MoveAction, &m2, Qt::LeftButton, {});
+                    QCoreApplication::sendEvent(window, &mv);
+                    QTest::qWait(30);
+                }
+                QDropEvent dr(at, Qt::CopyAction | Qt::MoveAction, &m2, Qt::LeftButton, {});
+                QCoreApplication::sendEvent(window, &dr);
+                t->sendText(QStringLiteral("\r"));
+                check(waitFor([&] { return t->screenText().contains("{" + odd + "}"); }) && dr.dropAction() == Qt::CopyAction && QFileInfo::exists(odd),
+                      QStringLiteral("a drag that comes in over the sidebar and ends on the terminal types the path"), t->screenText());
+            }
             t->sendText(QStringLiteral("exit\r"));
             check(waitFor([&] { return tabs().size() == 1; }), QStringLiteral("exiting the shell closes its tab"));
             check(win->property("activeTermId").toInt() == 0, QStringLiteral("…and the folder view is back"));

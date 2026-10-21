@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QPointer>
 #include <QQuickPaintedItem>
+#include <QQuickWindow>
 #include <QStringList>
 #include <deque>
 #include <vector>
@@ -48,8 +49,14 @@ public:
     // New terminals start at the last size used.
     Q_INVOKABLE void zoomBy(qreal factor);
     Q_INVOKABLE void setFontSize(qreal points);
+    // The largest size up to 12 pt at which the visible output has no wrapped lines (the
+    // thumbwheel's home button). Full-screen programs (nvim, tmux) get 12 pt.
+    Q_INVOKABLE void fitWidth();
     // Dropped files and folders: their paths, shell-quoted, typed at the cursor (as in Alacritty).
     Q_INVOKABLE void insertPaths(const QStringList &paths);
+    // The folder view navigated: cd the shell there — only if it's the shell at its prompt
+    // (nothing else in the foreground, e.g. not nvim or tmux). Returns whether it did.
+    Q_INVOKABLE bool changeDirectory(const QString &path);
 
     // libvterm callbacks
     int onDamage(VTermRect rect);
@@ -70,6 +77,8 @@ Q_SIGNALS:
 protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     bool event(QEvent *e) override;
+    bool eventFilter(QObject *watched, QEvent *e) override;
+    void itemChange(ItemChange change, const ItemChangeData &data) override;
     void keyPressEvent(QKeyEvent *e) override;
     void inputMethodEvent(QInputMethodEvent *e) override;
     void mousePressEvent(QMouseEvent *e) override;
@@ -83,6 +92,7 @@ protected:
     void focusOutEvent(QFocusEvent *e) override;
 
 private:
+    bool handleGesture(QEvent *e);
     void updateMetrics();
     void resizeTerminal();
     QColor toColor(const VTermColor &c, bool fg) const;
@@ -92,12 +102,15 @@ private:
     VTerm *m_vt = nullptr;
     VTermScreen *m_screen = nullptr;
     QPointer<KPtyProcess> m_pty;
+    QPointer<QQuickWindow> m_watchedWindow;
+    bool m_dragOver = false;                   // a drag is over this terminal (taken at the window)
     QString m_program, m_cwd, m_title;
     QStringList m_arguments;
     QFont m_font;
     static inline qreal s_lastPointSize = 12;
     qreal m_pointSize = s_lastPointSize;
-    QTimer *m_sizeHint = nullptr;              // shows "14 pt" for a moment after a change
+    QTimer *m_sizeHint = nullptr;
+    class QVariantAnimation *m_sizeAnim = nullptr;              // shows "14 pt" for a moment after a change
     qreal m_cellW = 8, m_cellH = 16, m_ascent = 12;
     int m_cols = 80, m_rows = 24;
     VTermPos m_cursor{0, 0};

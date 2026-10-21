@@ -36,6 +36,7 @@ Item {
     signal lastTabClosed()
     signal terminalRequested(string kind, var args)   // the window creates it in termLayer
     signal terminalClosed(int termId)
+    signal terminalCdRequested(int termId, string path)
 
     // terminal tabs on this side
     property int activeTermId: 0
@@ -134,7 +135,12 @@ Item {
 
     readonly property alias count: model.count
     function paths() { return Object.keys(selection) }
-    function go(path) { if (path && path !== dir) { back = back.concat([dir]); dir = path; selection = ({}); anchorIndex = -1; rows.positionViewAtBeginning() } }
+    function go(path) {
+        if (path && path !== dir) {
+            back = back.concat([dir]); dir = path; selection = ({}); anchorIndex = -1; rows.positionViewAtBeginning()
+            if (termActive) terminalCdRequested(activeTermId, path)   // the shell follows
+        }
+    }
     onDirChanged: Qt.callLater(saveTab)
     function goBack() { if (back.length) { const p = back[back.length - 1]; back = back.slice(0, -1); dir = p; selection = ({}); anchorIndex = -1 } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }

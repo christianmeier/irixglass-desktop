@@ -4,13 +4,21 @@
 #include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QLoggingCategory>
 #include <QMimeData>
 #include <QRegularExpression>
 #include <QPainter>
 #include <QTimer>
+#include <QVariantAnimation>
+
+#include <pwd.h>
+#include <unistd.h>
 
 #include <KPtyDevice>
 #include <KPtyProcess>
+
+// QT_LOGGING_RULES="irixfm.terminal.debug=true" logs drags and pinches (to the journal).
+Q_LOGGING_CATEGORY(lcTerminal, "irixfm.terminal", QtInfoMsg)
 
 namespace
 {
@@ -28,6 +36,17 @@ bool isZoomKey(const QKeyEvent *k)
     const int key = k->key();
     return key == Qt::Key_Plus || key == Qt::Key_Equal || key == Qt::Key_Minus || key == Qt::Key_Underscore
         || (key == Qt::Key_0 && !(k->modifiers() & Qt::ShiftModifier));
+}
+
+// The user's login shell (fish here), as Alacritty and Konsole use it. Not $SHELL: fm can be
+// started from another shell (or a tool) whose $SHELL is different. IRIXFM_SHELL overrides (tests).
+QString loginShell()
+{
+    if (qEnvironmentVariableIsSet("IRIXFM_SHELL"))
+        return qEnvironmentVariable("IRIXFM_SHELL");
+    if (const passwd *pw = getpwuid(getuid()); pw && pw->pw_shell && *pw->pw_shell)
+        return QString::fromLocal8Bit(pw->pw_shell);
+    return qEnvironmentVariable("SHELL", QStringLiteral("/bin/sh"));
 }
 
 TerminalView *self(void *user)
@@ -104,6 +123,7 @@ TerminalView::TerminalView(QQuickItem *parent)
     vterm_screen_set_damage_merge(m_screen, VTERM_DAMAGE_SCROLL);
     vterm_screen_enable_altscreen(m_screen, 1);
     vterm_screen_reset(m_screen, 1);
+    vterm_screen_enable_reflow(m_screen, true);   // wrapped lines re-flow when the width changes
 }
 
 TerminalView::~TerminalView()
@@ -128,12 +148,14 @@ void TerminalView::start()
     if (running())
         return;
     m_pty = new KPtyProcess(this);
-    const QString program = m_program.isEmpty() ? qEnvironmentVariable("SHELL", QStringLiteral("/bin/bash")) : m_program;
+    const QString shell = loginShell();
+    const QString program = m_program.isEmpty() ? shell : m_program;
     m_pty->setProgram(program, m_arguments);
     if (!m_cwd.isEmpty())
         m_pty->setWorkingDirectory(m_cwd);
     m_pty->setPtyChannels(KPtyProcess::AllChannels);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("SHELL"), shell);   // tmux, nvim's :terminal etc. start the same shell
     env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
     env.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
     env.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("irixfm"));
@@ -258,6 +280,45 @@ void TerminalView::setFontSize(qreal points)
     m_sizeHint->start();
 }
 
+void TerminalView::fitWidth()
+{
+    int longest = 0, current = 0;
+    if (!m_altScreen) {
+        const VTermState *state = vterm_obtain_state(m_vt);
+        for (int row = 0; row < m_rows; ++row) {
+            const VTermLineInfo *info = vterm_state_get_lineinfo(state, row);
+            if (!(info && info->continuation))
+                current = 0;
+            int used = 0;   // up to the last non-blank cell
+            for (int col = 0; col < m_cols; ++col) {
+                VTermScreenCell cell{};
+                vterm_screen_get_cell(m_screen, VTermPos{row, col}, &cell);
+                if (cell.chars[0] && cell.chars[0] != ' ')
+                    used = col + 1;
+            }
+            const VTermLineInfo *next = row + 1 < m_rows ? vterm_state_get_lineinfo(state, row + 1) : nullptr;
+            current += (next && next->continuation) ? m_cols : used;
+            longest = std::max(longest, current);
+        }
+    }
+    qreal points = 12;
+    if (longest > 0) {
+        const qreal cellW = (width() - 8) / (longest + 1);   // +1: room for the cursor
+        points = std::min(12.0, std::floor(m_pointSize * cellW / m_cellW * 10) / 10);
+    }
+    // Glide there, so the output visibly re-flows into the new width.
+    if (!m_sizeAnim) {
+        m_sizeAnim = new QVariantAnimation(this);
+        m_sizeAnim->setDuration(220);
+        m_sizeAnim->setEasingCurve(QEasingCurve::OutCubic);
+        connect(m_sizeAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) { setFontSize(v.toReal()); });
+    }
+    m_sizeAnim->stop();
+    m_sizeAnim->setStartValue(m_pointSize);
+    m_sizeAnim->setEndValue(points);
+    m_sizeAnim->start();
+}
+
 void TerminalView::zoomBy(qreal factor)
 {
     setFontSize(m_pointSize * factor);
@@ -343,8 +404,10 @@ void TerminalView::paint(QPainter *p)
                 cbg = QColor(0x43, 0x4C, 0x5E);   // nord2
             }
             const QRectF r(x0 + col * m_cellW, y0 + row * m_cellH, m_cellW * std::max(1, int(cell.width)), m_cellH);
-            if (cbg.alpha())
-                p->fillRect(r, cbg);
+            if (cbg.alpha()) {   // whole pixels, so neighbouring cells meet without seams
+                const int left = qRound(r.left()), right = qRound(r.right()), top = qRound(r.top()), bottom = qRound(r.bottom());
+                p->fillRect(QRect(left, top, right - left, bottom - top), cbg);
+            }
             if (cell.chars[0] && cell.chars[0] != ' ') {
                 QString text;
                 for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i]; ++i)
@@ -401,16 +464,89 @@ QString TerminalView::screenText() const
 
 // ---- input -------------------------------------------------------------------------------------
 
-bool TerminalView::event(QEvent *e)
+// Touchpad pinch: the font follows the fingers. Qt Quick doesn't reliably hand a real touchpad
+// gesture (Wayland zwp_pointer_gestures) to a painted item, so the terminal also watches its
+// window and takes pinches that happen over it.
+bool TerminalView::handleGesture(QEvent *e)
 {
-    // Touchpad pinch: the font follows the fingers.
-    if (e->type() == QEvent::NativeGesture) {
+    if (e->type() != QEvent::NativeGesture)
+        return false;
+    auto *g = static_cast<QNativeGestureEvent *>(e);
+    if (g->gestureType() == Qt::ZoomNativeGesture && g->value() != 0)
+        zoomBy(1 + g->value());
+    e->accept();
+    return true;
+}
+
+void TerminalView::itemChange(ItemChange change, const ItemChangeData &data)
+{
+    if (change == ItemSceneChange) {
+        if (m_watchedWindow)
+            m_watchedWindow->removeEventFilter(this);
+        m_watchedWindow = data.window;
+        if (m_watchedWindow)
+            m_watchedWindow->installEventFilter(this);
+    }
+    QQuickPaintedItem::itemChange(change, data);
+}
+
+// Drags and pinches are taken at the window, before Qt Quick's own delivery: real Wayland
+// drags and touchpad gestures didn't reliably reach this item that way.
+bool TerminalView::eventFilter(QObject *watched, QEvent *e)
+{
+    if (watched != m_watchedWindow || !isVisible())
+        return QQuickPaintedItem::eventFilter(watched, e);
+    switch (e->type()) {
+    case QEvent::NativeGesture: {
         auto *g = static_cast<QNativeGestureEvent *>(e);
-        if (g->gestureType() == Qt::ZoomNativeGesture)
-            zoomBy(1 + g->value());
-        e->accept();
+        if (!contains(mapFromScene(g->scenePosition())))
+            break;
+        if (g->gestureType() == Qt::BeginNativeGesture)
+            qCDebug(lcTerminal) << "pinch over the terminal, device" << (g->device() ? g->device()->name() : QString());
+        return handleGesture(e);
+    }
+    case QEvent::DragEnter:
+    case QEvent::DragMove: {
+        auto *d = static_cast<QDragMoveEvent *>(e);
+        const bool over = contains(mapFromScene(d->position())) && (d->mimeData()->hasUrls() || d->mimeData()->hasText());
+        if (!over) {
+            m_dragOver = false;
+            break;
+        }
+        if (!m_dragOver) {
+            qCDebug(lcTerminal) << "drag over the terminal:" << d->mimeData()->formats();
+            m_dragOver = true;
+            if (e->type() == QEvent::DragMove) {   // whatever Qt Quick had under the drag lets go
+                QDragLeaveEvent leave;
+                QCoreApplication::sendEvent(m_watchedWindow, &leave);
+            }
+        }
+        d->setDropAction(Qt::CopyAction);   // nothing is moved: only the path is typed
+        d->accept();
         return true;
     }
+    case QEvent::DragLeave:
+        m_dragOver = false;
+        break;
+    case QEvent::Drop: {
+        auto *d = static_cast<QDropEvent *>(e);
+        if (!m_dragOver && !contains(mapFromScene(d->position())))
+            break;
+        m_dragOver = false;
+        qCDebug(lcTerminal) << "drop on the terminal:" << d->mimeData()->urls();
+        dropEvent(d);
+        return true;
+    }
+    default:
+        break;
+    }
+    return QQuickPaintedItem::eventFilter(watched, e);
+}
+
+bool TerminalView::event(QEvent *e)
+{
+    if (handleGesture(e))
+        return true;
     // The terminal gets the keys (Ctrl+C, Ctrl+W, …) before the window's shortcuts — except
     // Ctrl+Shift+… (copy / paste / tab commands), Ctrl+PgUp/PgDn / Ctrl+Tab (switch tabs) and Alt+1…9.
     if (e->type() == QEvent::ShortcutOverride) {
@@ -626,13 +762,30 @@ void TerminalView::dropEvent(QDropEvent *e)
     forceActiveFocus();
 }
 
+static QString shellQuote(const QString &p)
+{
+    static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_@%+=:,./~-]+$"));
+    return plain.match(p).hasMatch() ? p : QLatin1Char('\'') + QString(p).replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QLatin1Char('\'');
+}
+
+bool TerminalView::changeDirectory(const QString &path)
+{
+    if (!running() || !m_program.isEmpty() || path.isEmpty())
+        return false;
+    const pid_t fg = tcgetpgrp(m_pty->pty()->masterFd());
+    if (fg <= 0 || fg != m_pty->processId())   // a program runs in the shell: leave it alone
+        return false;
+    // Ctrl+E Ctrl+U clears what's typed; the leading space keeps it out of the history.
+    sendText(QStringLiteral("\x05\x15 cd -- ") + shellQuote(path) + QLatin1Char('\r'));
+    m_cwd = path;
+    return true;
+}
+
 void TerminalView::insertPaths(const QStringList &paths)
 {
     QStringList quoted;
-    for (const QString &p : paths) {
-        static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_@%+=:,./~-]+$"));
-        quoted << (plain.match(p).hasMatch() ? p : QLatin1Char('\'') + QString(p).replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QLatin1Char('\''));
-    }
+    for (const QString &p : paths)
+        quoted << shellQuote(p);
     if (quoted.isEmpty())
         return;
     m_scrollOffset = 0;

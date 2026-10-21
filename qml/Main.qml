@@ -134,9 +134,20 @@ Window {
     readonly property real listTextX: listIcon + 14 * u
     // The split side has its own icon size; the thumbwheel, its home button and Ctrl+/- act on the active side.
     property real splitWheelValue: defaultWheel
+    property real termFontSize: 12              // terminal tabs' font size (pinch / Ctrl+±), saved
     readonly property real splitIconScale: .55 + splitWheelValue * 1.05
-    readonly property real activeWheel: splitActive ? splitWheelValue : wheelValue
-    function setActiveWheel(v) { if (splitActive) splitWheelValue = v; else wheelValue = v }
+    // …and while a terminal tab shows on the active side, it sets that terminal's text size (6–30 pt).
+    readonly property var activeTerminal: {
+        const id = splitActive ? splitPane.activeTermId : activeTermId
+        return id ? terminals[id] || null : null
+    }
+    readonly property real activeWheel: activeTerminal ? Math.max(0, Math.min(1, (activeTerminal.fontPointSize - 6) / 24))
+                                        : splitActive ? splitWheelValue : wheelValue
+    function setActiveWheel(v) {
+        if (activeTerminal) activeTerminal.setFontSize(6 + 24 * v)
+        else if (splitActive) splitWheelValue = v
+        else wheelValue = v
+    }
     property int viewMode: 0                    // 0 icons, 1 list, 2 previews
     property bool showHidden: false
     readonly property string fontFamily: "SF Pro Text"
@@ -166,6 +177,7 @@ Window {
         property alias wheelValue: win.wheelValue
         property alias viewMode: win.viewMode
         property alias splitWheelValue: win.splitWheelValue
+        property alias termFontSize: win.termFontSize
         property alias showHidden: win.showHidden
         property alias places: win.placesJson
         property alias sortField: win.sortField
@@ -234,6 +246,7 @@ Window {
         recent = [path].concat(recent.filter(p => p !== path)).slice(0, 12)
         recentJson = JSON.stringify(recent)
         view().positionViewAtBeginning()
+        if (termActive && terminals[activeTermId]) terminals[activeTermId].changeDirectory(path)   // the shell follows
     }
     function goBack() { if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
     function goForward() { if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
@@ -317,7 +330,8 @@ Window {
     function createTerminal(kind, cwd, args, layer) {
         const id = nextTermId++
         const t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
-                                                      workingDirectory: cwd, termId: id })
+                                                      workingDirectory: cwd, termId: id, fontPointSize: termFontSize })
+        t.fontChanged.connect(() => termFontSize = t.fontPointSize)   // pinch / Ctrl+± size, kept for new terminals
         const all = Object.assign({}, terminals); all[id] = t; terminals = all
         t.titleChanged.connect(() => termTitleRev++)
         t.finished.connect(() => Qt.callLater(() => terminalFinished(id)))
@@ -1846,7 +1860,7 @@ Window {
     Item {
         id: termLayer
         objectName: "termLayer"
-        x: 246 * u - win.contentShift; y: 66 * u
+        x: 246 * u - win.contentShift; y: 66 * u + (win.splitView ? 10 * u + 26 * tu : 0)   // below mainHeader when split
         width: parent.width - x - win.previewW - win.splitW - 8 * u; height: parent.height - y - win.bottomH - 4 * u
         visible: win.termActive
     }
@@ -1872,6 +1886,7 @@ Window {
         termTitleFor: win.termTitle
         onTerminalRequested: (kind, args) => splitPane.addTerminalTab(kind, win.createTerminal(kind, splitPane.dir, args, splitPane.termLayer))
         onTerminalClosed: id => win.destroyTerminal(id)
+        onTerminalCdRequested: (id, path) => { if (win.terminals[id]) win.terminals[id].changeDirectory(path) }
         Connections { target: win; function onTermTitleRevChanged() { splitPane.titleRev++ } }
         onSelectionChanged: if (win.quickLook && win.splitActive && paths().length) win.quickLook = focusedPath()
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
@@ -1897,7 +1912,7 @@ Window {
     PaneHeader {
         id: mainHeader
         objectName: "mainPaneHeader"
-        visible: splitPane.visible && !win.termActive
+        visible: splitPane.visible   // also over a terminal: its path bar moves the shell (go → cd)
         x: list.x + 6 * u; y: 66 * u + win.scopeH + 4 * u; width: list.width - 12 * u
         dir: win.dir; canGoBack: win.backStack.length > 0
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
@@ -2061,12 +2076,6 @@ Window {
         }
         TapHandler { onTapped: emptyDialog.open() }
     }
-    Text {
-        anchors.right: parent.right; anchors.rightMargin: 258 * u
-        anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.bottomLift
-        text: "Icon size"; color: "white"; opacity: .55
-        font.family: win.fontFamily; font.pixelSize: 12 * tu
-    }
     Thumbwheel {
         id: wheelCtl
         objectName: "thumbwheel"
@@ -2074,6 +2083,11 @@ Window {
         x: parent.width - 244 * u; y: parent.height - 42 * u - win.bottomLift; width: 190 * u; height: 22 * u
         value: win.activeWheel
         onValueChanged: win.setActiveWheel(value)
+        // No label (the IRIX wheels had none): the tooltip says what it sizes.
+        HoverHandler { id: wheelHover }
+        ToolTip.visible: wheelHover.hovered
+        ToolTip.delay: 700
+        ToolTip.text: win.activeTerminal ? "Text size" : "Icon size"
     }
     // The wheel's own value is set by dragging (which breaks a binding), so keep it in step here.
     Connections {
@@ -2085,7 +2099,7 @@ Window {
         id: homeButton
         objectName: "homeButton"
         x: parent.width - 48 * u; y: parent.height - 42 * u - win.bottomLift; width: 22 * u; height: 22 * u
-        readonly property bool atHome: Math.abs(win.activeWheel - win.defaultWheel) < .005
+        readonly property bool atHome: !win.activeTerminal && Math.abs(win.activeWheel - win.defaultWheel) < .005
         Rectangle { anchors.fill: parent; radius: 5 * win.u; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
         Rectangle {
             anchors.fill: parent; anchors.margins: 3 * win.u; radius: 3 * win.u
@@ -2100,10 +2114,10 @@ Window {
             }
         }
         HoverHandler { id: homeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: win.setActiveWheel(win.defaultWheel) }
+        TapHandler { onTapped: win.activeTerminal ? win.activeTerminal.fitWidth() : win.setActiveWheel(win.defaultWheel) }
         ToolTip.visible: homeHover.hovered
         ToolTip.delay: 700
-        ToolTip.text: "Standard icon size"
+        ToolTip.text: win.activeTerminal ? "Fit the text: no wrapped lines (at most 12 pt)" : "Standard icon size"
     }
 
     QuickLook {
