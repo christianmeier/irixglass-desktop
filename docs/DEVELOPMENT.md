@@ -154,7 +154,7 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
   of folder sizes (Baloo indexes files, not folder totals), so fm keeps its own. Note a folder's
   mtime only changes when its direct entries change, hence the one-hour limit.
 - **Kind** (`Fm::kind`) looks at the file name first (`QMimeDatabase::MatchExtension`) and only
-  reads the file when the name says nothing.
+  reads the file when the name says nothing (`MatchContent`). It's cached; see Performance: views.
 - **Compress / Expand** use KArchive in a worker thread (`archiveDone` selects the result).
 - **Settings are saved immediately** for the sidebar (`settings.sync()`), and `main.cpp` quits
   cleanly on SIGTERM/SIGINT (KSignalHandler), so `pkill irixfm` no longer loses changes.
@@ -307,6 +307,37 @@ sections stack.
 view mode, hidden files, window size, sidebar (`places`, JSON), sort field and order, sidebar
 and preview visibility, Calculate All Sizes, Recent Folders, search scope. All running fm windows share and overwrite it.
 
+### Performance: views
+
+Scrolling a big folder is dominated by what each delegate costs when it's made or refilled.
+`tools/bench.sh <repo> [runs] [split]` (`IRIXFM_BENCH`, see `main.cpp`) scrolls ~, `/usr/bin` and
+`/usr/lib` to the end and back in 121 rendered frames, off-screen, and prints wall and GUI-thread CPU
+time; compare medians (the machine is often busy). What made it fast (icon view `/usr/lib` ≈ 5000 →
+≈ 1000 ms, `/usr/bin` ≈ 6000–9500 → ≈ 1100–2700 ms depending on how far the kind prefetch got,
+list views ≈ 3200–3900 → ≈ 800–950 ms; the split side likewise):
+
+- **`reuseItems`** on all four views (grid and list, main and split side): scrolled-out delegates
+  are pooled and refilled. Delegates hold no state of their own beyond an item: the spring-loading
+  timer stops in `onPooled`, list rows ask for folder sizes in `onReused` as well as
+  `onCompleted`. **Qt 6.12 keeps the pool when a view's model changes**, and a delegate made for
+  the folder model reused for the search results (or back) reads the wrong roles (blank names);
+  so the main views switch model in `onShownModelChanged` with `reuseItems` off for a moment, which
+  drains the pool. Keep it that way if another model is added.
+- **Loaders for the rare parts**: the tag carpet (`Shape`), app icon (`K.Icon`, which also looks up
+  the Kirigami theme and system font), the previews mount and `TagDots` exist only when needed.
+  The test-visible `objectName`s (`carpetTint`, `tagDots`) are on the Loader / loaded item.
+- **No per-delegate bindings on window-wide state that isn't shown**: the drag's `text/uri-list`
+  is set in `onPressed` (it used to be a binding on `win.paths()` that every delegate re-ran on
+  each selection change). The list's Date/Size/Kind are three `Text`s, not a `Repeater`.
+- **`Fm::kind` / `desktopInfo` are cached** by path, valid while the file's ctime is unchanged
+  (any write, chmod or replacement changes it); one `stat` per call. `Fm::prefetchKinds(dir)` (called
+  when a folder model's folder changes) fills the kind cache from a worker thread in name order,
+  so files without an extension (`/usr/bin`) aren't read on the GUI thread while scrolling.
+  Tags (`getxattr`) aren't cached: they're cheap, and other apps change them.
+
+The bench grabs every frame with the software renderer (off-screen), which is a good part of
+what's left; on the GPU the frame is cheaper.
+
 ## Workflow
 
 ```
@@ -361,6 +392,7 @@ wallpaper to judge it, e.g.
 - **`stdout` is buffered when piped**: tests call `setvbuf(stdout, nullptr, _IONBF, 0)` so a hang
   still shows how far they got.
 - **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
+  With `reuseItems`, pooled (hidden) delegates are there too, with the last item's values.
 - **A component's own `dir` must not be bound to a setting it writes back** (SplitPane: binding
   loop); set it once in `Component.onCompleted`, then save on change.
 - **Menus already have `title`** (FINAL): a custom `title` property on a `P.Menu` fails the whole
