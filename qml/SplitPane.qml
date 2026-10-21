@@ -237,6 +237,7 @@ Item {
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
         model: model
+        reuseItems: true   // as on the main side: scrolled-out rows are refilled, not made again
         interactive: false
         ScrollBar.vertical: GlassScrollBar { u: pane.u }
         WheelHandler {
@@ -275,10 +276,11 @@ Item {
                 width: parent.width - x - 90 * pane.u
                 text: r.fileName; elide: Text.ElideMiddle; color: "white"
                 font.family: pane.fontFamily; font.pixelSize: 13 * pane.tu
-                TagDots {
-                    tags: r.tags; colorFor: pane.colorFor; size: 9 * pane.tu
+                Loader {   // only tagged items have dots
+                    active: r.tags.length > 0
                     x: Math.min(nameText.contentWidth, nameText.width) + 6 * pane.u
                     anchors.verticalCenter: parent.verticalCenter
+                    sourceComponent: TagDots { tags: r.tags; colorFor: pane.colorFor; size: 9 * pane.tu }
                 }
             }
             Text {
@@ -291,7 +293,6 @@ Item {
                 Drag.active: rowMouse.drag.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-                Drag.mimeData: ({ "text/uri-list": Fm.uriList(pane.paths()) })
                 Drag.onActiveChanged: pane.dragStarted(Drag.active)
             }
             MouseArea {
@@ -301,8 +302,11 @@ Item {
                 drag.target: dragProxy
                 onPressed: m => {
                     pane.activated()
+                    if (m.button !== Qt.MiddleButton && (!r.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        pane.select(r.index, m.modifiers)
+                    // set now, not bound: a binding per row re-ran on every selection change
+                    dragProxy.Drag.mimeData = { "text/uri-list": Fm.uriList(pane.paths()) }
                     if (m.button === Qt.MiddleButton) { if (r.fileIsDir) pane.newTab(r.filePath, false); return }
-                    if (!r.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) pane.select(r.index, m.modifiers)
                     if (m.button === Qt.RightButton) pane.menuRequested()
                 }
                 onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
@@ -330,6 +334,7 @@ Item {
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
         model: model
+        reuseItems: true
         interactive: false
         cellWidth: pane.cellSize; cellHeight: pane.cellSize
         ScrollBar.vertical: GlassScrollBar { u: pane.u }
@@ -363,18 +368,21 @@ Item {
                     source: pane.assetFor ? pane.assetFor(c.sel || cDrop.containsDrag ? "carpet-sel" : c.kind === "exe" ? "carpet-strong" : "carpet") : ""
                     sourceSize: Qt.size(width * 2, height * 2); smooth: true
                 }
-                Shape {   // a tagged item's carpet in its tag colour
+                Loader {   // a tagged item's carpet in its tag colour (Loaders: most items need none of these)
                     anchors.fill: parent
-                    visible: c.tags.length > 0 && !c.sel
-                    preferredRendererType: Shape.CurveRenderer
-                    ShapePath {
-                        strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
-                        fillColor: pane.colorFor ? pane.colorFor(c.tags[0] || "") : "gray"
-                        startX: 16 * c.kk; startY: 94 * c.kk
-                        PathLine { x: 68 * c.kk; y: 107 * c.kk }
-                        PathLine { x: 108 * c.kk; y: 90 * c.kk }
-                        PathLine { x: 56 * c.kk; y: 78 * c.kk }
-                        PathLine { x: 16 * c.kk; y: 94 * c.kk }
+                    active: c.tags.length > 0
+                    visible: !c.sel
+                    sourceComponent: Shape {
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: Qt.rgba(0, 0, 0, .45); strokeWidth: 1
+                            fillColor: pane.colorFor ? pane.colorFor(c.tags[0] || "") : "gray"
+                            startX: 16 * c.kk; startY: 94 * c.kk
+                            PathLine { x: 68 * c.kk; y: 107 * c.kk }
+                            PathLine { x: 108 * c.kk; y: 90 * c.kk }
+                            PathLine { x: 56 * c.kk; y: 78 * c.kk }
+                            PathLine { x: 16 * c.kk; y: 94 * c.kk }
+                        }
                     }
                 }
                 Image {
@@ -383,22 +391,28 @@ Item {
                     source: pane.assetFor ? pane.assetFor(c.kind === "app" ? "doc" : c.kind) : ""
                     sourceSize: Qt.size(width * 2, height * 2); smooth: true
                 }
-                K.Icon {
-                    visible: c.kind === "app"
+                Loader {
+                    active: c.kind === "app"
                     x: 32 * c.kk; y: 22 * c.kk; width: 58 * c.kk; height: width
-                    roundToIconSize: false
-                    source: c.info ? c.info.icon : ""
+                    sourceComponent: K.Icon {
+                        roundToIconSize: false
+                        source: c.info ? c.info.icon : ""
+                    }
                 }
-                Rectangle {   // previews: the real picture
+                Loader {   // previews: the real picture
                     id: thumb
-                    visible: pane.viewMode === 2 && c.kind === "image" && thumbImg.status === Image.Ready
+                    active: pane.viewMode === 2 && c.kind === "image"
+                    visible: active && item.ready
                     x: 30 * c.kk; y: 18 * c.kk; width: 62 * c.kk; height: 62 * c.kk
-                    color: "white"; border.color: "#1d1d1d"; rotation: 4
-                    Image {
-                        id: thumbImg
-                        anchors.fill: parent; anchors.margins: 3 * c.kk
-                        source: pane.viewMode === 2 && c.kind === "image" ? c.fileUrl : ""
-                        asynchronous: true; fillMode: Image.PreserveAspectCrop; sourceSize: Qt.size(256, 256)
+                    sourceComponent: Rectangle {
+                        readonly property bool ready: thumbImg.status === Image.Ready
+                        color: "white"; border.color: "#1d1d1d"; rotation: 4
+                        Image {
+                            id: thumbImg
+                            anchors.fill: parent; anchors.margins: 3 * c.kk
+                            source: c.fileUrl
+                            asynchronous: true; fillMode: Image.PreserveAspectCrop; sourceSize: Qt.size(256, 256)
+                        }
                     }
                 }
             }
@@ -416,17 +430,17 @@ Item {
                 text: c.info && c.info.name ? c.info.name : c.fileName
                 color: "white"; font.family: pane.fontFamily; font.pixelSize: 13 * pane.tu
             }
-            TagDots {
-                tags: c.tags; colorFor: pane.colorFor; size: 9 * pane.tu
+            Loader {
+                active: c.tags.length > 0
                 x: lbl.x + (lbl.width + Math.min(lbl.contentWidth, lbl.width)) / 2 + (c.sel ? 10 : 4) * pane.u
                 y: lbl.y + (lbl.height - height) / 2
+                sourceComponent: TagDots { tags: c.tags; colorFor: pane.colorFor; size: 9 * pane.tu }
             }
             Item {
                 id: cDrag
                 Drag.active: cMouse.drag.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-                Drag.mimeData: ({ "text/uri-list": Fm.uriList(pane.paths()) })
                 Drag.onActiveChanged: pane.dragStarted(Drag.active)
             }
             MouseArea {
@@ -437,8 +451,10 @@ Item {
                 drag.target: cDrag
                 onPressed: m => {
                     pane.activated()
+                    if (m.button !== Qt.MiddleButton && (!c.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        pane.select(c.index, m.modifiers)
+                    cDrag.Drag.mimeData = { "text/uri-list": Fm.uriList(pane.paths()) }   // as in the list
                     if (m.button === Qt.MiddleButton) { if (c.fileIsDir) pane.newTab(c.filePath, false); return }
-                    if (!c.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) pane.select(c.index, m.modifiers)
                     if (m.button === Qt.RightButton) pane.menuRequested()
                 }
                 onReleased: { cDrag.x = 0; cDrag.y = 0 }
