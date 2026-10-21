@@ -189,7 +189,7 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 src/terminal.*  C++: the terminal for tabs (libvterm on a KPty, painted in QML)
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, tag dots, notebook tabs, web tab (BrowserView), sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
 tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
