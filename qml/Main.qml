@@ -57,6 +57,10 @@ Window {
     readonly property int springDelay: 900      // ms hovering with a drag before a folder opens
     readonly property real hiddenShift: 98 * u   // how far the toolbar/content move left without the sidebar
     property real sideShift: sidebarShown ? 0 : hiddenShift
+    // Without the sidebar the files use the whole window width: content moves to the left edge
+    // (the toolbar only moves by sideShift, to keep room for the traffic lights).
+    property real contentShift: sidebarShown ? 0 : 230 * u
+    Behavior on contentShift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     Behavior on sideShift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     property real previewW: previewShown ? 280 * u : 0
     Behavior on previewW { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -824,7 +828,7 @@ Window {
 
     // Drops onto empty space go into the current folder.
     DropArea {
-        x: 240 * u - win.sideShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - 52 * u
+        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - 52 * u
         onDropped: drop => { if (!win.inTrash) Fm.drop(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
 
@@ -832,7 +836,7 @@ Window {
         id: grid
         objectName: "grid"
         visible: win.viewMode !== 1 && !win.searchActive
-        x: 262 * u - win.sideShift; y: 92 * u - 10 * win.k + win.scopeH
+        x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH
         width: parent.width - x - 20 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
@@ -1011,7 +1015,7 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
         }
-        x: 252 * u - win.sideShift; y: 80 * u + win.scopeH
+        x: 252 * u - win.contentShift; y: 80 * u + win.scopeH
         width: parent.width - x - 14 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
@@ -1145,7 +1149,7 @@ Window {
         id: scopeBar
         objectName: "scopeBar"
         visible: win.searchActive
-        x: 262 * u - win.sideShift; y: 66 * u
+        x: 262 * u - win.contentShift; y: 66 * u
         height: 28 * win.tu
         spacing: 6 * u
         Text {
@@ -1177,7 +1181,7 @@ Window {
         id: results
         objectName: "results"
         visible: win.searchActive
-        x: 252 * u - win.sideShift; y: 72 * u + win.scopeH
+        x: 252 * u - win.contentShift; y: 72 * u + win.scopeH
         width: parent.width - x - 14 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
@@ -1247,13 +1251,13 @@ Window {
 
     // ---- status bar ------------------------------------------------------------
     Rectangle {
-        x: 240 * u - win.sideShift; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
+        x: 240 * u - win.contentShift; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
     Text {
         id: statusText
         objectName: "status"
-        x: 262 * u - win.sideShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
+        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
         readonly property int n: win.paths().length
         text: win.searchActive
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")

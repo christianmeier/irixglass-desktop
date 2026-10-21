@@ -133,8 +133,9 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
   (`/tmp`); it asks to delete them instead.
 - **Drives** come from Solid (`Fm.volumes`): hot-pluggable or removable storage only. They're
   appended to Locations at run time, not saved.
-- **Layout**: `sideShift` (sidebar hidden) and `previewW` (preview pane) are animated and every
-  content x/width subtracts them; the glass tint has holes for the sidebar and the preview pane.
+- **Layout**: `sideShift` moves the toolbar when the sidebar is hidden (it keeps room for the traffic
+  lights), `contentShift` moves the files, scope bar and status bar to the window's left edge so they
+  use the whole width, and `previewW` makes room for the preview pane; all three are animated; the glass tint has holes for the sidebar and the preview pane.
 - **Folder sizes** go through a queue in `Fm` (3 `DirectorySizeJob`s at a time) into
   `win.folderSizes`.
 - **Compress / Expand** use KArchive in a worker thread (`archiveDone` selects the result).
