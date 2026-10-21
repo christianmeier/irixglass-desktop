@@ -62,6 +62,8 @@ manager icon; the IRIX icons are only inside the window.
   Drag the divider between the sides to resize them (remembered); double-click it to centre it.
   Each side has its own tabs: the tab keys (Ctrl+T, Ctrl+W, Ctrl+Tab, Alt+1…9, …) and sidebar
   places work on the active side (the one with the blue line under its header).
+- Maximized or full screen, fm keeps the floating dock's height free at the bottom, so tabs, status
+  bar and sidebar end above it; the height is read from Plasma's panel settings and follows changes.
 - The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
   to the standard size.
 - Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
@@ -94,7 +96,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (191 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (198 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -156,7 +158,7 @@ src/            C++: window blur, input mask and shadow (KWindowEffects, KWindow
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 

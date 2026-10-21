@@ -25,6 +25,9 @@ class Fm : public QObject
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
     Q_PROPERTY(QString trashDir READ trashDir CONSTANT)
     Q_PROPERTY(QVariantList volumes READ volumes NOTIFY volumesChanged)
+    // Height of bottom panels that windows go *below* (the floating dock), which a maximized window
+    // must keep free; follows Plasma's panel settings live.
+    Q_PROPERTY(int dockReserve READ dockReserve NOTIFY dockReserveChanged)
 
 public:
     Fm(const QString &startDir, const QString &assetDir, QObject *parent = nullptr, bool restoreSession = false);
@@ -35,6 +38,7 @@ public:
     QString undoText() const;
     QString trashDir() const;
     QVariantList volumes() const;
+    int dockReserve() const { return m_dockReserve; }
 
     // Blur behind + input mask in the window's rounded shape, plus a compositor-drawn shadow.
     Q_INVOKABLE void updateWindow(QQuickWindow *window, int radius, bool shadow);
@@ -134,6 +138,7 @@ Q_SIGNALS:
     void searchDone(int count, bool truncated);
     void archiveDone(const QString &path, bool ok);
     void tagsChanged();
+    void dockReserveChanged();
 
 private:
     void refreshVolumes();
@@ -143,6 +148,7 @@ private:
     QStringList taggedCandidates(const QString &tag) const;  // index + Baloo, not yet verified
     void startNextSize();
     void loadSizeCache();
+    void readDockReserve();
     void saveSizeCacheSoon();
     static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
@@ -160,6 +166,8 @@ private:
     };
     QHash<QString, SizeEntry> m_sizeCache;
     bool m_sizeSavePending = false;
+    int m_dockReserve = 0;
+    class QFileSystemWatcher *m_panelWatcher = nullptr;
     QAtomicInt m_searchGen;     // bumped to cancel the running search
     QHash<QString, QStringList> m_tagIndex;   // path -> tags, for files fm has tagged
 };

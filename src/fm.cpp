@@ -14,6 +14,9 @@
 #include <QQuickWindow>
 #include <QRegion>
 #include <QDirIterator>
+#include <QFileSystemWatcher>
+#include <KConfig>
+#include <KConfigGroup>
 #include <QStandardPaths>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -168,6 +171,38 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent, bool r
     refreshVolumes();
     loadTagIndex();
     loadSizeCache();
+    // The dock's size: from Plasma's panel settings, re-read whenever they change.
+    m_panelWatcher = new QFileSystemWatcher(this);
+    const QString cfg = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    m_panelWatcher->addPath(cfg);   // KConfig replaces files on save, so watch the folder
+    connect(m_panelWatcher, &QFileSystemWatcher::directoryChanged, this, &Fm::readDockReserve);
+    readDockReserve();
+}
+
+void Fm::readDockReserve()
+{
+    // Bottom panels (location 4) whose visibility lets windows go below them — "Windows Go Below"
+    // (3) and "Auto Hide" / "Dodge Windows" (1, 2) — don't reserve space, so a maximized window
+    // ends under them. "Always Visible" (0) panels already shrink the maximized area.
+    const KConfig applets(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc"), KConfig::SimpleConfig);
+    const KConfig shell(QStringLiteral("plasmashellrc"), KConfig::SimpleConfig);
+    const KConfigGroup containments = applets.group(QStringLiteral("Containments"));
+    int reserve = 0;
+    for (const QString &id : containments.groupList()) {
+        const KConfigGroup c = containments.group(id);
+        if (c.readEntry("plugin") != QLatin1String("org.kde.panel") || c.readEntry("location", 0) != 4)
+            continue;
+        const KConfigGroup view = shell.group(QStringLiteral("PlasmaViews")).group(QStringLiteral("Panel ") + id);
+        if (view.readEntry("panelVisibility", 0) == 0)
+            continue;
+        const int thickness = view.group(QStringLiteral("Defaults")).readEntry("thickness", 44);
+        const bool floating = view.readEntry("floating", 1) != 0;
+        reserve = std::max(reserve, thickness + (floating ? 16 : 4));   // a floating panel sits ~8 px up, plus a gap
+    }
+    if (reserve != m_dockReserve) {
+        m_dockReserve = reserve;
+        Q_EMIT dockReserveChanged();
+    }
 }
 
 // ---- Trash ---------------------------------------------------------------------------

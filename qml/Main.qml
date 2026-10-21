@@ -83,7 +83,10 @@ Window {
     property string tabsJson: ""                // saved: [{dir, back, fwd, search}]
     property int savedTabIndex: 0
     readonly property real tabBarH: tabBarShown ? 26 * tu : 0
-    readonly property real bottomH: 52 * u + tabBarH   // tab bar + status bar
+    // Maximized or full screen, the window reaches under the floating dock (it doesn't reserve space):
+    // keep its height free so tabs and status bar stay visible. Follows the dock's size live.
+    readonly property real dockInset: maximized ? Fm.dockReserve : 0
+    readonly property real bottomH: 52 * u + tabBarH + dockInset   // tab bar + status bar (+ dock)
     readonly property var tabModel: tabs.map((t, i) => ({ title: tabTitle(i), dir: i === tabIndex ? dir : t.dir }))
     // Collapsed sidebar sections (by title), saved.
     property string collapsedJson: "[]"
@@ -768,7 +771,7 @@ Window {
     // ---- sidebar -------------------------------------------------------------
     Item {
         id: sidebar
-        x: 10 * u - win.sideShift * .3; y: 10 * u; width: 220 * u; height: parent.height - 20 * u
+        x: 10 * u - win.sideShift * .3; y: 10 * u; width: 220 * u; height: parent.height - 20 * u - win.dockInset
         opacity: 1 - win.sideShift / win.hiddenShift
         visible: opacity > .01
         Rectangle { anchors.fill: parent; radius: 18 * win.u; color: win.sidebarTint }
@@ -1849,13 +1852,13 @@ Window {
     // ---- status bar ------------------------------------------------------------
     Rectangle {
         visible: !win.tabBarShown   // with tabs, the strip draws the page edge
-        x: 240 * u - win.contentShift; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
+        x: 240 * u - win.contentShift; y: parent.height - 52 * u - win.dockInset; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
     Text {
         id: statusText
         objectName: "status"
-        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
+        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.dockInset
         readonly property int n: win.paths().length
         text: win.searchActive
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
@@ -1867,7 +1870,7 @@ Window {
     }
     Pill {   // the Trash's "Empty" button, as in Finder
         visible: win.inTrash && folder.count > 0 && !win.searchActive
-        x: statusText.x + statusText.width + 14 * u; y: parent.height - 41 * u
+        x: statusText.x + statusText.width + 14 * u; y: parent.height - 41 * u - win.dockInset
         height: 22 * u; width: emptyLabel.implicitWidth + 24 * u
         Text {
             id: emptyLabel
@@ -1879,7 +1882,7 @@ Window {
     }
     Text {
         anchors.right: parent.right; anchors.rightMargin: 258 * u
-        anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
+        anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.dockInset
         text: "Icon size"; color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
     }
@@ -1887,7 +1890,7 @@ Window {
         id: wheelCtl
         objectName: "thumbwheel"
         u: win.u
-        x: parent.width - 244 * u; y: parent.height - 42 * u; width: 190 * u; height: 22 * u
+        x: parent.width - 244 * u; y: parent.height - 42 * u - win.dockInset; width: 190 * u; height: 22 * u
         value: win.wheelValue
         onValueChanged: win.wheelValue = value
     }
@@ -1900,7 +1903,7 @@ Window {
     Item {
         id: homeButton
         objectName: "homeButton"
-        x: parent.width - 48 * u; y: parent.height - 42 * u; width: 22 * u; height: 22 * u
+        x: parent.width - 48 * u; y: parent.height - 42 * u - win.dockInset; width: 22 * u; height: 22 * u
         readonly property bool atHome: Math.abs(win.wheelValue - win.defaultWheel) < .005
         Rectangle { anchors.fill: parent; radius: 5 * win.u; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
         Rectangle {

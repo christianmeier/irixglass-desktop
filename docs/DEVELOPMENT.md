@@ -223,6 +223,16 @@ main one. Tab keys, the File menu and sidebar places go through `activeNewTab`, 
 side (`splitActive`). Closing the split side's last tab closes the split view. Its tabs are saved
 as `splitTabsJson` (session window only).
 
+### The dock
+
+A Plasma panel set to "Windows Go Below" (or auto-hide) doesn't reserve space, so a maximized
+window extends under it. `Fm::readDockReserve()` reads bottom panels (location 4) from
+`plasma-org.kde.plasma.desktop-appletsrc` + `plasmashellrc` (thickness, floating, visibility) and
+`Fm.dockReserve` = thickness + 16 (floating) or + 4. `~/.config` is watched (KConfig replaces files
+on save), so resizing the dock updates fm at once. `win.dockInset` applies it only when maximized or
+full screen: on Wayland a window doesn't know its position, so a merely large window can't be
+detected. The tab bar, status bar, sidebar and panes all end `dockInset` higher.
+
 ### Sidebar sections
 
 Sections are part of `places` (title, colour, items) and can be created, renamed, moved and
