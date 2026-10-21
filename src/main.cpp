@@ -41,7 +41,8 @@ int main(int argc, char *argv[])
     const QFileInfo startInfo(start);
     start = startInfo.isDir() ? startInfo.absoluteFilePath() : startInfo.exists() ? startInfo.absolutePath() : QDir::homePath();
 
-    Fm fm(start, assets);
+    // Without a folder argument (dock, menu) the last session's tabs come back.
+    Fm fm(start, assets, nullptr, app.arguments().size() < 2);
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Fm"), &fm);
     engine.load(QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));

@@ -143,7 +143,13 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
   lights), `contentShift` moves the files, scope bar and status bar to the window's left edge so they
   use the whole width, and `previewW` makes room for the preview pane; all three are animated; the glass tint has holes for the sidebar and the preview pane.
 - **Folder sizes** go through a queue in `Fm` (3 `DirectorySizeJob`s at a time) into
-  `win.folderSizes`.
+  `win.folderSizes`, and are **cached** (`~/.cache/irixfm/folder-sizes.json`, at most 5000 folders):
+  a folder whose own mtime hasn't changed and was counted less than an hour ago answers at once;
+  otherwise the cached size shows while it's recounted (`Fm.cachedFolderSize`). KDE has no database
+  of folder sizes (Baloo indexes files, not folder totals), so fm keeps its own. Note a folder's
+  mtime only changes when its direct entries change, hence the one-hour limit.
+- **Kind** (`Fm::kind`) looks at the file name first (`QMimeDatabase::MatchExtension`) and only
+  reads the file when the name says nothing.
 - **Compress / Expand** use KArchive in a worker thread (`archiveDone` selects the result).
 - **Settings are saved immediately** for the sidebar (`settings.sync()`), and `main.cpp` quits
   cleanly on SIGTERM/SIGINT (KSignalHandler), so `pkill irixfm` no longer loses changes.
@@ -165,6 +171,40 @@ See [TAGS.md](TAGS.md) for the behaviour. Implementation:
 - Rename / Delete Tag rewrite the tag on every candidate file (`renameTagEverywhere`,
   `deleteTagEverywhere`).
 - Menus show colour dots from `icons/tag-<hex>.svg` (generated for the 10 Nord colours).
+
+### Tabs and the IRIX reference
+
+What IRIX 6.2 actually did (checked against SGI's *Desktop User's Guide* 007-1342, *Indigo Magic
+User Interface Guidelines* 007-2167 and *Desktop Integration Guide* 007-2006):
+- The square below the size thumbwheel is the thumbwheel's **home button**: "To revert to the
+  original size, click the small box below the thumbwheel." fm's `homeButton` sets `wheelValue` back
+  to `defaultWheel`.
+- The notebook tabs were the **Icon Catalog's pages** (Applications, Collaboration, Demos, …; Page Up
+  / Page Down switch; a stack of unnumbered tabs opens a page menu when they don't fit). Directory
+  views had no tabs. fm uses that look for Finder-style tabs, Ctrl+PgUp/PgDn echo IRIX's keys and
+  "////" opens the list of tabs.
+
+How tabs work:
+- The **active tab is the live window state** (`dir`, `backStack`/`fwdStack`, `selection`,
+  `anchorIndex`, `search.text`); the other tabs are snapshots in `win.tabs`. `switchTab()` =
+  `saveTab()` + `loadTab(i)`. That keeps every binding, menu and shortcut working unchanged.
+- `loadTab` closes transient state (rename, Quick Look, path editing, type-ahead), restores the
+  history and search, re-selects the saved selection once the folder model has the items
+  (`selectWhenReady`) and restores the scroll position (`pendingScrollY`, applied when the model is
+  Ready and the selection is done).
+- `openFolder(path)` gives a folder a tab: `findTab` (same folder, same search) or `newTab`. `go()`
+  stays inside the tab and is what back/forward, crumbs, typed paths and spring-loading use.
+- `onDirChanged` refreshes the active snapshot and `persistTabs()` writes `{dir, back, fwd,
+  search}` to the settings immediately. `Fm.restoreSession` (no folder argument) restores them.
+- `TabStrip.qml` is a non-interactive horizontal `ListView` of `NotebookTab`s (`spacing: -s`, so
+  the slanted sides interleave), drawing the page edge with a gap where the active tab joins it.
+
+### Sidebar sections
+
+Sections are part of `places` (title, colour, items) and can be created, renamed, moved and
+removed (`newSection`, `renameSection`, …); only Tags is fixed. Folding is saved by title
+(`collapsedJson`); a header after a folded section gets a small gap (`afterFolded`), so folded
+sections stack.
 
 ### Settings
 
@@ -218,11 +258,18 @@ wallpaper to judge it, e.g.
   enum names in QML and these numbers from C++.
 - **An inactive `Loader` still takes room in a `Row`** unless it's `visible: false` — that pushed the
   list view's Size/Date/Kind values off-screen.
+- **The tab switch reports the old folder as Ready**: FolderListModel keeps `Ready` until it starts
+  loading the new folder, so restoring a scroll position waits for `Loading` (`waitForLoad`).
+- **Tests get their own `XDG_CACHE_HOME`** (Makefile), so they never write into the real size cache.
 - **Tests that trash files must live on the home disk** and use a private `XDG_DATA_HOME`;
   `IRIXFM_NO_DIALOGS=1` makes job errors print instead of opening (blocking) dialogs.
 - **`stdout` is buffered when piped**: tests call `setvbuf(stdout, nullptr, _IONBF, 0)` so a hang
   still shows how far they got.
 - **ListView delegates are children of `contentItem`**, not of the view, when looking them up from C++.
+- **Menus already have `title`** (FINAL): a custom `title` property on a `P.Menu` fails the whole
+  file. Same family as `Item.top`.
+- **Middle-click needs `Qt.MiddleButton` in `acceptedButtons`**, and a MouseArea can set
+  `acceptedButtons` only once.
 - **Repo images** must not contain copyrighted wallpapers; `docs/bg.jpg` is a generated gradient.
 
 ## Ideas not done

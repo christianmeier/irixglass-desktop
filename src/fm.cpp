@@ -15,7 +15,9 @@
 #include <QRegion>
 #include <QDirIterator>
 #include <QStandardPaths>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QTimer>
 #include <QJsonObject>
 #include <QStorageInfo>
 #include <sys/xattr.h>
@@ -153,9 +155,10 @@ KWindowShadowTile::Ptr tile(const QImage &img, const QRect &r)
 }
 } // namespace
 
-Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent)
+Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent, bool restoreSession)
     : QObject(parent)
     , m_startDir(startDir)
+    , m_restoreSession(restoreSession)
     , m_assetDir(assetDir)
 {
     connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Fm::undoChanged);
@@ -164,6 +167,7 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent)
     connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceRemoved, this, &Fm::refreshVolumes);
     refreshVolumes();
     loadTagIndex();
+    loadSizeCache();
 }
 
 // ---- Trash ---------------------------------------------------------------------------
@@ -528,12 +532,80 @@ QVariantMap Fm::info(const QString &path) const
     return m;
 }
 
+namespace
+{
+QString sizeCacheFile()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + QStringLiteral("/irixfm/folder-sizes.json");
+}
+constexpr qint64 kSizeMaxAge = 60 * 60 * 1000;   // recount after an hour even if the folder looks unchanged
+} // namespace
+
 void Fm::folderSize(const QString &path)
 {
-    // Queued: a list view of a big folder asks for many sizes at once.
+    const QFileInfo fi(path);
+    const auto it = m_sizeCache.constFind(path);
+    const bool fresh = it != m_sizeCache.constEnd() && it->dirMtime == fi.lastModified().toMSecsSinceEpoch()
+        && QDateTime::currentMSecsSinceEpoch() - it->counted < kSizeMaxAge;
+    if (fresh) {
+        // Answer from the cache, after the caller has finished (a delegate being created).
+        const SizeEntry e = *it;
+        QMetaObject::invokeMethod(this, [this, path, e] { Q_EMIT folderSizeReady(path, e.bytes, e.files, e.folders); }, Qt::QueuedConnection);
+        return;
+    }
+    // Queued: a list view of a big folder asks for many sizes at once. The view keeps showing the
+    // cached (possibly stale) size meanwhile.
     if (!m_sizeQueue.contains(path))
         m_sizeQueue << path;
     startNextSize();
+}
+
+QString Fm::cachedFolderSize(const QString &path) const
+{
+    const auto it = m_sizeCache.constFind(path);
+    return it == m_sizeCache.constEnd() ? QString() : humanSize(it->bytes);
+}
+
+void Fm::loadSizeCache()
+{
+    QFile f(sizeCacheFile());
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    for (auto it = o.begin(); it != o.end(); ++it) {
+        const QJsonArray a = it.value().toArray();
+        if (a.size() == 5)
+            m_sizeCache.insert(it.key(), {qint64(a[0].toDouble()), qint64(a[1].toDouble()), qint64(a[2].toDouble()),
+                                          qint64(a[3].toDouble()), qint64(a[4].toDouble())});
+    }
+}
+
+void Fm::saveSizeCacheSoon()
+{
+    if (m_sizeSavePending)
+        return;
+    m_sizeSavePending = true;
+    QTimer::singleShot(3000, this, [this] {
+        m_sizeSavePending = false;
+        // Keep it small: forget folders that are gone, and the oldest entries beyond 5000.
+        QList<QPair<qint64, QString>> order;
+        for (auto it = m_sizeCache.begin(); it != m_sizeCache.end(); ++it)
+            order << qMakePair(it->counted, it.key());
+        std::sort(order.begin(), order.end(), std::greater<>());
+        QJsonObject o;
+        for (const auto &[counted, path] : std::as_const(order)) {
+            if (o.size() >= 5000)
+                break;
+            if (!QFileInfo::exists(path))
+                continue;
+            const SizeEntry &e = m_sizeCache[path];
+            o.insert(path, QJsonArray{double(e.bytes), double(e.files), double(e.folders), double(e.dirMtime), double(e.counted)});
+        }
+        QDir().mkpath(QFileInfo(sizeCacheFile()).absolutePath());
+        QFile f(sizeCacheFile());
+        if (f.open(QIODevice::WriteOnly))
+            f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    });
 }
 
 void Fm::startNextSize()
@@ -543,8 +615,14 @@ void Fm::startNextSize()
         const QString path = m_sizeQueue.takeFirst();
         ++m_sizeRunning;
         auto *job = KIO::directorySize(QUrl::fromLocalFile(path));
-        connect(job, &KJob::result, this, [this, job, path] {
+        const qint64 mtime = QFileInfo(path).lastModified().toMSecsSinceEpoch();   // before counting
+        connect(job, &KJob::result, this, [this, job, path, mtime] {
             --m_sizeRunning;
+            if (!job->error()) {
+                m_sizeCache.insert(path, {qint64(job->totalSize()), qint64(job->totalFiles()), qint64(job->totalSubdirs()), mtime,
+                                          QDateTime::currentMSecsSinceEpoch()});
+                saveSizeCacheSoon();
+            }
             Q_EMIT folderSizeReady(path, job->error() ? -1 : qint64(job->totalSize()), qint64(job->totalFiles()), qint64(job->totalSubdirs()));
             startNextSize();
         });
@@ -623,7 +701,11 @@ QString Fm::kind(const QString &path) const
         return QStringLiteral("folder");
     if (fi.suffix() == QLatin1String("desktop"))
         return QStringLiteral("app");
-    const QMimeType mime = QMimeDatabase().mimeTypeForFile(fi);
+    // By name first (no disk reads); look inside only when the name says nothing.
+    static const QMimeDatabase db;
+    QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
+    if (mime.isDefault())
+        mime = db.mimeTypeForFile(fi);
     if (mime.name().startsWith(QLatin1String("image/")))
         return QStringLiteral("image");
     if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))

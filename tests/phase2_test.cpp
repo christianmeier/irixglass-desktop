@@ -7,7 +7,9 @@
 #include <QApplication>
 #include <QDir>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QSignalSpy>
 #include <QImage>
 #include <QMimeData>
 #include <QQmlApplicationEngine>
@@ -273,6 +275,24 @@ int main(int argc, char *argv[])
             win->setProperty("wheelValue", 0.352);
         }
         win->setProperty("viewMode", 0);
+
+        // --- folder sizes are cached: asking again answers at once, a change recounts
+        {
+            QSignalSpy first(&fm, &Fm::folderSizeReady);
+            fm.folderSize(at(QStringLiteral("Work")));
+            first.wait(3000);
+            QElapsedTimer t;
+            t.start();
+            QSignalSpy again(&fm, &Fm::folderSizeReady);
+            fm.folderSize(at(QStringLiteral("Work")));
+            check(again.wait(1000) && t.elapsed() < 300 && !fm.cachedFolderSize(at(QStringLiteral("Work"))).isEmpty(),
+                  QStringLiteral("a folder size comes from the cache the second time"), QString::number(t.elapsed()) + " ms");
+            QTest::qWait(1100);   // mtime has second resolution on some file systems
+            writeFile(at(QStringLiteral("Work/new.bin")), QByteArray(9000, 'w'));
+            QSignalSpy recount(&fm, &Fm::folderSizeReady);
+            fm.folderSize(at(QStringLiteral("Work")));
+            check(recount.wait(3000) && recount.last().at(1).toLongLong() >= 9000, QStringLiteral("…and is counted again when the folder changed"));
+        }
 
         // --- sidebar: hovering an entry shows a remove button that removes it
         {

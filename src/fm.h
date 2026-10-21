@@ -16,6 +16,8 @@ class Fm : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString startDir MEMBER m_startDir CONSTANT)
+    // True when fm was started without a folder: the window then restores its saved tabs.
+    Q_PROPERTY(bool restoreSession MEMBER m_restoreSession CONSTANT)
     Q_PROPERTY(QString home READ home CONSTANT)
     Q_PROPERTY(QString userName READ userName CONSTANT)
     Q_PROPERTY(QString assetDir MEMBER m_assetDir CONSTANT)
@@ -25,7 +27,7 @@ class Fm : public QObject
     Q_PROPERTY(QVariantList volumes READ volumes NOTIFY volumesChanged)
 
 public:
-    Fm(const QString &startDir, const QString &assetDir, QObject *parent = nullptr);
+    Fm(const QString &startDir, const QString &assetDir, QObject *parent = nullptr, bool restoreSession = false);
 
     QString home() const;
     QString userName() const;
@@ -73,7 +75,10 @@ public:
 
     // Get Info and Quick Look.
     Q_INVOKABLE QVariantMap info(const QString &path) const;
-    Q_INVOKABLE void folderSize(const QString &path);               // answers with folderSizeReady
+    // Answers with folderSizeReady: at once from the size cache when the folder hasn't changed,
+    // otherwise after counting it (KIO). cachedFolderSize() returns the last known size ("" if none).
+    Q_INVOKABLE void folderSize(const QString &path);
+    Q_INVOKABLE QString cachedFolderSize(const QString &path) const;
     Q_INVOKABLE QString textPreview(const QString &path, int maxBytes = 262144) const;  // "" for binary files
 
     // Trash: the home trash is listed directly (trashDir); Put Back and Empty go through KIO.
@@ -132,13 +137,24 @@ private:
     void indexTags(const QString &path, const QStringList &tags);
     QStringList taggedCandidates(const QString &tag) const;  // index + Baloo, not yet verified
     void startNextSize();
+    void loadSizeCache();
+    void saveSizeCacheSoon();
     static QString freeName(const QString &dir, const QString &base, const QString &suffix);
     QString m_startDir;
+    bool m_restoreSession = false;
     QString m_assetDir;
     QPointer<KWindowShadow> m_shadow;
     QVariantList m_volumes;
     QStringList m_sizeQueue;    // folder-size requests waiting; at most kMaxSizeJobs run at once
     int m_sizeRunning = 0;
+    // Folder sizes survive navigation and restarts (~/.cache/irixfm/folder-sizes.json).
+    struct SizeEntry {
+        qint64 bytes = 0, files = 0, folders = 0;
+        qint64 dirMtime = 0;   // the folder's own mtime when counted (changes when its entries change)
+        qint64 counted = 0;    // when it was counted (ms since epoch)
+    };
+    QHash<QString, SizeEntry> m_sizeCache;
+    bool m_sizeSavePending = false;
     QAtomicInt m_searchGen;     // bumped to cancel the running search
     QHash<QString, QStringList> m_tagIndex;   // path -> tags, for files fm has tagged
 };

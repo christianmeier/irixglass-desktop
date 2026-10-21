@@ -83,6 +83,7 @@ int main(int argc, char *argv[])
     QObject *win = engine.rootObjects().constFirst();
     auto *window = qobject_cast<QQuickWindow *>(win);
     auto *list = win->findChild<QQuickItem *>(QStringLiteral("places"));
+    // (also used by the folding checks)
 
     const QPointingDevice touchpad(QStringLiteral("test touchpad"), 9001, QInputDevice::DeviceType::TouchPad,
                                    QPointingDevice::PointerType::Finger,
@@ -169,6 +170,45 @@ int main(int argc, char *argv[])
         call(win, "toggleSection", {QStringLiteral("Favorites")});
         call(win, "toggleSection", {QStringLiteral("Tags")});
         check(kinds(QStringLiteral("Favorites")) == favRows && kinds(QStringLiteral("Tags")) > 0, QStringLiteral("clicking again opens them"));
+
+        // --- a folded section takes only its title line: the next title moves right up
+        auto headY = [&](const QString &title) -> double {
+            auto *content = list->property("contentItem").value<QQuickItem *>();
+            for (QQuickItem *c : content->childItems()) {
+                const QVariantMap m = c->property("modelData").toMap();
+                if (m.value(QStringLiteral("kind")) == QStringLiteral("head") && m.value(QStringLiteral("title")) == title)
+                    return c->y();
+            }
+            return -1;
+        };
+        call(win, "toggleSection", {QStringLiteral("Favorites")});
+        call(win, "toggleSection", {QStringLiteral("Indigo Magic")});
+        QTest::qWait(150);
+        const double favY = headY(QStringLiteral("Favorites")), indigoY = headY(QStringLiteral("Indigo Magic")), locsY = headY(QStringLiteral("Locations"));
+        const double rowH = 30 * win->property("tu").toDouble();
+        check(indigoY - favY < rowH * 1.3 && locsY - indigoY < rowH * 1.3, QStringLiteral("folded sections stack without a big gap"),
+              QString::number(indigoY - favY) + ", " + QString::number(locsY - indigoY));
+        call(win, "toggleSection", {QStringLiteral("Favorites")});
+        call(win, "toggleSection", {QStringLiteral("Indigo Magic")});
+
+        // --- sections can be added, renamed, moved and removed
+        auto titles = [&] {
+            QStringList t;
+            for (const QVariant &r : win->property("placeRows").toList())
+                if (r.toMap().value(QStringLiteral("kind")) == QStringLiteral("head")) t << r.toMap().value(QStringLiteral("title")).toString();
+            return t;
+        };
+        call(win, "newSection", {});
+        check(titles().contains(QStringLiteral("New Section")) && win->property("renamingSection").toInt() == 3,
+              QStringLiteral("New Section adds one, ready to rename"), titles().join(", "));
+        win->setProperty("renamingSection", -1);
+        call(win, "renameSection", {3, QStringLiteral("Clients")});
+        call(win, "placeAdd", {3, base + QStringLiteral("/Work"), -1});
+        check(titles().contains(QStringLiteral("Clients")) && labels(win, 3).size() == 1, QStringLiteral("a new section can be renamed and filled"), titles().join(", "));
+        call(win, "moveSection", {3, -3});
+        check(titles().first() == QStringLiteral("Clients"), QStringLiteral("a section can be moved to the top"), titles().join(", "));
+        call(win, "removeSection", {0});
+        check(!titles().contains(QStringLiteral("Clients")), QStringLiteral("a section can be removed"), titles().join(", "));
 
         // --- saved, and reset
         check(!win->property("placesJson").toString().isEmpty(), QStringLiteral("changes are kept in the settings"));

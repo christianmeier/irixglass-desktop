@@ -74,7 +74,7 @@ Item {
         }
         Text {
             width: parent.width; horizontalAlignment: Text.AlignHCenter
-            text: (pane.info.kindText || "") + " · " + (pane.info.isDir ? (pane.sizes[pane.path] || "…") : (pane.info.size >= 0 ? Fm.humanSize(pane.info.size) : ""))
+            text: (pane.info.kindText || "") + " · " + (pane.info.isDir ? (pane.sizes[pane.path] || Fm.cachedFolderSize(pane.path) || "…") : (pane.info.size >= 0 ? Fm.humanSize(pane.info.size) : ""))
             color: "white"; opacity: .6
             font.family: pane.fontFamily; font.pixelSize: 12 * pane.tu
         }

@@ -49,11 +49,14 @@ $(BUILD)/phase2_test: tests/phase2_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/f
 $(BUILD)/tag_test: tests/tag_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tag_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
 
+$(BUILD)/tab_test: tests/tab_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tab_test.cpp src/fm.cpp $(BUILD)/moc_fm.cpp -o $@ $(LDLIBS)
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test
 test: $(TESTS)
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
-	  XDG_CONFIG_HOME=$$tmp QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc
+	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc
 
 icons:
 	python3 tools/make_icons.py

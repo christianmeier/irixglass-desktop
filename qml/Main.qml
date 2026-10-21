@@ -55,6 +55,20 @@ Window {
     property string tagsJson: ""
     property int tagRev: 0                      // bumped when tags change, so views re-read them
     property string renamingTag: ""
+    // ---- tabs: the active tab's state is the live window state (dir, history, selection, search);
+    // the other tabs are snapshots in `tabs`, swapped in by switchTab().
+    property var tabs: [{ dir: Fm.startDir, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0 }]
+    property int tabIndex: 0
+    property bool tabBarShown: true
+    property bool folderTabs: true              // opening a folder / place adds a tab (or switches to its tab)
+    property var closedTabs: []                 // for Reopen Closed Tab
+    property real pendingScrollY: -1
+    property bool waitForLoad: false            // the folder model still shows the previous folder
+    property string tabsJson: ""                // saved: [{dir, back, fwd, search}]
+    property int savedTabIndex: 0
+    readonly property real tabBarH: tabBarShown ? 26 * tu : 0
+    readonly property real bottomH: 52 * u + tabBarH   // tab bar + status bar
+    readonly property var tabModel: tabs.map((t, i) => ({ title: tabTitle(i), dir: i === tabIndex ? dir : t.dir }))
     // Collapsed sidebar sections (by title), saved.
     property string collapsedJson: "[]"
     readonly property var collapsed: { try { return JSON.parse(collapsedJson) } catch (e) { return [] } }
@@ -76,7 +90,8 @@ Window {
     property real previewW: previewShown ? 280 * u : 0
     Behavior on previewW { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     readonly property real scopeH: searchActive ? 34 * tu : 0
-    property real wheelValue: .352              // thumbwheel 0..1
+    readonly property real defaultWheel: .352      // the standard icon size (the IRIX home position)
+    property real wheelValue: defaultWheel      // thumbwheel 0..1
     readonly property real iconScale: .55 + wheelValue * 1.05
     readonly property real k: u * iconScale     // px per icon unit (icons are drawn in a 100-unit box)
     // List and search results: the icon follows the thumbwheel too (26 px at the default size, at least
@@ -97,7 +112,7 @@ Window {
     visible: true
     color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint
-    title: (dir === "/" ? "/" : dir.split("/").pop()) + " — fm"
+    title: tabTitle(tabIndex) + " — fm"
 
     Settings {
         id: settings
@@ -116,6 +131,10 @@ Window {
         property alias trashAdded: win.trashAdded
         property alias tags: win.tagsJson
         property alias collapsedSections: win.collapsedJson
+        property alias tabs: win.tabsJson
+        property alias activeTab: win.savedTabIndex
+        property alias tabBarShown: win.tabBarShown
+        property alias folderTabs: win.folderTabs
         property alias width: win.width
         property alias height: win.height
     }
@@ -127,6 +146,17 @@ Window {
     onVisibilityChanged: shape()
     Component.onCompleted: {
         Qt.callLater(shape)
+        // Started from the dock or menu (no folder given): bring back the last session's tabs.
+        if (Fm.restoreSession && tabsJson) {
+            let saved = []
+            try { saved = JSON.parse(tabsJson) } catch (e) {}
+            saved = saved.filter(t => t && t.dir && Fm.resolvePath(t.dir, "/").ok)
+            if (saved.length) {
+                tabs = saved.map(t => ({ dir: t.dir, back: t.back || [], fwd: t.fwd || [], sel: [], anchor: -1, search: t.search || "", scrollY: 0 }))
+                tabIndex = -1
+                loadTab(Math.max(0, Math.min(saved.length - 1, savedTabIndex)))
+            }
+        }
         // Older saved sidebars don't have Trash yet: add it once to Locations.
         if (!trashAdded) {
             const p = copyPlaces(), li = Math.max(0, p.findIndex(sec => sec.title === "Locations"))
@@ -141,11 +171,11 @@ Window {
     // ---- navigation ----------------------------------------------------------
     function go(path, fromHistory) {
         if (!path || path === dir) return
+        pendingScrollY = -1; pendingSelect = []
         if (!fromHistory) { backStack = backStack.concat([dir]); fwdStack = [] }
         dir = path
         selection = ({}); anchorIndex = -1; renaming = ""
         search.text = ""
-        folderSizes = ({})
         recent = [path].concat(recent.filter(p => p !== path)).slice(0, 12)
         recentJson = JSON.stringify(recent)
         view().positionViewAtBeginning()
@@ -153,7 +183,150 @@ Window {
     function goBack() { if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
     function goForward() { if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
     function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
-    function activate(path, isDir) { isDir ? go(path) : Fm.open(path) }
+    function activate(path, isDir) { isDir ? openFolder(path, false) : Fm.open(path) }
+    // Opening a folder or a sidebar place gives it a tab: an existing tab showing it, or a new one.
+    // Moving around inside a tab (back, path bar, crumbs, spring-loading) stays in the tab (go()).
+    function openFolder(path, sameTab) {
+        if (folderTabs && !sameTab) openTabFor(path, "")
+        else go(path)
+    }
+    function findTab(path, searchText) {
+        const tag = searchText.toLowerCase().startsWith("tag:")   // a tag view is the same anywhere
+        for (let i = 0; i < tabs.length; ++i) {
+            const t = i === tabIndex ? { dir: dir, search: search.text } : tabs[i]
+            const sameSearch = (t.search || "").toLowerCase() === searchText.toLowerCase()
+            if (sameSearch && (tag || t.dir === path)) return i
+        }
+        return -1
+    }
+    function openTabFor(path, searchText) {
+        const i = findTab(path, searchText)
+        if (i === tabIndex) return
+        if (i >= 0) { switchTab(i); return }
+        newTab(path, true)
+        if (searchText) search.text = searchText
+    }
+
+    // ---- tabs ----------------------------------------------------------------------
+    function tabTitleOf(t) {
+        const s = t.search || ""
+        const m = s.match(/^tag:\s*(.+)$/i)
+        if (m) return tagDef(m[1].trim()) ? tagDef(m[1].trim()).name : m[1].trim()
+        if (s) return "Search “" + s + "”"
+        if (t.dir === Fm.trashDir || t.dir.startsWith(Fm.trashDir + "/")) return "Trash"
+        if (t.dir === Fm.home) return Fm.userName
+        if (t.dir === "/") return "cachyOS"
+        return t.dir.split("/").pop()
+    }
+    function tabTitle(i) {
+        if (i === tabIndex) return tabTitleOf({ dir: dir, search: search.text })
+        return tabs[i] ? tabTitleOf(tabs[i]) : ""
+    }
+    function snapshot() {
+        return { dir: dir, back: backStack.slice(-20), fwd: fwdStack.slice(0, 20), sel: paths(), anchor: anchorIndex,
+                 search: search.text, scrollY: view().contentY }
+    }
+    function saveTab() {
+        if (tabIndex < 0 || tabIndex >= tabs.length) return
+        const t = tabs.slice(); t[tabIndex] = snapshot(); tabs = t
+    }
+    function persistTabs() {
+        if (!Fm.restoreSession) return    // a window opened on a folder (xdg-open, Ctrl+N) leaves the saved tabs alone
+        tabsJson = JSON.stringify(tabs.map((t, i) => {
+            const x = i === tabIndex ? snapshot() : t
+            return { dir: x.dir, back: x.back.slice(-20), fwd: x.fwd.slice(0, 20), search: x.search }
+        }))
+        savedTabIndex = tabIndex
+        settings.sync()
+    }
+    // Makes tab i live: close transient things, restore its folder, history, search, selection, scroll.
+    function loadTab(i) {
+        const t = tabs[i]
+        if (!t) return
+        renaming = ""; quickLook = ""; typeAhead = ""; renamingPlace = ""; renamingTag = ""
+        if (editingPath) cancelPath()
+        pendingSelect = []; pendingScrollY = -1; selection = ({}); anchorIndex = -1
+        tabIndex = i
+        backStack = t.back || []; fwdStack = t.fwd || []
+        // A different folder: the model reports Ready for the old one until it starts loading.
+        waitForLoad = t.dir !== dir
+        dir = t.dir
+        search.text = t.search || ""
+        searchDelay.stop()                // the text change would re-run (and clear the selection) later
+        if (t.search) runSearch()         // its own folder: two tabs can share the same search text
+        if (!t.search) {
+            const sel = (t.sel || []).filter(p => Fm.resolvePath(p, "/").ok)
+            if (sel.length) selectWhenReady(sel)
+            pendingScrollY = t.scrollY || 0
+            applyPendingScroll()
+        }
+        persistTabs()
+        keys.forceActiveFocus()
+    }
+    function applyPendingScroll() {
+        if (pendingScrollY < 0 || pendingSelect.length || waitForLoad) return
+        if (folder.status !== FolderListModel.Ready) return
+        const v = view(), y = pendingScrollY
+        pendingScrollY = -1
+        Qt.callLater(() => { v.contentY = Math.max(v.originY, Math.min(y, v.originY + v.contentHeight - v.height)) })
+    }
+    function switchTab(i) {
+        if (i === tabIndex || i < 0 || i >= tabs.length) return
+        saveTab()
+        loadTab(i)
+    }
+    function cycleTab(delta) { if (tabs.length > 1) switchTab((tabIndex + delta + tabs.length) % tabs.length) }
+    // New tabs go at the end, like Finder; `activate` switches to it.
+    function newTab(path, activate) {
+        saveTab()
+        tabs = tabs.concat([{ dir: path, back: [], fwd: [], sel: [], anchor: -1, search: "", scrollY: 0 }])
+        tabBarShown = true
+        if (activate) loadTab(tabs.length - 1); else persistTabs()
+    }
+    // Each folder in `paths` opens in a new tab, in order (the last one becomes active).
+    function openInNewTab(paths, activate) {
+        const dirs = paths.filter(p => Fm.kind(p) === "folder")
+        dirs.forEach((p, k) => newTab(p, activate && k === dirs.length - 1))
+    }
+    function closeTab(i) {
+        if (tabs.length <= 1) { win.close(); return }
+        saveTab()
+        closedTabs = closedTabs.concat([tabs[i]]).slice(-20)
+        const t = tabs.slice(); t.splice(i, 1)
+        const wasActive = i === tabIndex
+        let next = tabIndex > i ? tabIndex - 1 : tabIndex
+        tabs = t
+        if (wasActive) { tabIndex = -1; loadTab(Math.min(i, t.length - 1)) }
+        else { tabIndex = next; persistTabs() }
+    }
+    function closeOtherTabs(i) {
+        saveTab()
+        const keep = tabs[i]
+        closedTabs = closedTabs.concat(tabs.filter((t, k) => k !== i)).slice(-20)
+        tabs = [keep]
+        if (i === tabIndex) { tabIndex = 0; persistTabs() } else { tabIndex = -1; loadTab(0) }
+    }
+    function reopenClosedTab() {
+        if (!closedTabs.length) return
+        const t = closedTabs[closedTabs.length - 1]
+        closedTabs = closedTabs.slice(0, -1)
+        saveTab()
+        const all = tabs.slice(); all.splice(tabIndex + 1, 0, t); tabs = all
+        loadTab(tabIndex + 1)
+    }
+    function moveTab(from, to) {
+        if (from === to || from < 0 || to < 0 || from >= tabs.length || to >= tabs.length) return
+        saveTab()
+        const t = tabs.slice(), [x] = t.splice(from, 1)
+        t.splice(to, 0, x)
+        tabIndex = tabIndex === from ? to : (from < tabIndex && to >= tabIndex ? tabIndex - 1 : from > tabIndex && to <= tabIndex ? tabIndex + 1 : tabIndex)
+        tabs = t
+        persistTabs()
+    }
+    // Navigating inside a tab keeps its snapshot (and the saved session) current.
+    // (deferred: go() and loadTab() change dir before they reset the search and selection)
+    function syncTab() { if (tabIndex >= 0 && tabIndex < tabs.length) { saveTab(); persistTabs() } }
+    onDirChanged: Qt.callLater(syncTab)
 
     // Editable path bar (click the path, Ctrl+L, Ctrl+Shift+G, or type / or ~ in the file view).
     function editPath(initial) {
@@ -200,6 +373,7 @@ Window {
         pendingSelect = []
         selection = s
         anchorIndex = idx[0]
+        if (pendingScrollY >= 0) { applyPendingScroll(); return }   // a restored tab: its own scroll position
         view().currentIndex = idx[0]
         view().positionViewAtIndex(idx[0], ListView.Contain)
     }
@@ -271,10 +445,43 @@ Window {
     }
     function placeMoveTo(si, ii, sj) { const p = copyPlaces(); const [it] = p[si].items.splice(ii, 1); p[sj].items.push(it); setPlaces(p) }
     function resetPlaces() { placesJson = ""; settings.sync() }
+    // Sections are user data too: new, rename, move, remove (the Tags section is fixed).
+    property int renamingSection: -1
+    function newSection() {
+        const p = copyPlaces()
+        let t = "New Section", i = 2
+        while (p.some(sec => sec.title === t) || t === "Tags") t = "New Section " + i++
+        const colors = ["#88C0D0", "#8FBCBB", "#A3BE8C", "#EBCB8B", "#D08770"]
+        p.push({ title: t, color: colors[p.length % colors.length], items: [] })
+        setPlaces(p)
+        sidebarShown = true
+        renamingSection = p.length - 1
+        return t
+    }
+    function renameSection(si, title) {
+        title = title.trim()
+        const p = copyPlaces()
+        if (!title || !p[si] || title === "Tags" || p.some((sec, k) => k !== si && sec.title === title)) return
+        const old = p[si].title
+        p[si].title = title
+        if (isCollapsed(old)) collapsedJson = JSON.stringify(collapsed.map(t => t === old ? title : t))
+        setPlaces(p)
+    }
+    function moveSection(si, delta) {
+        const p = copyPlaces(), j = si + delta
+        if (j < 0 || j >= p.length) return
+        const [x] = p.splice(si, 1); p.splice(j, 0, x); setPlaces(p)
+    }
+    function removeSection(si) {
+        const p = copyPlaces(), title = p[si] ? p[si].title : ""
+        p.splice(si, 1)
+        collapsedJson = JSON.stringify(collapsed.filter(t => t !== title))
+        setPlaces(p)
+    }
     function activatePlace(item) {
-        if (item.udi !== undefined) { item.mounted ? go(item.path) : Fm.mountVolume(item.udi); return }
-        if (item.action === "trash") { go(Fm.trashDir); return }
-        if (item.path) go(expand(item.path))
+        if (item.udi !== undefined) { item.mounted ? openFolder(item.path, false) : Fm.mountVolume(item.udi); return }
+        if (item.action === "trash") { openFolder(Fm.trashDir, false); return }
+        if (item.path) openFolder(expand(item.path), false)
         else if (item.action === "overview") Fm.overview()
         else if (item.action === "find") search.forceActiveFocus()
         else if (item.action === "network") Fm.openInDolphin("remote:/")
@@ -290,7 +497,8 @@ Window {
     readonly property var placeRows: {
         const rows = []
         places.forEach((sec, si) => {
-            rows.push({ kind: "head", si: si, title: sec.title, first: si === 0, collapsed: isCollapsed(sec.title) })
+            rows.push({ kind: "head", si: si, title: sec.title, first: si === 0, collapsed: isCollapsed(sec.title),
+                        afterFolded: si > 0 && isCollapsed(places[si - 1].title) })
             if (isCollapsed(sec.title)) return   // folded: only the title shows
             sec.items.forEach((it, ii) => rows.push({ kind: "item", si: si, ii: ii, item: it, color: sec.color }))
             if (!sec.items.length) rows.push({ kind: "empty", si: si })
@@ -299,7 +507,8 @@ Window {
                 volumes.forEach(v => rows.push({ kind: "volume", si: si, item: v, color: sec.color }))
         })
         // Tags section (not part of `places`): the shown tags, in their order.
-        rows.push({ kind: "head", si: -1, title: "Tags", tags: true, first: false, collapsed: isCollapsed("Tags") })
+        rows.push({ kind: "head", si: -1, title: "Tags", tags: true, first: false, collapsed: isCollapsed("Tags"),
+                    afterFolded: places.length > 0 && isCollapsed(places[places.length - 1].title) })
         if (!isCollapsed("Tags")) {
             tagDefs.forEach((t, ti) => { if (t.shown) rows.push({ kind: "tag", si: -1, ti: ti, tag: t }) })
             if (!tagDefs.some(t => t.shown)) rows.push({ kind: "empty", si: -1, hint: "Right-click to show tags" })
@@ -309,7 +518,7 @@ Window {
     Connections {
         target: Fm
         function onTagsChanged() { win.tagRev++; if (win.searchTag) win.runSearch() }
-        function onVolumeMounted(udi, path) { win.go(path) }
+        function onVolumeMounted(udi, path) { win.openFolder(path, false) }
         function onFolderSizeReady(p, bytes, files, folders) {
             const s = Object.assign({}, win.folderSizes)
             s[p] = bytes < 0 ? "--" : Fm.humanSize(bytes)
@@ -382,7 +591,7 @@ Window {
         if (searchTag.toLowerCase() === name.toLowerCase()) search.text = ""
     }
     function resetTags() { tagsJson = ""; settings.sync() }
-    function showTagged(name) { search.text = "tag:" + name }
+    function showTagged(name) { if (folderTabs) openTabFor(dir, "tag:" + name); else search.text = "tag:" + name }
     function urlsToPaths(urls) { return urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, ""))) }
 
     // ---- Finder commands -----------------------------------------------------------
@@ -455,8 +664,11 @@ Window {
         sortCaseSensitive: false
         sortField: win.sortField
         sortReversed: win.sortReversed
-        onCountChanged: win.selectPending()
-        onStatusChanged: win.selectPending()
+        onCountChanged: { win.selectPending(); win.applyPendingScroll() }
+        onStatusChanged: {
+            if (status === FolderListModel.Loading) win.waitForLoad = false   // the new folder is on its way
+            win.selectPending(); win.applyPendingScroll()
+        }
     }
 
     // ---- glass ---------------------------------------------------------------
@@ -527,7 +739,9 @@ Window {
                                                            : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
                 readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
                 // Header rows carry the gap above them, so baselines match the mockup.
-                readonly property real gap: head && !modelData.first ? 30 * win.tu : 0
+                // Header rows carry the gap above them; after a folded section it's small, so folded
+                // sections stack tightly.
+                readonly property real gap: head && !modelData.first ? (modelData.afterFolded ? 4 * win.tu : 30 * win.tu) : 0
                 width: placesView.width
                 height: gap + (head ? 28 : 30) * win.tu
 
@@ -554,6 +768,7 @@ Window {
                 }
                 Text {
                     visible: !(row.item && win.renamingPlace === row.key) && !(row.tagRow && win.renamingTag === row.modelData.tag.name)
+                             && !(row.head && !row.tagHead && win.renamingSection === row.modelData.si)
                     x: (row.head ? 16 : row.item || row.tagRow ? 48 : 22) * win.u
                     width: (row.head ? 170 : 160) * win.u
                     elide: Text.ElideRight
@@ -572,6 +787,14 @@ Window {
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
                     onCommitted: text => win.placeRename(row.modelData.si, row.modelData.ii, text)
                     onDone: { win.renamingPlace = ""; keys.forceActiveFocus() }
+                }
+                Rename {   // a section title (double-click, or Rename Section…)
+                    active: row.head && !row.tagHead && win.renamingSection === row.modelData.si
+                    x: 12 * win.u; width: 170 * win.u; y: row.gap + 4 * win.tu
+                    name: row.head ? row.modelData.title : ""
+                    u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
+                    onCommitted: text => win.renameSection(row.modelData.si, text)
+                    onDone: { win.renamingSection = -1; keys.forceActiveFocus() }
                 }
                 Rename {
                     active: row.tagRow && win.renamingTag === row.modelData.tag.name
@@ -622,9 +845,14 @@ Window {
                 HoverHandler { id: hov }
                 MouseArea {
                     anchors.fill: parent; anchors.rightMargin: row.head || (row.vol && row.modelData.item.mounted) || removeButton.visible ? 36 * win.u : 0
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                     onClicked: m => {
                         keys.forceActiveFocus()
+                        if (m.button === Qt.MiddleButton) {   // a place in a background tab
+                            const it = row.modelData.item
+                            if (it && (it.path || it.action === "trash")) win.newTab(it.action === "trash" ? Fm.trashDir : win.expand(it.path), false)
+                            return
+                        }
                         if (row.tagRow) {
                             if (m.button === Qt.RightButton) { tagMenu.tag = row.modelData.tag; tagMenu.open() }
                             else win.showTagged(row.modelData.tag.name)
@@ -642,6 +870,8 @@ Window {
                     onDoubleClicked: m => {
                         if (m.button !== Qt.LeftButton) return
                         if (row.tagRow) win.renamingTag = row.modelData.tag.name
+                        // the first click folded it: open it again and rename
+                        else if (row.head && !row.tagHead) { win.toggleSection(row.modelData.title); win.renamingSection = row.modelData.si }
                         else if (row.item && !row.vol) win.renamingPlace = row.key
                     }
                 }
@@ -772,7 +1002,9 @@ Window {
                             MouseArea {   // a parent folder: go there; the current folder: edit the path
                                 anchors.fill: parent
                                 cursorShape: crumb.last ? Qt.IBeamCursor : Qt.PointingHandCursor
-                                onClicked: crumb.last ? win.editPath() : win.go(crumb.modelData.path)
+                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                                onClicked: m => m.button === Qt.MiddleButton ? win.newTab(crumb.modelData.path, false)
+                                                : crumb.last ? win.editPath() : win.go(crumb.modelData.path)
                             }
                         }
                         Text {
@@ -897,7 +1129,7 @@ Window {
             color: "white"; selectionColor: "#0a84ff"
             font.family: win.fontFamily; font.pixelSize: 13.5 * win.tu
             clip: true
-            onTextChanged: searchDelay.restart()
+            onTextChanged: { searchDelay.restart(); Qt.callLater(win.syncTab) }
             Keys.onEscapePressed: { text = ""; keys.forceActiveFocus() }
             Keys.onDownPressed: { keys.forceActiveFocus(); if (win.itemCount) win.select(0, win.itemAt(0, "filePath"), 0) }
             Keys.onReturnPressed: { keys.forceActiveFocus(); if (win.itemCount) win.select(0, win.itemAt(0, "filePath"), 0) }
@@ -954,7 +1186,7 @@ Window {
 
     // Drops onto empty space go into the current folder.
     DropArea {
-        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - 52 * u
+        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW; height: parent.height - y - win.bottomH
         onDropped: drop => { if (!win.inTrash) Fm.drop(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
 
@@ -964,7 +1196,7 @@ Window {
         visible: win.viewMode !== 1
         x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH
         width: parent.width - x - 20 * u - win.previewW
-        height: parent.height - 52 * u - y
+        height: parent.height - win.bottomH - y
         clip: true
         cellWidth: 168 * u * win.iconScale / .92
         cellHeight: 168 * u * win.iconScale / .92
@@ -1142,15 +1374,20 @@ Window {
                 id: mouse
                 x: (cell.width - 100 * cell.k) / 2; y: 10 * cell.k
                 width: 100 * cell.k; height: 100 * cell.k + 26 * win.tu
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 drag.target: dragProxy
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 onPressed: m => {
                     keys.forceActiveFocus()
+                    if (m.button === Qt.MiddleButton) { if (cell.fileIsDir) win.openInNewTab([cell.filePath], false); return }
                     if (!cell.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(cell.index, cell.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
                 }
                 onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
-                onDoubleClicked: m => { if (m.button === Qt.LeftButton) win.activate(cell.filePath, cell.fileIsDir) }
+                onDoubleClicked: m => {
+                    if (m.button !== Qt.LeftButton) return
+                    if (cell.fileIsDir && m.modifiers & Qt.ControlModifier) win.folderTabs ? win.go(cell.filePath) : win.openInNewTab([cell.filePath], true)
+                    else win.activate(cell.filePath, cell.fileIsDir)
+                }
             }
             DropArea {
                 id: drop
@@ -1175,7 +1412,7 @@ Window {
         }
         x: 252 * u - win.contentShift; y: 80 * u + win.scopeH
         width: parent.width - x - 14 * u - win.previewW
-        height: parent.height - 52 * u - y
+        height: parent.height - win.bottomH - y
         clip: true
         model: win.searchActive ? resultsModel : folder
         boundsBehavior: Flickable.StopAtBounds
@@ -1263,7 +1500,9 @@ Window {
                 Repeater {
                     model: [
                         [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), 180],
-                        [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || "…") : "--") : Fm.humanSize(row.fileSize), 90],
+                        // folder sizes: the fresh count, else the cached one (shown at once), else "…"
+                        [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--")
+                                       : Fm.humanSize(row.fileSize), 90],
                         [win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
                          : row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document", 110]
                     ]
@@ -1286,15 +1525,20 @@ Window {
             MouseArea {
                 id: rowMouse
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 drag.target: rowDrag
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 onPressed: m => {
                     keys.forceActiveFocus()
+                    if (m.button === Qt.MiddleButton) { if (row.fileIsDir) win.openInNewTab([row.filePath], false); return }
                     if (!row.sel || m.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) win.select(row.index, row.filePath, m.modifiers)
                     if (m.button === Qt.RightButton) itemMenu.open()
                 }
                 onReleased: { rowDrag.x = 0; rowDrag.y = 0 }
-                onDoubleClicked: m => { if (m.button === Qt.LeftButton) win.activate(row.filePath, row.fileIsDir) }
+                onDoubleClicked: m => {
+                    if (m.button !== Qt.LeftButton) return
+                    if (row.fileIsDir && m.modifiers & Qt.ControlModifier) win.folderTabs ? win.go(row.filePath) : win.openInNewTab([row.filePath], true)
+                    else win.activate(row.filePath, row.fileIsDir)
+                }
             }
             DropArea {
                 id: rowDrop
@@ -1372,7 +1616,7 @@ Window {
         objectName: "previewPane"
         visible: win.previewW > 1
         x: parent.width - win.previewW; y: 72 * u
-        width: 270 * u; height: parent.height - 72 * u - 60 * u
+        width: 270 * u; height: parent.height - 72 * u - win.bottomH - 8 * u
         clip: true
         path: win.focusedPath() || win.dir
         u: win.u; tu: win.tu; fontFamily: win.fontFamily
@@ -1382,8 +1626,33 @@ Window {
         onInfoRequested: win.getInfo()
     }
 
+    // ---- tabs (IRIX notebook tabs along the bottom of the page) ------------------------
+    TabStrip {
+        id: tabStrip
+        visible: win.tabBarShown
+        x: 262 * u - win.contentShift; y: parent.height - win.bottomH
+        width: parent.width - x - win.previewW - 20 * u; height: win.tabBarH
+        tabs: win.tabModel
+        current: win.tabIndex
+        u: win.u; tu: win.tu; fontFamily: win.fontFamily
+        springDelay: win.springDelay
+        onActivated: i => win.switchTab(i)
+        onCloseRequested: i => win.closeTab(i)
+        onMiddleClicked: i => win.closeTab(i)
+        onMenuRequested: i => { tabMenu.index = i; tabMenu.open() }
+        onNewRequested: win.newTab(win.dir, true)
+        onOverflowRequested: tabListMenu.open()
+        onFilesDropped: (i, urls, move) => {
+            const target = i === win.tabIndex ? win.dir : (win.tabs[i] ? win.tabs[i].dir : "")
+            if (!target) return
+            if (target === Fm.trashDir || target.startsWith(Fm.trashDir + "/")) Fm.trash(win.urlsToPaths(urls))
+            else Fm.drop(urls, target, move)
+        }
+    }
+
     // ---- status bar ------------------------------------------------------------
     Rectangle {
+        visible: !win.tabBarShown   // with tabs, the strip draws the page edge
         x: 240 * u - win.contentShift; y: parent.height - 52 * u; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
@@ -1413,17 +1682,48 @@ Window {
         TapHandler { onTapped: emptyDialog.open() }
     }
     Text {
-        anchors.right: parent.right; anchors.rightMargin: 230 * u
+        anchors.right: parent.right; anchors.rightMargin: 258 * u
         anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u
         text: "Icon size"; color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
     }
     Thumbwheel {
         id: wheelCtl
+        objectName: "thumbwheel"
         u: win.u
-        x: parent.width - 216 * u; y: parent.height - 42 * u; width: 190 * u; height: 22 * u
+        x: parent.width - 244 * u; y: parent.height - 42 * u; width: 190 * u; height: 22 * u
         value: win.wheelValue
         onValueChanged: win.wheelValue = value
+    }
+    // The wheel's own value is set by dragging (which breaks a binding), so keep it in step here.
+    Connections {
+        target: win
+        function onWheelValueChanged() { if (Math.abs(wheelCtl.value - win.wheelValue) > 1e-6) wheelCtl.value = win.wheelValue }
+    }
+    // IRIX "home button" (the small box at the end of the thumbwheel): back to the standard icon size.
+    Item {
+        id: homeButton
+        objectName: "homeButton"
+        x: parent.width - 48 * u; y: parent.height - 42 * u; width: 22 * u; height: 22 * u
+        readonly property bool atHome: Math.abs(win.wheelValue - win.defaultWheel) < .005
+        Rectangle { anchors.fill: parent; radius: 5 * win.u; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 3 * win.u; radius: 3 * win.u
+            gradient: Gradient {
+                GradientStop { position: 0; color: homeHover.hovered ? "#a9aebb" : "#8a8f9c" }
+                GradientStop { position: 1; color: "#3a3d46" }
+            }
+            Rectangle {   // the inner square, as on SGI's home button
+                anchors.centerIn: parent; width: parent.width * .42; height: width
+                color: "transparent"; border.color: "#0d0e12"; border.width: 1.6 * win.u
+                Rectangle { anchors.centerIn: parent; width: parent.width * .42; height: width; color: "#0d0e12"; opacity: homeButton.atHome ? .35 : 1 }
+            }
+        }
+        HoverHandler { id: homeHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: win.wheelValue = win.defaultWheel }
+        ToolTip.visible: homeHover.hovered
+        ToolTip.delay: 700
+        ToolTip.text: "Standard icon size"
     }
 
     QuickLook {
@@ -1473,6 +1773,7 @@ Window {
         property int si: 0
         property int ii: -1
         readonly property var entry: ii >= 0 && win.places[si] ? win.places[si].items[ii] : null
+        P.MenuItem { text: "Open in New Tab"; visible: !!(placeMenu.entry && placeMenu.entry.path); onTriggered: win.newTab(win.expand(placeMenu.entry.path), true) }
         P.MenuItem { text: "Open in New Window"; visible: !!(placeMenu.entry && placeMenu.entry.path); onTriggered: Fm.newWindow(win.expand(placeMenu.entry.path)) }
         P.MenuItem { text: "Rename…"; onTriggered: win.renamingPlace = placeMenu.si + "/" + placeMenu.ii }
         P.MenuSeparator {}
@@ -1494,10 +1795,27 @@ Window {
     }
     P.Menu {
         id: sectionMenu
+        readonly property string sectionTitle: win.places[placeMenu.si] ? win.places[placeMenu.si].title : ""
+        P.MenuItem { text: (win.isCollapsed(sectionMenu.sectionTitle) ? "Open “" : "Fold “") + sectionMenu.sectionTitle + "”"; onTriggered: win.toggleSection(sectionMenu.sectionTitle) }
+        P.MenuSeparator {}
         P.MenuItem { text: "Add Current Folder"; onTriggered: win.placeAdd(placeMenu.si, win.dir) }
         P.MenuItem { text: "Add Folder…"; onTriggered: { folderPicker.si = placeMenu.si; folderPicker.folder = "file://" + win.dir; folderPicker.open() } }
         P.MenuSeparator {}
+        P.MenuItem { text: "New Section"; onTriggered: win.newSection() }
+        P.MenuItem { text: "Rename Section…"; onTriggered: win.renamingSection = placeMenu.si }
+        P.MenuItem { text: "Move Section Up"; enabled: placeMenu.si > 0; onTriggered: win.moveSection(placeMenu.si, -1) }
+        P.MenuItem { text: "Move Section Down"; enabled: placeMenu.si < win.places.length - 1; onTriggered: win.moveSection(placeMenu.si, 1) }
+        P.MenuItem { text: "Remove Section…"; onTriggered: removeSectionDialog.open() }
+        P.MenuSeparator {}
         P.MenuItem { text: "Reset Sidebar"; onTriggered: win.resetPlaces() }
+    }
+    P.MessageDialog {
+        id: removeSectionDialog
+        title: "Remove Section"
+        text: "Remove the section “" + sectionMenu.sectionTitle + "” from the sidebar?"
+        informativeText: "Only the sidebar entries go; the folders themselves aren't touched."
+        buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
+        onOkClicked: win.removeSection(placeMenu.si)
     }
     P.FolderDialog {
         id: folderPicker
@@ -1527,6 +1845,7 @@ Window {
             P.MenuSeparator {}
             P.MenuItem { text: "Other…"; onTriggered: Fm.openWith(win.paths(), "") }
         }
+        P.MenuItem { text: "Open in New Tab"; visible: win.paths().length > 0 && win.paths().every(p => Fm.kind(p) === "folder"); onTriggered: win.openInNewTab(win.paths(), true) }
         P.MenuItem { text: "Open in Dolphin"; onTriggered: Fm.openInDolphin(win.paths()[0]) }
         P.MenuSeparator {}
         P.Menu {
@@ -1635,7 +1954,10 @@ Window {
     }
     P.Menu {
         id: tagsHeadMenu
+        P.MenuItem { text: (win.isCollapsed("Tags") ? "Open" : "Fold") + " “Tags”"; onTriggered: win.toggleSection("Tags") }
+        P.MenuSeparator {}
         P.MenuItem { text: "New Tag"; onTriggered: win.newTag(false) }
+        P.MenuItem { text: "New Section"; onTriggered: win.newSection() }
         P.Menu {
             id: hiddenTagsMenu
             title: "Show in Sidebar"
@@ -1663,6 +1985,38 @@ Window {
         informativeText: "It will be removed from all items that have it."
         buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
         onOkClicked: win.deleteTag(tagMenu.name)
+    }
+    P.Menu {
+        id: tabMenu
+        property int index: 0
+        P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: win.newTab(win.tabs[tabMenu.index] ? (tabMenu.index === win.tabIndex ? win.dir : win.tabs[tabMenu.index].dir) : win.dir, true) }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Move Tab Left"; enabled: tabMenu.index > 0; onTriggered: win.moveTab(tabMenu.index, tabMenu.index - 1) }
+        P.MenuItem { text: "Move Tab Right"; enabled: tabMenu.index < win.tabs.length - 1; onTriggered: win.moveTab(tabMenu.index, tabMenu.index + 1) }
+        P.MenuItem {
+            text: "Move Tab to New Window"; enabled: win.tabs.length > 1
+            onTriggered: { const i = tabMenu.index; Fm.newWindow(i === win.tabIndex ? win.dir : win.tabs[i].dir); win.closeTab(i) }
+        }
+        P.MenuSeparator {}
+        P.MenuItem { text: "Close Tab"; onTriggered: win.closeTab(tabMenu.index) }
+        P.MenuItem { text: "Close Other Tabs"; enabled: win.tabs.length > 1; onTriggered: win.closeOtherTabs(tabMenu.index) }
+        P.MenuItem { text: "Reopen Closed Tab\tCtrl+Shift+T"; enabled: win.closedTabs.length > 0; onTriggered: win.reopenClosedTab() }
+    }
+    P.Menu {   // the IRIX "////" stack: every tab, to jump to one that doesn't fit
+        id: tabListMenu
+        Instantiator {
+            model: win.tabModel
+            delegate: P.MenuItem {
+                required property var modelData
+                required property int index
+                text: modelData.title
+                checkable: true
+                checked: index === win.tabIndex
+                onTriggered: win.switchTab(index)
+            }
+            onObjectAdded: (i, o) => tabListMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => tabListMenu.removeItem(o)
+        }
     }
     P.Menu {
         id: trashMenu
@@ -1714,6 +2068,7 @@ Window {
         P.Menu {
             title: "File"
             P.MenuItem { text: "New Window\tCtrl+N"; onTriggered: Fm.newWindow(win.dir) }
+            P.MenuItem { text: "New Tab\tCtrl+T"; onTriggered: win.newTab(win.dir, true) }
             P.MenuItem { text: "New Folder\tCtrl+Shift+N"; onTriggered: win.newFolder() }
             P.MenuItem { text: "Open\tCtrl+O"; onTriggered: win.openSelection() }
             P.MenuSeparator {}
@@ -1733,7 +2088,9 @@ Window {
             P.MenuItem { text: "Put Back"; enabled: win.inTrash; onTriggered: win.putBack() }
             P.MenuItem { text: "Empty Trash…\tCtrl+Shift+Del"; onTriggered: emptyDialog.open() }
             P.MenuSeparator {}
-            P.MenuItem { text: "Close Window\tCtrl+W"; onTriggered: win.close() }
+            P.MenuItem { text: "Close Tab\tCtrl+W"; onTriggered: win.closeTab(win.tabIndex) }
+            P.MenuItem { text: "Close Window\tCtrl+Shift+W"; onTriggered: win.close() }
+            P.MenuItem { text: "Reopen Closed Tab\tCtrl+Shift+T"; enabled: win.closedTabs.length > 0; onTriggered: win.reopenClosedTab() }
         }
         P.Menu {
             title: "Edit"
@@ -1770,6 +2127,9 @@ Window {
             P.MenuSeparator {}
             P.MenuItem { text: (win.sidebarShown ? "Hide" : "Show") + " Sidebar\tCtrl+Alt+S"; onTriggered: win.sidebarShown = !win.sidebarShown }
             P.MenuItem { text: (win.previewShown ? "Hide" : "Show") + " Preview\tCtrl+Shift+P"; onTriggered: win.previewShown = !win.previewShown }
+            P.MenuItem { text: (win.tabBarShown ? "Hide" : "Show") + " Tab Bar"; onTriggered: win.tabBarShown = !win.tabBarShown }
+            P.MenuItem { text: "Open Folders in New Tabs"; checkable: true; checked: win.folderTabs; onTriggered: win.folderTabs = !win.folderTabs }
+            P.MenuItem { text: "Standard Icon Size"; onTriggered: win.wheelValue = win.defaultWheel }
         }
         P.Menu {
             title: "Go"
@@ -1807,6 +2167,8 @@ Window {
         P.Menu {
             title: "Window"
             P.MenuItem { text: "Minimize\tCtrl+M"; onTriggered: win.showMinimized() }
+            P.MenuItem { text: "Next Tab\tCtrl+PgDown"; onTriggered: win.cycleTab(1) }
+            P.MenuItem { text: "Previous Tab\tCtrl+PgUp"; onTriggered: win.cycleTab(-1) }
             P.MenuItem { text: "Zoom"; onTriggered: win.maximized ? win.showNormal() : win.showMaximized() }
             P.MenuItem { text: "Desks Overview"; onTriggered: Fm.overview() }
         }
@@ -1818,7 +2180,21 @@ Window {
 
     Shortcut { sequence: "Ctrl+N"; onActivated: Fm.newWindow(win.dir) }
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: win.newFolder() }
-    Shortcut { sequence: "Ctrl+W"; onActivated: win.close() }
+    Shortcut { sequence: "Ctrl+W"; onActivated: win.closeTab(win.tabIndex) }
+    Shortcut { sequence: "Ctrl+Shift+W"; onActivated: win.close() }
+    Shortcut { sequence: "Ctrl+T"; onActivated: win.newTab(win.dir, true) }
+    Shortcut { sequence: "Ctrl+Shift+T"; onActivated: win.reopenClosedTab() }
+    // Next / previous tab (IRIX used Page Down / Page Up for Icon Catalog pages).
+    Shortcut { sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: win.cycleTab(1) }
+    Shortcut { sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+Shift+Backtab", "Ctrl+PgUp"]; onActivated: win.cycleTab(-1) }
+    // Alt+1…8 jump to a tab, Alt+9 to the last one (Ctrl+digit is views, Ctrl+Alt+digit is tags).
+    Repeater {
+        model: 9
+        Item {
+            required property int index
+            Shortcut { sequence: "Alt+" + (index + 1); onActivated: win.switchTab(index === 8 ? win.tabs.length - 1 : index) }
+        }
+    }
     Shortcut { sequence: "Ctrl+M"; onActivated: win.showMinimized() }
     Shortcut { sequences: [StandardKey.Copy]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.copyToClipboard(win.paths()) }
     Shortcut { sequences: [StandardKey.Paste]; enabled: !search.activeFocus && !win.renaming; onActivated: Fm.paste(win.dir) }

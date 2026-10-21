@@ -48,12 +48,25 @@ manager icon; the IRIX icons are only inside the window.
   carpet takes the tag colour. The sidebar's Tags section shows everything with a tag, and tags can
   be renamed, recoloured, reordered, hidden or deleted there. Stored as `user.xdg.tags`, so Dolphin
   and Baloo share them. Details: [docs/TAGS.md](docs/TAGS.md).
+- Tabs, drawn as IRIX notebook tabs along the bottom of the page (like IRIX 6.2's Icon Catalog
+  pages), working like Finder tabs: opening a folder or a sidebar place gives it a tab (or switches
+  to the tab that already shows it); Ctrl+double-click stays in the same tab. Close with ×, Ctrl+W
+  or a middle-click; Ctrl+T new tab, Ctrl+Shift+T reopen, Ctrl+Tab / Ctrl+PgUp/PgDn switch, Alt+1…9
+  jump; middle-click a folder for a background tab; drag files onto a tab to switch to it / drop
+  into its folder; "////" lists tabs that don't fit. Each tab keeps its folder, history, selection,
+  scroll position and search, and the tabs come back the next time fm starts.
+- The IRIX thumbwheel "home button" (the small square at the end of the wheel) puts the icons back
+  to the standard size.
+- Sidebar sections fold with a click on their title and stack tightly when folded; sections can be
+  added, renamed (double-click), moved and removed.
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
 - Search and tag results use the same views as folders (icons, list, previews), with carpets, tag
   dots and the icon-size thumbwheel; in the list view the Kind column shows where each result is.
 - The icon-size thumbwheel scales icons in every view, including the list and search results.
+- Folder sizes are cached between visits and restarts, so the list shows them at once; a folder
+  is only counted again when it changed (or after an hour).
 - Remembers icon size, view mode, hidden files and window size.
 
 ## Requirements
@@ -74,7 +87,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (131 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (173 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -121,7 +134,10 @@ xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 | Ctrl+Shift+Del | Empty Trash |
 | Ctrl+1 / 2 / 3 | Icons / list / previews |
 | Ctrl++ / Ctrl+- / Ctrl+wheel | Bigger / smaller icons (or roll the thumbwheel: drag, scroll or swipe over it) |
-| Ctrl+N / Ctrl+W | New window / close window |
+| Ctrl+N / Ctrl+Shift+W | New window / close window |
+| Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab |
+| Ctrl+Tab, Ctrl+PgDn / Ctrl+Shift+Tab, Ctrl+PgUp | Next / previous tab |
+| Alt+1…8 / Alt+9 | Go to tab 1…8 / the last tab |
 
 ## Layout of the code
 
@@ -130,9 +146,9 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 ```
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, preview pane, tag dots, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, preview pane, tag dots, notebook tabs, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 
@@ -143,5 +159,5 @@ checking the look without touching the screen.
 
 - No licence file yet: pick one before publishing.
 - Plasma/KWin only: the blur and shadow use KDE protocols. Elsewhere the window is plain translucent.
-- No tabs, no column view, no network browsing (Network opens Dolphin at `remote:/`).
+- No column view, no network browsing (Network opens Dolphin at `remote:/`).
 - Desks Overview triggers KWin's Overview effect.

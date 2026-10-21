@@ -17,8 +17,8 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Recent folders (Go ▸ Recent Folders) | ✅ Go ▸ Recent Folders + ⌄ menu, saved, Clear Menu | | |
 | Path bar, proxy icon drag (title bar) | ✅ crumbs + drop pocket | | |
 | New window (⌘N), close (⌘W) | ✅ | | |
-| Tabs (⌘T, ⇧⌘[ ], drag tabs out, Merge All Windows) | ⬜ | 3 | tab strip under the toolbar; one model per tab |
-| Open folder in new tab/window (⌘-double-click) | ⬜ | 3 | after tabs |
+| Tabs (⌘T, ⇧⌘[ ], drag tabs out, Merge All Windows) | ✅ IRIX notebook tabs at the bottom; folders and places open in tabs; reopen, move, to new window; session restore (no drag-out, no merge) | | active tab = live window state, others are snapshots |
+| Open folder in new tab/window (⌘-double-click) | ✅ opening a folder gives it a tab; middle-click = background tab; Ctrl+double-click = same tab | | |
 | Spring-loaded folders (hover while dragging opens) | ✅ icons, list rows and sidebar (0.9 s) | | DropArea + timer |
 | New window opens at… (Settings) | ⬜ | 3 | settings window |
 
@@ -117,5 +117,5 @@ list, Compress / Expand, Recent Folders. Checked by `tests/phase2_test.cpp` (34 
 
 ## Phase 3 (later)
 
-Tabs, column view, gallery view, Group By, Recents (files), New Folder with Selection,
+Column view, gallery view, Group By, Recents (files), New Folder with Selection,
 Finder drag semantics, batch rename, Get Info editing, Share, content search (Baloo), settings window.
