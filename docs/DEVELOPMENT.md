@@ -121,6 +121,12 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
 
 ### Phase 2
 
+- **Results use the normal views.** Search and tag hits go into `resultsModel` (a `ListModel` with
+  the folder model's role names), and the grid and list switch their model while searching. All
+  selection code goes through `win.itemAt(i, role)`, `win.itemCount` and `win.indexOfPath(p)`, which
+  pick the folder or the results.
+- **Folding**: clicking a sidebar section title toggles it in `collapsedJson` (saved);
+  `placeRows` then only emits the header.
 - **Search** no longer filters the folder model (`FolderListModel.nameFilters` never hides
   folders, which made search look broken). Typing shows a results list fed by `Fm::startSearch()`, a
   `QDirIterator` scan in a worker thread that sends batches (`searchBatch`) and stops at 2000 hits;
@@ -153,7 +159,7 @@ See [TAGS.md](TAGS.md) for the behaviour. Implementation:
   `tagRev`, which re-evaluates every binding. The tinted carpet is a `Shape` in the carpet's outline
   (a shader effect rendered nothing off-screen).
 - Finding: `Fm::startTagSearch(tag, here)` checks candidates from fm's index
-  (`$XDG_DATA_HOME/irixfm/tags.json`), `baloosearch6 tag:<name>` and the folder on screen, and
+  (`$XDG_DATA_HOME/irixfm/tags.json`, pruned of missing files at start), `baloosearch6 tag:<name>` and the folder on screen, and
   re-reads each file's tags before listing it. `tag:Name` in the search field or a click in the
   sidebar starts it; the scope bar then shows the tag.
 - Rename / Delete Tag rewrite the tag on every candidate file (`renameTagEverywhere`,

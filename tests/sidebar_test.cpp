@@ -150,6 +150,26 @@ int main(int argc, char *argv[])
         check(win->property("dir").toString() == base + QStringLiteral("/Work"), QStringLiteral("clicking an entry opens the folder"),
               win->property("dir").toString());
 
+        // --- folding sections
+        auto kinds = [&](const QString &title) {
+            int n = 0; bool in = false;
+            for (const QVariant &r : win->property("placeRows").toList()) {
+                const QVariantMap m = r.toMap();
+                if (m.value(QStringLiteral("kind")) == QStringLiteral("head")) in = m.value(QStringLiteral("title")) == title;
+                else if (in) ++n;
+            }
+            return n;
+        };
+        const int favRows = kinds(QStringLiteral("Favorites"));
+        call(win, "toggleSection", {QStringLiteral("Favorites")});
+        check(favRows > 0 && kinds(QStringLiteral("Favorites")) == 0, QStringLiteral("clicking a section title folds it"), QString::number(kinds(QStringLiteral("Favorites"))));
+        call(win, "toggleSection", {QStringLiteral("Tags")});
+        check(kinds(QStringLiteral("Tags")) == 0, QStringLiteral("the Tags section folds too"));
+        check(win->property("collapsedJson").toString().contains(QStringLiteral("Favorites")), QStringLiteral("folded sections are saved"));
+        call(win, "toggleSection", {QStringLiteral("Favorites")});
+        call(win, "toggleSection", {QStringLiteral("Tags")});
+        check(kinds(QStringLiteral("Favorites")) == favRows && kinds(QStringLiteral("Tags")) > 0, QStringLiteral("clicking again opens them"));
+
         // --- saved, and reset
         check(!win->property("placesJson").toString().isEmpty(), QStringLiteral("changes are kept in the settings"));
         call(win, "resetPlaces", {});

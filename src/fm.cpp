@@ -897,8 +897,12 @@ void Fm::loadTagIndex()
     if (!f.open(QIODevice::ReadOnly))
         return;
     const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    // Files that are gone (deleted, or temporary) drop out of the index.
     for (auto it = o.begin(); it != o.end(); ++it)
-        m_tagIndex.insert(it.key(), it.value().toVariant().toStringList());
+        if (QFileInfo::exists(it.key()))
+            m_tagIndex.insert(it.key(), it.value().toVariant().toStringList());
+    if (m_tagIndex.size() != o.size())
+        saveTagIndex();
 }
 
 void Fm::saveTagIndex() const

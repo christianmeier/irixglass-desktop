@@ -49,13 +49,15 @@ Window {
     property var searchResults: []              // [{name, path, where, isDir, modified, size}]
     property bool searching: false
     property bool searchTruncated: false
-    property int resultIndex: -1
     property var volumes: Fm.volumes            // removable drives (Solid); a property so tests can fake one
     readonly property bool searchActive: search.text.length > 0
     // ---- tags (docs/TAGS.md): names and Nord colours here, the tags themselves on the files (user.xdg.tags)
     property string tagsJson: ""
     property int tagRev: 0                      // bumped when tags change, so views re-read them
     property string renamingTag: ""
+    // Collapsed sidebar sections (by title), saved.
+    property string collapsedJson: "[]"
+    readonly property var collapsed: { try { return JSON.parse(collapsedJson) } catch (e) { return [] } }
     readonly property var nordColors: [["Red", "#BF616A"], ["Orange", "#D08770"], ["Yellow", "#EBCB8B"], ["Green", "#A3BE8C"],
                                        ["Teal", "#8FBCBB"], ["Cyan", "#88C0D0"], ["Light Blue", "#81A1C1"], ["Blue", "#5E81AC"],
                                        ["Purple", "#B48EAD"], ["Gray", "#4C566A"]]
@@ -113,6 +115,7 @@ Window {
         property alias searchScope: win.searchScope
         property alias trashAdded: win.trashAdded
         property alias tags: win.tagsJson
+        property alias collapsedSections: win.collapsedJson
         property alias width: win.width
         property alias height: win.height
     }
@@ -172,11 +175,25 @@ Window {
         if (r.file) selectWhenReady([r.file])
         return true
     }
+    // The views show the folder, or the search / tag results (same roles: fileName, filePath, …).
+    readonly property int itemCount: searchActive ? resultsModel.count : folder.count
+    function itemAt(i, role) {
+        if (!searchActive) return folder.get(i, role)
+        const r = resultsModel.get(i)
+        return r ? r[role] : undefined
+    }
+    function indexOfPath(p) {
+        if (!searchActive) return folder.indexOf("file://" + p)
+        for (let i = 0; i < resultsModel.count; ++i) if (resultsModel.get(i).filePath === p) return i
+        return -1
+    }
+    ListModel { id: resultsModel; objectName: "resultsModel" }
+
     function selectWhenReady(paths) { pendingSelect = paths; selectPending() }
     // Selects the pending paths as soon as they're all in the folder model.
     function selectPending() {
         if (!pendingSelect.length) return
-        const idx = pendingSelect.map(p => folder.indexOf("file://" + p))
+        const idx = pendingSelect.map(p => indexOfPath(p))
         if (idx.some(i => i < 0)) return
         const s = ({})
         for (const p of pendingSelect) s[p] = true
@@ -194,7 +211,7 @@ Window {
         let s = Object.assign({}, selection)
         if (mods & Qt.ShiftModifier && anchorIndex >= 0) {
             s = ({})
-            for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); ++i) s[folder.get(i, "filePath")] = true
+            for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); ++i) s[itemAt(i, "filePath")] = true
         } else if (mods & Qt.ControlModifier) {
             if (s[path]) delete s[path]; else s[path] = true
             anchorIndex = index
@@ -204,11 +221,11 @@ Window {
         selection = s
         view().currentIndex = index
     }
-    function selectAll() { const s = ({}); for (let i = 0; i < folder.count; ++i) s[folder.get(i, "filePath")] = true; selection = s }
+    function selectAll() { const s = ({}); for (let i = 0; i < itemCount; ++i) s[itemAt(i, "filePath")] = true; selection = s }
     function moveCursor(delta) {
-        if (!folder.count) return
-        const i = Math.max(0, Math.min(folder.count - 1, (anchorIndex < 0 ? -delta : anchorIndex) + delta))
-        select(i, folder.get(i, "filePath"), 0)
+        if (!itemCount) return
+        const i = Math.max(0, Math.min(itemCount - 1, (anchorIndex < 0 ? -delta : anchorIndex) + delta))
+        select(i, itemAt(i, "filePath"), 0)
         view().positionViewAtIndex(i, ListView.Contain)
     }
     // Touchpads send pixel deltas (smooth 1:1 scrolling); mouse wheels send 120 per notch.
@@ -273,7 +290,8 @@ Window {
     readonly property var placeRows: {
         const rows = []
         places.forEach((sec, si) => {
-            rows.push({ kind: "head", si: si, title: sec.title, first: si === 0 })
+            rows.push({ kind: "head", si: si, title: sec.title, first: si === 0, collapsed: isCollapsed(sec.title) })
+            if (isCollapsed(sec.title)) return   // folded: only the title shows
             sec.items.forEach((it, ii) => rows.push({ kind: "item", si: si, ii: ii, item: it, color: sec.color }))
             if (!sec.items.length) rows.push({ kind: "empty", si: si })
             // Removable drives appear at the end of Locations (not saved; they come and go).
@@ -281,9 +299,11 @@ Window {
                 volumes.forEach(v => rows.push({ kind: "volume", si: si, item: v, color: sec.color }))
         })
         // Tags section (not part of `places`): the shown tags, in their order.
-        rows.push({ kind: "head", si: -1, title: "Tags", tags: true, first: false })
-        tagDefs.forEach((t, ti) => { if (t.shown) rows.push({ kind: "tag", si: -1, ti: ti, tag: t }) })
-        if (!tagDefs.some(t => t.shown)) rows.push({ kind: "empty", si: -1, hint: "Right-click to show tags" })
+        rows.push({ kind: "head", si: -1, title: "Tags", tags: true, first: false, collapsed: isCollapsed("Tags") })
+        if (!isCollapsed("Tags")) {
+            tagDefs.forEach((t, ti) => { if (t.shown) rows.push({ kind: "tag", si: -1, ti: ti, tag: t }) })
+            if (!tagDefs.some(t => t.shown)) rows.push({ kind: "empty", si: -1, hint: "Right-click to show tags" })
+        }
         return rows
     }
     Connections {
@@ -295,7 +315,12 @@ Window {
             s[p] = bytes < 0 ? "--" : Fm.humanSize(bytes)
             win.folderSizes = s
         }
-        function onSearchBatch(items) { win.searchResults = win.searchResults.concat(items) }
+        function onSearchBatch(items) {
+            win.searchResults = win.searchResults.concat(items)
+            for (const it of items)
+                resultsModel.append({ fileName: it.name, filePath: it.path, fileIsDir: it.isDir, fileUrl: "file://" + it.path,
+                                      fileModified: it.modified, fileSize: it.size < 0 ? 0 : it.size })
+        }
         function onSearchDone(count, truncated) { win.searching = false; win.searchTruncated = truncated }
         function onArchiveDone(path, ok) { if (ok) win.selectWhenReady([path]) }
     }
@@ -305,6 +330,11 @@ Window {
             .map(n => ({ name: n, color: nordColors.find(c => c[0] === n)[1], shown: true }))
     }
     function setTagDefs(d) { tagsJson = JSON.stringify(d); settings.sync() }
+    function isCollapsed(title) { return collapsed.includes(title) }
+    function toggleSection(title) {
+        collapsedJson = JSON.stringify(isCollapsed(title) ? collapsed.filter(t => t !== title) : collapsed.concat([title]))
+        settings.sync()
+    }
     function tagDef(name) { return tagDefs.find(t => t.name.toLowerCase() === String(name).toLowerCase()) }
     function tagColor(name) { const d = tagDef(name); return d ? d.color : "#4C566A" }
     function tagIcon(color) { return asset("tag-" + color.substring(1).toLowerCase()) }
@@ -373,8 +403,7 @@ Window {
     }
     // Quick Look shows the focused item (the last one clicked or reached with the keys).
     function focusedPath() {
-        if (searchActive) return resultIndex >= 0 && searchResults[resultIndex] ? searchResults[resultIndex].path : (paths()[0] || "")
-        const p = anchorIndex >= 0 ? folder.get(anchorIndex, "filePath") : ""
+        const p = anchorIndex >= 0 ? itemAt(anchorIndex, "filePath") : ""
         return p && selection[p] ? p : (paths()[0] || "")
     }
     function toggleQuickLook() { quickLook = quickLook ? "" : focusedPath() }
@@ -382,9 +411,9 @@ Window {
     function typeSelect(text) {
         typeAhead += text.toLowerCase()
         typeAheadTimer.restart()
-        for (let i = 0; i < folder.count; ++i)
-            if (folder.get(i, "fileName").toLowerCase().startsWith(typeAhead)) {
-                select(i, folder.get(i, "filePath"), 0)
+        for (let i = 0; i < itemCount; ++i)
+            if (String(itemAt(i, "fileName")).toLowerCase().startsWith(typeAhead)) {
+                select(i, itemAt(i, "filePath"), 0)
                 view().positionViewAtIndex(i, ListView.Contain)
                 return
             }
@@ -404,7 +433,8 @@ Window {
     function expandSelected() { for (const p of paths()) if (Fm.isArchive(p)) Fm.expand(p) }
     // Search: results come from a background scan (Fm.startSearch); the scope bar picks where.
     function runSearch() {
-        searchResults = []; resultIndex = -1; searchTruncated = false
+        searchResults = []; resultsModel.clear(); searchTruncated = false
+        selection = ({}); anchorIndex = -1
         if (!search.text) { Fm.stopSearch(); searching = false; return }
         searching = true
         if (searchTag) Fm.startTagSearch(searchTag, dir)   // "tag:Red" (or a click on a tag in the sidebar)
@@ -412,17 +442,6 @@ Window {
     }
     Timer { id: searchDelay; interval: 200; onTriggered: win.runSearch() }
     onSearchScopeChanged: if (searchActive) runSearch()
-    function selectResult(i) {
-        if (i < 0 || i >= searchResults.length) return
-        resultIndex = i
-        const s = ({}); s[searchResults[i].path] = true; selection = s
-        results.positionViewAtIndex(i, ListView.Contain)
-    }
-    function openResult(i) {
-        const r = searchResults[i]
-        if (!r) return
-        if (r.isDir) go(r.path); else Fm.open(r.path)
-    }
     function showInFolder(path) { const where = path.substring(0, path.lastIndexOf("/")) || "/"; go(where); selectWhenReady([path]) }
     function newFolder() { const p = Fm.makeFolder(dir); const s = ({}); s[p] = true; selection = s; renaming = p }
 
@@ -562,6 +581,14 @@ Window {
                     onCommitted: text => win.renameTag(row.modelData.tag.name, text)
                     onDone: { win.renamingTag = ""; keys.forceActiveFocus() }
                 }
+                Text {   // section chevron: ▾ open / › folded; click the title to fold or open it
+                    objectName: "chevron"
+                    visible: row.head && (hov.hovered || !!row.modelData.collapsed)
+                    anchors.right: parent.right; anchors.rightMargin: 40 * win.u
+                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
+                    text: row.modelData.collapsed ? "›" : "⌄"; color: "white"; opacity: .55
+                    font.family: win.fontFamily; font.pixelSize: (row.modelData.collapsed ? 15 : 13) * win.tu; font.weight: Font.DemiBold
+                }
                 Text {   // "+" on a hovered header: add the current folder to this section
                     visible: row.head && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
@@ -603,6 +630,7 @@ Window {
                             else win.showTagged(row.modelData.tag.name)
                             return
                         }
+                        if (row.head && m.button === Qt.LeftButton) { win.toggleSection(row.modelData.title); return }
                         if (row.tagHead || row.modelData.si < 0) { if (m.button === Qt.RightButton) tagsHeadMenu.open(); return }
                         placeMenu.si = row.modelData.si
                         placeMenu.ii = row.item ? row.modelData.ii : -1
@@ -871,8 +899,8 @@ Window {
             clip: true
             onTextChanged: searchDelay.restart()
             Keys.onEscapePressed: { text = ""; keys.forceActiveFocus() }
-            Keys.onDownPressed: { keys.forceActiveFocus(); if (win.searchActive) win.selectResult(0) }
-            Keys.onReturnPressed: { keys.forceActiveFocus(); if (win.searchActive) win.selectResult(0) }
+            Keys.onDownPressed: { keys.forceActiveFocus(); if (win.itemCount) win.select(0, win.itemAt(0, "filePath"), 0) }
+            Keys.onReturnPressed: { keys.forceActiveFocus(); if (win.itemCount) win.select(0, win.itemAt(0, "filePath"), 0) }
             Text {
                 visible: !search.text
                 text: "Search"; color: "white"; opacity: .5
@@ -899,12 +927,7 @@ Window {
             if (plain && event.text.length === 1 && (event.text > " " || (event.text === " " && win.typeAhead)) && event.key !== Qt.Key_Delete) {
                 win.typeSelect(event.text); event.accepted = true; return
             }
-            if (win.searchActive) {   // the results list has its own cursor
-                if (event.key === Qt.Key_Down) { win.selectResult(Math.min(win.searchResults.length - 1, win.resultIndex + 1)); event.accepted = true; return }
-                if (event.key === Qt.Key_Up) { win.selectResult(Math.max(0, win.resultIndex - 1)); event.accepted = true; return }
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { win.openResult(win.resultIndex); event.accepted = true; return }
-                if (event.key === Qt.Key_Escape && !win.quickLook) { search.text = ""; event.accepted = true; return }
-            }
+            if (win.searchActive && event.key === Qt.Key_Escape && !win.quickLook && !win.paths().length) { search.text = ""; event.accepted = true; return }
             if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) { win.goUp(); event.accepted = true; return }
             if (event.key === Qt.Key_Down && event.modifiers & Qt.ControlModifier) { win.openSelection(); event.accepted = true; return }
             if (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier) {   // in the Trash: Put Back, as in Finder
@@ -918,7 +941,7 @@ Window {
             else if (event.key === Qt.Key_Up) win.moveCursor(-vertical)
             else if (event.key === Qt.Key_Down) win.moveCursor(vertical)
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                if (win.anchorIndex >= 0) win.activate(folder.get(win.anchorIndex, "filePath"), folder.get(win.anchorIndex, "fileIsDir"))
+                if (win.anchorIndex >= 0) win.activate(win.itemAt(win.anchorIndex, "filePath"), win.itemAt(win.anchorIndex, "fileIsDir"))
             }
             else if (event.key === Qt.Key_Backspace) win.goUp()
             else if (event.key === Qt.Key_F2 && win.paths().length === 1) win.renaming = win.paths()[0]
@@ -938,14 +961,14 @@ Window {
     GridView {
         id: grid
         objectName: "grid"
-        visible: win.viewMode !== 1 && !win.searchActive
+        visible: win.viewMode !== 1
         x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH
         width: parent.width - x - 20 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
         cellWidth: 168 * u * win.iconScale / .92
         cellHeight: 168 * u * win.iconScale / .92
-        model: folder
+        model: win.searchActive ? resultsModel : folder
         interactive: false
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
@@ -982,12 +1005,12 @@ Window {
                 area = Qt.rect(Math.min(start.x, mouse.x), Math.min(start.y, y), Math.abs(mouse.x - start.x), Math.abs(y - start.y))
                 const cols = Math.max(1, Math.floor(grid.width / grid.cellWidth))
                 const s = ({})
-                for (let i = 0; i < folder.count; ++i) {
+                for (let i = 0; i < win.itemCount; ++i) {
                     const cx = (i % cols) * grid.cellWidth, cy = Math.floor(i / cols) * grid.cellHeight
                     const ix = cx + grid.cellWidth * .15, iw = grid.cellWidth * .7
                     const iy = cy + 10 * win.k, ih = 100 * win.k + 26 * win.tu
                     if (ix < area.x + area.width && ix + iw > area.x && iy < area.y + area.height && iy + ih > area.y)
-                        s[folder.get(i, "filePath")] = true
+                        s[win.itemAt(i, "filePath")] = true
                 }
                 win.selection = s
             }
@@ -1145,7 +1168,7 @@ Window {
     ListView {
         id: list
         objectName: "list"
-        visible: win.viewMode === 1 && !win.searchActive
+        visible: win.viewMode === 1
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
@@ -1154,7 +1177,7 @@ Window {
         width: parent.width - x - 14 * u - win.previewW
         height: parent.height - 52 * u - y
         clip: true
-        model: folder
+        model: win.searchActive ? resultsModel : folder
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: GlassScrollBar { u: win.u }
         headerPositioning: ListView.OverlayHeader
@@ -1165,7 +1188,7 @@ Window {
                 Repeater {
                     // Click a column to sort by it; click again to reverse.
                     model: [["Name", list.width - 430 * win.u, FolderListModel.Name], ["Date Modified", 180 * win.u, FolderListModel.Time],
-                            ["Size", 90 * win.u, FolderListModel.Size], ["Kind", 110 * win.u, FolderListModel.Type]]
+                            ["Size", 90 * win.u, FolderListModel.Size], [win.searchActive ? "Where" : "Kind", 110 * win.u, FolderListModel.Type]]
                     Text {
                         required property var modelData
                         readonly property bool active: win.sortField === modelData[2]
@@ -1241,7 +1264,8 @@ Window {
                     model: [
                         [Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm"), 180],
                         [row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || "…") : "--") : Fm.humanSize(row.fileSize), 90],
-                        [row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document", 110]
+                        [win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
+                         : row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document", 110]
                     ]
                     Text {
                         required property var modelData
@@ -1334,66 +1358,12 @@ Window {
             }
         }
     }
-    ListView {
-        id: results
-        objectName: "results"
-        visible: win.searchActive
-        x: 252 * u - win.contentShift; y: 72 * u + win.scopeH
-        width: parent.width - x - 14 * u - win.previewW
-        height: parent.height - 52 * u - y
-        clip: true
-        model: win.searchResults
-        interactive: false
-        ScrollBar.vertical: GlassScrollBar { u: win.u }
-        WheelHandler {
-            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            onWheel: event => win.scroll(results, event)
-        }
-        delegate: Item {
-            id: hit
-            required property var modelData
-            required property int index
-            readonly property bool sel: win.resultIndex === index
-            width: results.width; height: win.listRowH
-            Rectangle {
-                anchors.fill: parent; radius: 6 * win.u
-                color: hit.sel ? "#0a84ff" : hit.index % 2 ? Qt.rgba(1, 1, 1, .035) : "transparent"
-            }
-            Image {
-                x: 8 * win.u; anchors.verticalCenter: parent.verticalCenter
-                width: win.listIcon; height: width
-                source: win.asset(hit.modelData.isDir ? "folder" : Fm.kind(hit.modelData.path) === "app" ? "doc" : Fm.kind(hit.modelData.path))
-                sourceSize: Qt.size(width * 2, height * 2)
-            }
-            Text {
-                id: hitName
-                x: win.listTextX; width: parent.width * .38 - 30 * win.u; anchors.verticalCenter: parent.verticalCenter
-                text: hit.modelData.name; elide: Text.ElideMiddle; color: "white"
-                font.family: win.fontFamily; font.pixelSize: 13 * win.tu
-                TagDots {
-                    tags: win.tagsOf(hit.modelData.path); colorFor: win.tagColor; size: 9 * win.tu
-                    x: Math.min(hitName.contentWidth, hitName.width) + 6 * win.u
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-            Text {   // where it is, relative to home
-                x: 48 * win.u + parent.width * .38; width: parent.width * .62 - 60 * win.u; anchors.verticalCenter: parent.verticalCenter
-                text: win.shorten(hit.modelData.where); elide: Text.ElideLeft; color: "white"; opacity: hit.sel ? .9 : .5
-                font.family: win.fontFamily; font.pixelSize: 12 * win.tu
-            }
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onPressed: m => { keys.forceActiveFocus(); win.selectResult(hit.index); if (m.button === Qt.RightButton) resultMenu.open() }
-                onDoubleClicked: win.openResult(hit.index)
-            }
-        }
-        Text {
-            visible: !win.searching && win.searchResults.length === 0
-            anchors.centerIn: parent
-            text: "No results"; color: "white"; opacity: .4
-            font.family: win.fontFamily; font.pixelSize: 15 * win.tu
-        }
+    Text {
+        visible: win.searchActive && !win.searching && resultsModel.count === 0
+        x: 240 * u - win.contentShift + (parent.width - 240 * u + win.contentShift - win.previewW) / 2 - width / 2
+        y: parent.height / 2
+        text: "No results"; color: "white"; opacity: .4
+        font.family: win.fontFamily; font.pixelSize: 15 * win.tu
     }
 
     // ---- preview pane (Ctrl+Shift+P) ----------------------------------------------------
@@ -1425,7 +1395,7 @@ Window {
         text: win.searchActive
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
                 + (win.searchTruncated ? " (first " + win.searchResults.length + ")" : "")
-              : (n ? n + " of " + folder.count + " selected" : folder.count + (folder.count === 1 ? " item" : " items"))
+              : (n ? n + " of " + win.itemCount + " selected" : win.itemCount + (win.itemCount === 1 ? " item" : " items"))
                 + (win.inTrash ? " in Trash" : " · " + (folder.count >= 0 ? Fm.freeSpace(win.dir) : ""))
         color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
@@ -1538,7 +1508,8 @@ Window {
 
     P.Menu {
         id: itemMenu
-        P.MenuItem { text: "Open"; onTriggered: { for (const p of win.paths()) win.activate(p, folder.get(folder.indexOf("file://" + p), "fileIsDir")) } }
+        P.MenuItem { text: "Open"; onTriggered: { for (const p of win.paths()) win.activate(p, Fm.kind(p) === "folder") } }
+        P.MenuItem { text: "Show in Enclosing Folder"; visible: win.searchActive; onTriggered: { const p = win.focusedPath(); search.text = ""; win.showInFolder(p) } }
         P.Menu {
             id: openWithMenu
             title: "Open With"
@@ -1692,39 +1663,6 @@ Window {
         informativeText: "It will be removed from all items that have it."
         buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
         onOkClicked: win.deleteTag(tagMenu.name)
-    }
-    P.Menu {
-        id: resultMenu
-        P.MenuItem { text: "Open"; onTriggered: win.openResult(win.resultIndex) }
-        P.MenuItem { text: "Show in Enclosing Folder"; onTriggered: { const p = win.focusedPath(); search.text = ""; win.showInFolder(p) } }
-        P.MenuItem { text: "Quick Look"; onTriggered: win.toggleQuickLook() }
-        P.MenuItem { text: "Get Info"; onTriggered: win.getInfo() }
-        P.Menu {
-            id: resultTagsMenu
-            title: "Tags"
-            Instantiator {
-                model: win.tagDefs
-                delegate: P.MenuItem {
-                    required property var modelData
-                    required property int index
-                    text: modelData.name + (index < 7 ? "\tCtrl+Alt+" + (index + 1) : "")
-                    icon.source: win.tagIcon(modelData.color)
-                    checkable: true
-                    checked: win.selectionHasTag(modelData.name)
-                    onTriggered: win.toggleTag(modelData.name)
-                }
-                onObjectAdded: (i, o) => resultTagsMenu.insertItem(i, o)
-                onObjectRemoved: (i, o) => resultTagsMenu.removeItem(o)
-            }
-            P.MenuSeparator {}
-            P.MenuItem { text: "New Tag…"; onTriggered: win.newTag(true) }
-            P.MenuItem { text: "Remove All Tags\tCtrl+Alt+0"; onTriggered: win.clearSelectionTags() }
-        }
-        P.MenuSeparator {}
-        P.MenuItem { text: "Copy"; onTriggered: Fm.copyToClipboard(win.paths()) }
-        P.MenuItem { text: "Copy Path"; onTriggered: Fm.copyPathText(win.paths().join("\n")) }
-        P.MenuSeparator {}
-        P.MenuItem { text: "Move to Trash"; onTriggered: { Fm.trash(win.paths()); win.runSearch() } }
     }
     P.Menu {
         id: trashMenu

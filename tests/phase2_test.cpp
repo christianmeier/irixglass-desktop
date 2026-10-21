@@ -117,6 +117,20 @@ int main(int argc, char *argv[])
               QStringLiteral("default scope finds matches in subfolders, folders too"), resultNames(win).join(", "));
         check(status->property("text").toString().startsWith(QStringLiteral("3 results")), QStringLiteral("status shows the result count"),
               status->property("text").toString());
+        check(grid->isVisible() && grid->property("count").toInt() == 3, QStringLiteral("results show in the icon view (with carpets, tags, scaling)"),
+              QString::number(grid->property("count").toInt()));
+        {
+            const double cw = grid->property("cellWidth").toDouble();
+            win->setProperty("wheelValue", 0.8);
+            QTest::qWait(100);
+            check(grid->property("cellWidth").toDouble() > cw * 1.3, QStringLiteral("…and the icon size wheel scales them"));
+            win->setProperty("wheelValue", 0.352);
+            win->setProperty("viewMode", 1);
+            QTest::qWait(100);
+            auto *list = win->findChild<QQuickItem *>(QStringLiteral("list"));
+            check(list->isVisible() && list->property("count").toInt() == 3, QStringLiteral("…and in the list view"));
+            win->setProperty("viewMode", 0);
+        }
         win->setProperty("searchScope", 0);
         waitFor([&] { return !win->property("searching").toBool() && resultNames(win).size() == 2; });
         check(resultNames(win) == QStringList{QStringLiteral("NeedleDir"), QStringLiteral("needle-top.txt")},
@@ -128,7 +142,11 @@ int main(int argc, char *argv[])
         search->setProperty("text", QStringLiteral("deep"));
         waitFor([&] { return resultNames(win) == QStringList{QStringLiteral("deep")}; });
         window->requestActivate();
-        QMetaObject::invokeMethod(win, "selectResult", Q_ARG(QVariant, 0));
+        {   // results are in the normal views now: select the first one like a click would
+            QVariant first;
+            QMetaObject::invokeMethod(win, "itemAt", Q_RETURN_ARG(QVariant, first), Q_ARG(QVariant, 0), Q_ARG(QVariant, QStringLiteral("filePath")));
+            QMetaObject::invokeMethod(win, "select", Q_ARG(QVariant, 0), Q_ARG(QVariant, first), Q_ARG(QVariant, 0));
+        }
         key(Qt::Key_Return);
         check(waitFor([&] { return dir() == at(QStringLiteral("Sub/deep")); }), QStringLiteral("Enter on a folder result opens it"), dir());
         check(search->property("text").toString().isEmpty(), QStringLiteral("…and clears the search"));

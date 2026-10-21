@@ -30,7 +30,8 @@ manager icon; the IRIX icons are only inside the window.
 - Editable sidebar: add folders to Favorites, Indigo Magic or Locations (the + on a section title,
   drag a folder onto it, right-click → Add to Sidebar, or Add Folder…), remove with the ⊖ that shows
   on hover, rename by double-clicking, and right-click for move up/down, move to another section,
-  remove and Reset Sidebar. It scrolls when the window is short.
+  remove and Reset Sidebar. Click a section title (Favorites, Indigo Magic, Locations, Tags) to fold
+  it away or open it again; folded sections are remembered. It scrolls when the window is short.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.
@@ -50,6 +51,8 @@ manager icon; the IRIX icons are only inside the window.
 - Icon Catalog shows `/usr/share/applications` with each app's real icon and name.
 - Two-finger touchpad scrolling in the icon and list views, and over the icon-size thumbwheel
   (up/down or sideways). A mouse wheel works too.
+- Search and tag results use the same views as folders (icons, list, previews), with carpets, tag
+  dots and the icon-size thumbwheel; in the list view the Kind column shows where each result is.
 - The icon-size thumbwheel scales icons in every view, including the list and search results.
 - Remembers icon size, view mode, hidden files and window size.
 
@@ -71,7 +74,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (124 checks)
+make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (131 checks)
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
