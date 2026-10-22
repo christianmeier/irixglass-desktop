@@ -49,7 +49,8 @@ make tools                                   # build/shot and build/leak (not pa
   QML items by `objectName` and call QML functions with `QMetaObject::invokeMethod`. Which test
   covers what: `terminal_test` (terminal tabs), `browser_test` (web tabs), `split_test` (split view,
   list columns), `tab_test`, `sidebar_test`, `tag_test`, `finder_test` / `phase2_test` (Finder
-  commands), `path_test`, `scroll_test`, `dock_test`, `preview_test`.
+  commands), `path_test`, `scroll_test`, `dock_test`, `preview_test`, `devices_test` (devices in
+  Locations, with a fake backend: `Fm::setFakeDevices`).
 
 ## Environment variables
 
@@ -163,4 +164,7 @@ Always look at the image (Read the PNG) before reporting a visual change.
 - **Crashes**: `coredumpctl list irixfm`, `coredumpctl info <pid>`. ptrace is restricted
   (`ptrace_scope` 1: no `gdb -p`); for a hung process, `kill -ABRT <pid>` and read its core dump.
 - **Tests and snapshots save settings**: always use a throwaway `XDG_CONFIG_HOME`.
+- **Devices**: never unmount or power off the user's real drives in tests; use the fake backend
+  (`Fm::setFakeDevices`, DEVELOPMENT.md "Devices"). The sidebar lists real internal partitions
+  too (here "Windows"), so don't count Locations rows in tests.
 - Claude's Bash tool may run zsh: an unmatched glob aborts the whole command (use `find … -delete`).

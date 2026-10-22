@@ -39,8 +39,15 @@ manager icon; the IRIX icons are only inside the window.
   Duplicate (Ctrl+D), Make Alias, Show Original (Ctrl+R), Move Item Here (Ctrl+Alt+V), Undo (Ctrl+Z),
   type to select, Sort By (click a list column or View ▸ Sort By). Plan and status of every Finder
   feature: [docs/FINDER-FEATURES.md](docs/FINDER-FEATURES.md).
-- More Finder: Trash in the sidebar (Put Back, Empty, Delete Immediately), Open With, USB drives with
-  Eject, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
+- Devices in Locations, live as they're plugged in: every partition of a USB stick or external disk,
+  SD cards, discs, encrypted (LUKS) volumes (KDE asks for the passphrase), phones (Android over MTP,
+  iPhones over AFC) and internal partitions that aren't the system (e.g. Windows). Unmounted ones
+  are dimmed; a click mounts and opens them; the tooltip shows size and format. ⏏ is Finder's eject:
+  Safely Remove unmounts every partition of the drive and powers it off ("Safe to remove “X”"), a
+  disc comes out, an internal partition is unmounted. If something still uses it, fm says what
+  (e.g. "in use by nvim"); tabs, the split side and terminal shells inside it go home first.
+  Right-click: Open, Open in New Tab, Mount / Unmount, Eject / Safely Remove, Get Info.
+- More Finder: Trash in the sidebar (Put Back, Empty, Delete Immediately), Open With, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
   through subfolders (scope bar: this folder / subfolders / Home), folder sizes in the list,
   Compress / Expand, Recent Folders.
 - Tags (colour labels) in Nord colours, like Finder's: right-click ▸ Tags, Ctrl+Alt+1…7 (Ctrl+Alt+0
@@ -133,7 +140,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # all tests, off-screen (297 checks: views, path bar, sidebar, Finder features, tags, tabs, split view, terminal and web tabs, single instance)
+make test         # all tests, off-screen (297 checks: views, path bar, sidebar, Finder features, tags, tabs, split view, devices, terminal and web tabs, single instance)
 make tools        # build/shot (screenshot harness) and build/leak (leak test), for development
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
@@ -201,7 +208,7 @@ src/            C++: window blur, input mask and shadow (KWindowEffects, KWindow
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, list columns, tag dots, notebook tabs, web tab (BrowserView) + shared web profile, sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test, single_instance_test.sh (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, devices_test, terminal_test, browser_test, single_instance_test.sh (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png), bench.sh (timings), shot.cpp (screenshots), leak.cpp (leak test)
 CLAUDE.md       how to work on fm: commands, safe restart, team rules (read first)
 ```
