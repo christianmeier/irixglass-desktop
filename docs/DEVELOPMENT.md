@@ -728,3 +728,65 @@ with the page's URL; `target=_blank` links open in the same tab.
 Terminal touchpad scrolling adds up `pixelDelta` (`m_wheelRest`) and scrolls a line per cell
 height; dividing every small delta by the cell height on its own gave 0 lines, so touchpad
 scrolling did nothing.
+
+### Show in folder (org.freedesktop.FileManager1)
+
+"Show in folder" / "Open containing folder" in Firefox, Chromium, VS Code and KDE apps (KIO's
+`highlightInFileManager`) call the freedesktop
+[file manager interface](https://www.freedesktop.org/wiki/Specifications/file-manager-interface/)
+on the session bus. `src/filemanager1.h` exports it (QtDBus, `ExportScriptableSlots`) at
+`/org/freedesktop/FileManager1` in the one fm process; `main()` sets its three handlers:
+
+- **ShowItems(uris, startupId)**: a new window on the first item's folder, the items selected and
+  scrolled to (`win.revealItems(groups)` → `selectWhenReady`). Items in more folders go into tabs of
+  that window (their `sel` is applied when the tab is switched to; `scrollY: -1` scrolls to them).
+- **ShowFolders**: the same without a selection (one window, a tab per further folder); KIO folder
+  URLs of known protocols (`smb://`, `sftp://`, `mtp:/` …) open too, listed by KioModel.
+- **ShowItemProperties**: a Get Info window per item (`win.showInfoFor(paths)` on any open window).
+- URIs and plain paths are accepted; non-local or missing ones are skipped (logged), and a call with
+  nothing left gets an `InvalidArgs` error back. Hidden files are only selected while hidden files
+  are shown: the setting is saved, so it isn't switched on behind the user's back.
+
+**A window per call, not a tab** in the front window: that's what Finder and Dolphin do, the call
+comes from another app (a new window is something KWin can raise and focus for it), and it doesn't
+change the folder of a tab the user is working in. Each window has its own `Fm` (`openWindow`).
+
+**Raising**: the caller passes its XDG activation token (Wayland) or startup id (X11) as
+`startupId`. After the window's first frame (or 500 ms) `KWindowSystem::setCurrentXdgActivationToken`
++ `activateWindow` (X11: `KStartupInfo::setNewStartupId`) hand it to KWin. Without a token KWin's
+focus-stealing prevention decides.
+
+**The name**: fm registers `org.freedesktop.FileManager1` after its first window is up, with
+`QueueService` + `DontAllowReplacement`: if Dolphin (or another fm) owns it, fm logs the owner and
+waits in line instead of taking it, and gets it when that one quits. Dolphin registers without
+queueing, so a running fm keeps it when Dolphin starts. Off-screen, bench and snapshot runs never go
+on the bus (not even with `IRIXFM_SINGLE`, whose test runs on the user's bus); `IRIXFM_DBUS=1` opts
+in, which only `tests/dbus_test.sh` does, on a private bus.
+
+**D-Bus activation**: `make install` writes
+`~/.local/share/dbus-1/services/org.freedesktop.FileManager1.service` (from
+`org.freedesktop.FileManager1.service`, `Exec=` made absolute) and asks the bus to reload
+(`busctl --user call … ReloadConfig`: dbus-broker watches the service directories with inotify,
+but only those that existed when it started, and `~/.local/share/dbus-1/services` usually didn't). Dolphin ships
+`/usr/share/dbus-1/services/org.kde.dolphin.FileManager1.service` for the same name. Which wins:
+the session service directories are searched in order `$XDG_RUNTIME_DIR/dbus-1/services`,
+`$XDG_DATA_HOME/dbus-1/services` (`~/.local/share`), then each `$XDG_DATA_DIRS` entry
+(`/usr/local/share`, `/usr/share`), and "if a particular service is found in more than one service
+directory, the first directory takes precedence" (dbus-daemon(1), `<standard_session_servicedirs/>`).
+dbus-broker (Plasma's session bus on Arch/CachyOS) follows the same order: `dbus-broker-launch`
+keeps the first file for a name and logs "Ignoring duplicate name … in service file …" for later
+ones. `tests/dbus_test.sh` checks it with dbus-daemon and a stand-in Dolphin file in a second dir.
+`make uninstall` removes the file again, and Dolphin is activated as before.
+
+Started by the bus, fm gets `--dbus-activated`: it opens no window of its own and skips the
+single-instance hand-over; the call that started it opens the first window (`loadMain` on the
+call's folder; for ShowItemProperties also the folder with the items, as Get Info windows come from
+an fm window). If the name is taken after all, it exits; if no call comes within 30 s, it quits.
+Later launches (dock, xdg-open) hand over to it through the socket as usual.
+
+**Test**: `tests/dbus_test.sh` (in `make test`) re-runs itself under `dbus-run-session` with its own
+bus config (only its temporary service dirs: nothing of the system's gets activated) and checks that
+it isn't on the user's bus before anything else. fm runs off-screen with `IRIXFM_DBUS=1`,
+`QT_FORCE_STDERR_LOGGING=1` (Qt logs to the journal when stderr isn't a terminal) and prints
+`irixfm: window opened on …`, `irixfm: selected …` (QML, `logReveal`) and `irixfm: info window for …`;
+the test calls the methods with `gdbus call` and greps those lines. `KEEP=1` keeps its logs.

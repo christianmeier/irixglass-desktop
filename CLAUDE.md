@@ -12,12 +12,13 @@ and `docs/SESSION-NOTES.md`).
 ## Where things are
 
 ```
-src/main.cpp        start-up, single instance, IRIXFM_BENCH / IRIXFM_SNAPSHOT, shutdown watchdog
+src/main.cpp        start-up, single instance, Show in folder (D-Bus), IRIXFM_BENCH / IRIXFM_SNAPSHOT, shutdown watchdog
+src/filemanager1.h  org.freedesktop.FileManager1 D-Bus interface (Show in folder in other apps)
 src/fm.*            the `Fm` object for QML: window blur/shape, KIO file actions, kinds, tags, search, sizes
 src/terminal.*      terminal tabs: libvterm on a KPty, painted (TerminalView)
 src/kiomodel.*      KIO folders (smb://, sftp://, remote:/, mtp:/ …): KioModel + the `Kio` URL helpers for QML
 qml/Main.qml        the whole window (~3000 lines); other qml/*.qml are its parts
-tests/*_test.cpp    off-screen Qt tests, one binary each; tests/single_instance_test.sh
+tests/*_test.cpp    off-screen Qt tests, one binary each; tests/single_instance_test.sh, tests/dbus_test.sh
 tools/              bench.sh, shot.cpp, leak.cpp, make_icons.py, make_mockup.py
 docs/               DEVELOPMENT.md (read first), FINDER-FEATURES.md, TAGS.md, bench-baseline.txt
 ```
@@ -45,6 +46,8 @@ make tools                                   # build/shot and build/leak (not pa
   (`make build/<name>_test` first).
 - `IRIXFM_TEST_NETWORK=1` makes `browser_test` also load real sites (three tabs on example.com).
 - `tests/single_instance_test.sh build/irixfm` checks the one-process behaviour (part of `make test`).
+- `tests/dbus_test.sh build/irixfm` checks Show in folder (org.freedesktop.FileManager1, D-Bus
+  activation) on a private bus, never the user's (part of `make test`; `KEEP=1` keeps its logs).
 - New test file: add a `$(BUILD)/x_test` rule and put it in `TESTS` in the `Makefile`. Tests are
   plain `main()` programs printing `PASS …` / `FAIL …` lines (see `check()` in any test); they find
   QML items by `objectName` and call QML functions with `QMetaObject::invokeMethod`. Which test
@@ -62,6 +65,7 @@ make tools                                   # build/shot and build/leak (not pa
 | `IRIXFM_BENCH=1\|split` | print start-up and scroll timings and quit (`tools/bench.sh`) |
 | `IRIXFM_TERM_BENCH=<dir>` | `terminal_test` runs the terminal benchmark instead of the tests |
 | `IRIXFM_SINGLE=1` | single-instance behaviour even off-screen (it's off for off-screen, bench, snapshot runs) |
+| `IRIXFM_DBUS=1` | claim org.freedesktop.FileManager1 even off-screen (only `dbus_test.sh`, on a private bus) |
 | `IRIXFM_SHELL=<path>` | shell for terminal tabs instead of the login shell (tests use bash) |
 | `IRIXFM_NO_DIALOGS=1` | KIO job errors print instead of opening dialogs (tests) |
 | `IRIXFM_TEST_NETWORK=1` | `browser_test` also loads real sites |
