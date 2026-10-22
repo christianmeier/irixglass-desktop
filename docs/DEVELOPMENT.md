@@ -117,6 +117,19 @@ header rows carry the 30-unit gap above them so the baselines match the mockup. 
 follow `placesJson`). The list is non-interactive and scrolls with the same `win.scroll()` as the
 file views.
 
+**Width and style.** The sidebar's width is `sidebarUnits` (mockup units, 150–420, default 230,
+saved as `sidebarWidth`); `sideW = sidebarUnits × u` and `sideEdge = sideW + 10u` is where the files,
+status bar, tab strip and toolbar start. Everything that used to be placed at a fixed 240 units
+derives from `sideEdge`, and `hiddenShift` (how far the toolbar moves when the sidebar hides)
+from `sideEdge − 142u`, so the traffic lights keep their room at any width. The `sidebarResize`
+MouseArea on the right edge changes `sidebarUnits` while dragging (`draggingSidebar` turns the
+slide animations off so the layout follows the mouse); double-click resets it.
+`sidebarStyle` ("dolphin" | "finder", View ▸ Sidebar Style, saved): Dolphin = no inset, no glass
+hole or card, a 1 px white .10 divider below the toolbar row, white symbolic icons, plain 12.5 px
+section titles; Finder = the original card (10-unit inset, own tint + EdgeRing, a hole in the body
+tint), section-coloured icons, small bold titles. `sidebar_test` covers resizing (drag, minimum,
+double-click reset) and switching styles.
+
 ### Finder commands
 
 See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation notes:

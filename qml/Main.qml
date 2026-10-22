@@ -77,7 +77,7 @@ Window {
     function setViewMode(m) { if (splitActive) splitViewMode = m; else viewMode = m }
     property int activePane: 0                  // 0 = the main side, 1 = the split side (F5 / F6 go to the other)
     property bool internalDrag: false           // a drag that started inside fm (move by default)
-    readonly property real contentAreaW: width - (240 * u - contentShift) - previewW - 10 * u
+    readonly property real contentAreaW: width - (sideEdge - contentShift) - previewW - 10 * u
     property real splitRatio: .5                // the main side's share; drag the divider to change it
     property bool draggingSplit: false
     property real splitW: splitView ? contentAreaW * (1 - splitRatio) : 0
@@ -151,13 +151,25 @@ Window {
     readonly property bool remote: Kio.isUrl(dir)
     // Layout: the sidebar slides away (sideShift) and the preview pane takes room on the right.
     readonly property int springDelay: 900      // ms hovering with a drag before a folder opens
-    readonly property real hiddenShift: 98 * u   // how far the toolbar/content move left without the sidebar
+    // Sidebar width: drag the divider at its right edge (like Dolphin's Places panel), saved.
+    property real sidebarUnits: 230             // in mockup units (× u); 230 = the original layout
+    readonly property real minSidebarUnits: 150
+    readonly property real maxSidebarUnits: 420
+    readonly property real sideW: sidebarUnits * u
+    readonly property real sideEdge: sideW + 10 * u   // where the content starts with the sidebar shown
+    readonly property real hiddenShift: sideEdge - 142 * u   // how far the toolbar moves left without the sidebar (98 at the default width)
     property real sideShift: sidebarShown ? 0 : hiddenShift
     // Without the sidebar the files use the whole window width: content moves to the left edge
     // (the toolbar only moves by sideShift, to keep room for the traffic lights).
-    property real contentShift: sidebarShown ? 0 : 230 * u
-    Behavior on contentShift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-    Behavior on sideShift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    property real contentShift: sidebarShown ? 0 : sideW
+    Behavior on contentShift { enabled: !win.draggingSidebar; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    Behavior on sideShift { enabled: !win.draggingSidebar; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    property bool draggingSidebar: false
+    // View ▸ Sidebar Style: "dolphin" = flush with the window, divider, white icons (like Dolphin's
+    // Places panel); "finder" = the floating glass card with section-coloured icons (mockup A). Saved.
+    property string sidebarStyle: "dolphin"
+    readonly property bool dolphinSidebar: sidebarStyle !== "finder"
+    readonly property color sidebarTint: Qt.rgba(42 / 255, 45 / 255, 56 / 255, .35 * glassAlpha / .62)
     property real previewW: previewShown ? 280 * u : 0
     Behavior on previewW { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     readonly property real scopeH: searchActive ? 34 * tu : 0
@@ -193,7 +205,6 @@ Window {
     // View ▸ Transparency: how much the glass tints the blurred desktop (Clear … Solid).
     readonly property var glassLevels: [["Clear", .32], ["Light", .48], ["Standard", .62], ["Frosted", .76], ["Solid", .9]]
     property real glassAlpha: .62
-    readonly property color sidebarTint: Qt.rgba(42 / 255, 45 / 255, 56 / 255, .35 * glassAlpha / .62)
     readonly property color bodyTint: Qt.rgba(20 / 255, 22 / 255, 29 / 255, glassAlpha)
     readonly property color pillTint: Qt.rgba(58 / 255, 61 / 255, 72 / 255, Math.min(.85, .40 * glassAlpha / .62))
     function stepGlass(d) {
@@ -223,6 +234,8 @@ Window {
         property alias listColumns: win.listColumnsJson
         property alias sortReversed: win.sortReversed
         property alias sidebarShown: win.sidebarShown
+        property alias sidebarWidth: win.sidebarUnits
+        property alias sidebarStyle: win.sidebarStyle
         property alias previewShown: win.previewShown
         property alias calcSizes: win.calcSizes
         property alias recent: win.recentJson
@@ -1059,7 +1072,7 @@ Window {
             strokeColor: "transparent"
             fillRule: ShapePath.OddEvenFill
             PathRectangle { x: 0; y: 0; width: win.width; height: win.height; radius: win.r }
-            PathRectangle { x: sidebar.x; y: sidebar.y; width: sidebar.visible ? sidebar.width : 0; height: sidebar.height; radius: 18 * win.u }
+            PathRectangle { x: sidebar.x; y: sidebar.y; width: sidebar.visible && !win.dolphinSidebar ? sidebar.width : 0; height: sidebar.height; radius: 18 * win.u }
             PathRectangle { x: preview.x; y: preview.y; width: preview.visible ? preview.width : 0; height: preview.height; radius: 18 * win.u }
             PathRectangle { x: navPill.x; y: navPill.y; width: navPill.width; height: navPill.height; radius: navPill.height / 2 }
             PathRectangle { x: pathPill.x; y: pathPill.y; width: pathPill.width; height: pathPill.height; radius: pathPill.height / 2 }
@@ -1074,7 +1087,7 @@ Window {
 
     // Window dragging: empty toolbar strip and sidebar background.
     Item {
-        x: 240 * u - win.sideShift; y: 0; width: parent.width - x; height: 72 * u
+        x: win.sideEdge - win.sideShift; y: 0; width: parent.width - x; height: 72 * u
         DragHandler { target: null; onActiveChanged: if (active) win.startSystemMove() }
         TapHandler { onDoubleTapped: win.maximized ? win.showNormal() : win.showMaximized() }
     }
@@ -1082,12 +1095,41 @@ Window {
     // ---- sidebar -------------------------------------------------------------
     Item {
         id: sidebar
-        x: 10 * u - win.sideShift * .3; y: 10 * u; width: 220 * u; height: parent.height - 20 * u - win.dockInset
+        // Like Dolphin's Places panel: on the window's own glass, flush with the window edge,
+        // separated from the files by a thin divider that resizes it (sidebarUnits, saved).
+        // Finder style: a floating card 10 units in from the window edges, with its own tint and ring.
+        readonly property real inset: win.dolphinSidebar ? 0 : 10 * win.u
+        x: inset - win.sideShift * .3; y: inset; width: win.sideW - inset; height: parent.height - 2 * inset - win.dockInset
         opacity: 1 - win.sideShift / win.hiddenShift
         visible: opacity > .01
-        Rectangle { anchors.fill: parent; radius: 18 * win.u; color: win.sidebarTint }
-        EdgeRing { anchors.fill: parent; radius: 18 * win.u; bottomAlpha: .55 }
+        Rectangle { visible: !win.dolphinSidebar; anchors.fill: parent; radius: 18 * win.u; color: win.sidebarTint }
+        EdgeRing { visible: !win.dolphinSidebar; anchors.fill: parent; radius: 18 * win.u; bottomAlpha: .55 }
         DragHandler { target: null; onActiveChanged: if (active) win.startSystemMove() }
+        Rectangle {   // the divider (below the toolbar row, like Dolphin's panel splitter)
+            objectName: "sidebarDivider"
+            visible: win.dolphinSidebar || sideResize.containsMouse || sideResize.pressed
+            x: parent.width - width + (win.dolphinSidebar ? 0 : 5 * win.u); y: 72 * win.u - sidebar.inset; width: 1; height: parent.height - y - 10 * win.u
+            color: Qt.rgba(1, 1, 1, sideResize.containsMouse || sideResize.pressed ? .30 : .10)
+        }
+        MouseArea {   // drag the divider to resize the sidebar; double-click resets it
+            id: sideResize
+            objectName: "sidebarResize"
+            x: parent.width - 4 * win.u + (win.dolphinSidebar ? 0 : 5 * win.u); y: 72 * win.u - sidebar.inset; width: 8 * win.u; height: parent.height - y
+            z: 3
+            hoverEnabled: true
+            cursorShape: Qt.SplitHCursor
+            property real startX: 0
+            property real startUnits: 0
+            onPressed: m => { startX = mapToItem(null, m.x, 0).x; startUnits = win.sidebarUnits; win.draggingSidebar = true }
+            onPositionChanged: m => {
+                if (!pressed) return
+                const dx = mapToItem(null, m.x, 0).x - startX
+                win.sidebarUnits = Math.round(Math.max(win.minSidebarUnits, Math.min(win.maxSidebarUnits, startUnits + dx / win.u)))
+            }
+            onReleased: win.draggingSidebar = false
+            onCanceled: win.draggingSidebar = false
+            onDoubleClicked: win.sidebarUnits = 230
+        }
 
 
         // Places list: scrolls (scroll bar, touchpad, wheel) when the window is too short for it.
@@ -1132,12 +1174,12 @@ Window {
 
                 Rectangle {
                     visible: (row.item || row.tagRow) && (row.current || hov.hovered || drop.containsDrag)
-                    x: 14 * win.u; y: 4 * win.tu; width: 196 * win.u; height: 26 * win.tu; radius: 8 * win.tu
+                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: 4 * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: 26 * win.tu; radius: (win.dolphinSidebar ? 6 : 8) * win.tu
                     color: Qt.rgba(1, 1, 1, row.current || drop.containsDrag ? .16 : .07)
                 }
                 Rectangle {   // drop target line for headers / empty sections
                     visible: !row.item && !row.tagRow && !row.tagHead && row.modelData.si >= 0 && drop.containsDrag
-                    x: 14 * win.u; y: row.height - 3 * win.tu; width: 196 * win.u; height: 2 * win.tu; radius: 1
+                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: row.height - 3 * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: 2 * win.tu; radius: 1
                     color: "#0a84ff"
                 }
                 Rectangle {   // a tag: a filled Nord colour dot
@@ -1155,7 +1197,7 @@ Window {
                     source: visible ? (row.vol ? row.modelData.item.icon || "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
                     opacity: row.dimmed ? .6 : 1
                     fallback: "folder-symbolic"
-                    isMask: true; color: row.modelData.color || "white"
+                    isMask: true; color: win.dolphinSidebar ? "white" : row.modelData.color || "white"   // Dolphin: plain white; Finder: section colour
                     roundToIconSize: false
                 }
                 Text {
@@ -1177,19 +1219,19 @@ Window {
                     visible: !(row.item && win.renamingPlace === row.key) && !(row.tagRow && win.renamingTag === row.modelData.tag.name)
                              && !(row.head && !row.tagHead && win.renamingSection === row.modelData.si)
                     x: (row.head ? 16 : row.item || row.tagRow ? 48 : 22) * win.u
-                    width: (row.head ? 170 : 160) * win.u
+                    width: placesView.width - (row.head ? 60 : 90) * win.u
                     elide: Text.ElideRight
                     anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
                     text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item)
                           : row.tagRow ? row.modelData.tag.name : (row.modelData.hint || "Drop folders here")
-                    color: "white"; opacity: row.head ? .45 : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
+                    color: "white"; opacity: row.head ? (win.dolphinSidebar ? .55 : .45) : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
                     font.family: win.fontFamily
-                    font.pixelSize: (row.head ? 11 : row.item || row.tagRow ? 13.5 : 12) * win.tu
-                    font.weight: row.head ? Font.DemiBold : Font.Normal
+                    font.pixelSize: (row.head ? (win.dolphinSidebar ? 12.5 : 11) : row.item || row.tagRow ? 13.5 : 12) * win.tu
+                    font.weight: row.head && !win.dolphinSidebar ? Font.DemiBold : Font.Normal   // Dolphin: plain section titles
                 }
                 Rename {
                     active: row.item && !row.vol && win.renamingPlace === row.key
-                    x: 44 * win.u; width: 160 * win.u; y: 4 * win.tu
+                    x: 44 * win.u; width: placesView.width - 90 * win.u; y: 4 * win.tu
                     name: row.item ? win.placeLabel(row.modelData.item) : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
                     onCommitted: text => win.placeRename(row.modelData.si, row.modelData.ii, text)
@@ -1320,7 +1362,7 @@ Window {
         id: sidebarButton
         objectName: "sidebarButton"
         z: 5
-        x: 194 * u - win.sideShift * (78 / 98); y: 36 * u - height / 2
+        x: win.sideW - 36 * u - win.sideShift * (win.sideW - 152 * u) / win.hiddenShift; y: 36 * u - height / 2
         width: 22 * u; height: 18 * u
         Rectangle {   // a window with a sidebar
             anchors.fill: parent; radius: 4 * win.u; color: "transparent"
@@ -1335,7 +1377,7 @@ Window {
     Pill {
         id: navPill
         tint: win.pillTint
-        x: 250 * u - win.sideShift; y: 18 * u; width: 86 * u; height: 36 * u
+        x: win.sideEdge + 10 * u - win.sideShift; y: 18 * u; width: 86 * u; height: 36 * u
         Text {
             x: 24 * win.u - width / 2; anchors.baseline: parent.top; anchors.baselineOffset: 24 * win.u
             text: "‹"; color: "white"; opacity: win.backStack.length ? 1 : .4
@@ -1352,7 +1394,7 @@ Window {
     Pill {
         id: pathPill
         tint: win.pillTint
-        x: 350 * u - win.sideShift; y: 18 * u; height: 36 * u
+        x: win.sideEdge + 110 * u - win.sideShift; y: 18 * u; height: 36 * u
         transform: Translate { id: pathShake }
         width: viewPill.x - 15 * u - x
         // Drop pocket: the current directory as a draggable IRIX icon.
@@ -1662,7 +1704,7 @@ Window {
     // Drops onto empty space go into the current folder.
     DropArea {
         enabled: !win.termActive   // a terminal takes drops itself (it types the paths)
-        x: 240 * u - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW - win.splitW; height: parent.height - y - win.bottomH
+        x: win.sideEdge - win.contentShift; y: 72 * u + win.scopeH; width: parent.width - x - win.previewW - win.splitW; height: parent.height - y - win.bottomH
         onDropped: drop => { if (!win.inTrash) win.dropFiles(drop.urls, win.dir, drop.proposedAction === Qt.MoveAction); drop.accept() }
     }
 
@@ -1670,7 +1712,7 @@ Window {
         id: grid
         objectName: "grid"
         visible: !win.termActive && win.viewMode !== 1
-        x: 262 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH + win.splitHeaderH
+        x: win.sideEdge + 22 * u - win.contentShift; y: 92 * u - 10 * win.k + win.scopeH + win.splitHeaderH
         width: parent.width - x - 20 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
@@ -1913,7 +1955,7 @@ Window {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: event => win.scroll(list, event)
         }
-        x: 252 * u - win.contentShift; y: 80 * u + win.scopeH + win.splitHeaderH
+        x: win.sideEdge + 12 * u - win.contentShift; y: 80 * u + win.scopeH + win.splitHeaderH
         width: parent.width - x - 14 * u - win.previewW - win.splitW
         height: parent.height - win.bottomH - y
         clip: true
@@ -2071,7 +2113,7 @@ Window {
         id: scopeBar
         objectName: "scopeBar"
         visible: win.searchActive && !win.termActive
-        x: 262 * u - win.contentShift; y: 66 * u
+        x: win.sideEdge + 22 * u - win.contentShift; y: 66 * u
         height: 28 * win.tu
         spacing: 6 * u
         Text {
@@ -2119,7 +2161,7 @@ Window {
         objectName: "remoteMessage"
         visible: win.remote && !win.searchActive && !win.termActive && kioFolder.count === 0
                  && (kioFolder.status === KioModel.Loading || kioFolder.status === KioModel.Error)
-        x: 240 * u - win.contentShift + 40 * u
+        x: win.sideEdge - win.contentShift + 40 * u
         width: parent.width - x - win.previewW - win.splitW - 40 * u
         y: parent.height / 2 - height / 2
         horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
@@ -2130,7 +2172,7 @@ Window {
     }
     Text {
         visible: win.searchActive && !win.searching && resultsModel.count === 0
-        x: 240 * u - win.contentShift + (parent.width - 240 * u + win.contentShift - win.previewW) / 2 - width / 2
+        x: win.sideEdge - win.contentShift + (parent.width - win.sideEdge + win.contentShift - win.previewW) / 2 - width / 2
         y: parent.height / 2
         text: "No results"; color: "white"; opacity: .4
         font.family: win.fontFamily; font.pixelSize: 15 * win.tu
@@ -2139,7 +2181,7 @@ Window {
     Item {
         id: termLayer
         objectName: "termLayer"
-        x: 246 * u - win.contentShift; y: 66 * u + (win.splitView ? 10 * u + 26 * tu : 0)   // below mainHeader when split
+        x: win.sideEdge + 6 * u - win.contentShift; y: 66 * u + (win.splitView ? 10 * u + 26 * tu : 0)   // below mainHeader when split
         width: parent.width - x - win.previewW - win.splitW - 8 * u; height: parent.height - y - win.bottomH - 4 * u
         visible: win.termActive
     }
@@ -2261,7 +2303,7 @@ Window {
     TabStrip {
         id: tabStrip
         visible: win.tabBarShown
-        x: 262 * u - win.contentShift; y: parent.height - win.bottomH
+        x: win.sideEdge + 22 * u - win.contentShift; y: parent.height - win.bottomH
         width: parent.width - x - win.previewW - win.splitW - 20 * u; height: win.tabBarH
         tabs: win.tabModel
         current: win.tabIndex
@@ -2308,7 +2350,7 @@ Window {
     Item {
         id: bottomHandle
         objectName: "bottomHandle"
-        x: 240 * u - win.contentShift; width: parent.width - x - win.previewW - 10 * u
+        x: win.sideEdge - win.contentShift; width: parent.width - x - win.previewW - 10 * u
         y: parent.height - win.bottomH - 5 * u; height: 10 * u
         z: 4
         property real startExtra: 0
@@ -2336,9 +2378,9 @@ Window {
         opacity: win.deviceNotice ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 180 } }
         z: 20
-        x: Math.max(240 * u - win.contentShift, (parent.width + 240 * u - win.contentShift - width) / 2)
+        x: Math.max(win.sideEdge - win.contentShift, (parent.width + win.sideEdge - win.contentShift - width) / 2)
         y: parent.height - win.bottomH - height - 14 * u
-        width: Math.min(noticeMetrics.advanceWidth + 34 * u, parent.width - 260 * u + win.contentShift); height: noticeText.implicitHeight + 14 * u
+        width: Math.min(noticeMetrics.advanceWidth + 34 * u, parent.width - win.sideEdge - 20 * u + win.contentShift); height: noticeText.implicitHeight + 14 * u
         TextMetrics { id: noticeMetrics; font: noticeText.font; text: win.deviceNotice }
         radius: Math.min(height / 2, 14 * u)
         color: Qt.rgba(28 / 255, 30 / 255, 38 / 255, .82); border.color: Qt.rgba(1, 1, 1, .18)
@@ -2359,13 +2401,13 @@ Window {
     // ---- status bar ------------------------------------------------------------
     Rectangle {
         visible: !win.tabBarShown   // with tabs, the strip draws the page edge
-        x: 240 * u - win.contentShift; y: parent.height - 52 * u - win.bottomLift; width: parent.width - x - 10 * u; height: 1
+        x: win.sideEdge - win.contentShift; y: parent.height - 52 * u - win.bottomLift; width: parent.width - x - 10 * u; height: 1
         color: Qt.rgba(1, 1, 1, .08)
     }
     Text {
         id: statusText
         objectName: "status"
-        x: 262 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.bottomLift
+        x: win.sideEdge + 22 * u - win.contentShift; anchors.baseline: parent.top; anchors.baselineOffset: parent.height - 28 * u - win.bottomLift
         readonly property int n: win.paths().length
         text: win.searchActive
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
@@ -3009,6 +3051,13 @@ Window {
             P.MenuItem { text: "Calculate All Sizes"; checkable: true; checked: win.calcSizes; onTriggered: win.calcSizes = !win.calcSizes }
             P.MenuSeparator {}
             P.MenuItem { text: (win.sidebarShown ? "Hide" : "Show") + " Sidebar\tCtrl+Alt+S"; onTriggered: win.sidebarShown = !win.sidebarShown }
+            P.Menu {
+                id: sidebarStyleMenu
+                objectName: "sidebarStyleMenu"
+                title: "Sidebar Style"
+                P.MenuItem { text: "Dolphin (flush, divider, white icons)"; checkable: true; checked: win.dolphinSidebar; onTriggered: win.sidebarStyle = "dolphin" }
+                P.MenuItem { text: "Finder (floating glass, coloured icons)"; checkable: true; checked: !win.dolphinSidebar; onTriggered: win.sidebarStyle = "finder" }
+            }
             P.MenuItem { text: (win.previewShown ? "Hide" : "Show") + " Preview\tCtrl+Shift+P"; onTriggered: win.previewShown = !win.previewShown }
             P.MenuItem { text: (win.tabBarShown ? "Hide" : "Show") + " Tab Bar"; onTriggered: win.tabBarShown = !win.tabBarShown }
             P.MenuItem { text: "Split View\tF3"; checkable: true; checked: win.splitView; onTriggered: win.toggleSplit() }
