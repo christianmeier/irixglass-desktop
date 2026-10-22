@@ -1,4 +1,5 @@
 #include "fm.h"
+#include "kiomodel.h"
 
 #include <QApplication>
 #include <KSignalHandler>
@@ -57,6 +58,8 @@ int main(int argc, char *argv[])
     auto folderOf = [](QString start) {
         if (start.startsWith(QLatin1String("file://")))
             start = QUrl(start).toLocalFile();
+        if (KioModel::isUrl(start))
+            return KioModel::normalize(start);   // smb://…, sftp://…, remote:/ (listed through KIO)
         const QFileInfo info(start);
         return info.isDir() ? info.absoluteFilePath() : info.exists() ? info.absolutePath() : QDir::homePath();
     };

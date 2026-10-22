@@ -1,4 +1,5 @@
 #include "fm.h"
+#include "kiomodel.h"
 #include "terminal.h"
 
 #include <QQmlEngine>
@@ -45,6 +46,7 @@
 #include <KIO/DeleteJob>
 #include <KIO/EmptyTrashJob>
 #include <KIO/RestoreJob>
+#include <KProtocolInfo>
 #include <Solid/Device>
 #include <Solid/DeviceNotifier>
 #include <Solid/OpticalDrive>
@@ -70,13 +72,21 @@
 
 namespace
 {
+// fm's items are local paths, or URL strings for folders listed through KIO (KioModel).
+QUrl toUrl(const QString &p)
+{
+    return KioModel::isUrl(p) ? QUrl(p) : QUrl::fromLocalFile(p);
+}
+
 QList<QUrl> toUrls(const QStringList &paths)
 {
     QList<QUrl> urls;
     for (const QString &p : paths)
-        urls << QUrl::fromLocalFile(p);
+        urls << toUrl(p);
     return urls;
 }
+
+QString kindOfMime(const QMimeType &mime);
 
 // "~", "~/x", "file:///x", "rel/x" -> absolute, cleaned path (not checked for existence).
 QString expandPath(QString text, const QString &base)
@@ -185,7 +195,10 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent, bool r
     loadTagIndex();
     loadSizeCache();
     // The terminal used by terminal tabs (import IrixFm).
-    static const bool registered = (qmlRegisterType<TerminalView>("IrixFm", 1, 0, "TerminalView"), true);
+    static const bool registered = (qmlRegisterType<TerminalView>("IrixFm", 1, 0, "TerminalView"),
+                                    // folders behind KIO URLs (smb://, sftp://, remote:/, mtp:, …) and the URL helpers
+                                    qmlRegisterType<KioModel>("IrixFm", 1, 0, "KioModel"),
+                                    qmlRegisterSingletonInstance("IrixFm", 1, 0, "Kio", KioUrl::instance()), true);
     Q_UNUSED(registered)
     // The dock's size: from Plasma's panel settings, re-read whenever they change.
     m_panelWatcher = new QFileSystemWatcher(this);
@@ -258,7 +271,10 @@ int Fm::trashCount() const
 
 QVariantList Fm::appsFor(const QString &path) const
 {
-    const QString mime = QMimeDatabase().mimeTypeForFile(path).name();
+    const KFileItem remote = KioModel::isUrl(path) ? KioModel::findItem(path) : KFileItem();
+    const QString mime = KioModel::isUrl(path) ? (remote.isNull() ? QMimeDatabase().mimeTypeForFile(path, QMimeDatabase::MatchExtension).name()
+                                                                  : remote.mimetype())
+                                               : QMimeDatabase().mimeTypeForFile(path).name();
     QVariantList out;
     for (const KService::Ptr &app : KApplicationTrader::queryByMimeType(mime)) {
         out << QVariantMap{{QStringLiteral("id"), app->storageId()}, {QStringLiteral("name"), app->name()}, {QStringLiteral("icon"), app->icon()}};
@@ -270,6 +286,15 @@ QVariantList Fm::appsFor(const QString &path) const
 
 QVariantMap Fm::fileMeta(const QString &path) const
 {
+    if (KioModel::isUrl(path)) {   // what KIO listed
+        const KFileItem it = KioModel::findItem(path);
+        if (it.isNull())
+            return {};
+        return {{QStringLiteral("created"), it.time(KFileItem::CreationTime)},
+                {QStringLiteral("opened"), it.time(KFileItem::AccessTime)},
+                {QStringLiteral("permissions"), it.permissionsString().mid(1)},
+                {QStringLiteral("owner"), it.user()}};
+    }
     const QFileInfo fi(path);
     const QFile::Permissions p = fi.permissions();
     QString perms;
@@ -396,6 +421,10 @@ void Fm::startSearch(const QString &root, const QString &text, bool hidden, bool
     const int gen = ++m_searchGen;
     if (text.trimmed().isEmpty())
         return;
+    if (KioModel::isUrl(root)) {   // no search in KIO folders: answer "nothing" (the window waits for searchDone)
+        QMetaObject::invokeMethod(this, [this, gen] { if (m_searchGen == gen) Q_EMIT searchDone(0, false); }, Qt::QueuedConnection);
+        return;
+    }
     QPointer<Fm> self(this);
     (void)QtConcurrent::run([self, gen, root, needle = text.trimmed(), hidden, recursive] {
         constexpr int kMax = 2000, kBatch = 50;
@@ -460,7 +489,7 @@ std::unique_ptr<KArchive> archiveFor(const QString &path)
 
 bool Fm::isArchive(const QString &path) const
 {
-    return QFileInfo(path).isFile() && archiveFor(path) != nullptr;
+    return !KioModel::isUrl(path) && QFileInfo(path).isFile() && archiveFor(path) != nullptr;
 }
 
 QString Fm::compress(const QStringList &paths)
@@ -535,6 +564,8 @@ QStringList Fm::duplicate(const QStringList &paths)
 {
     QStringList out;
     for (const QString &p : paths) {
+        if (KioModel::isUrl(p))
+            continue;   // local only (names are checked on disk)
         const QFileInfo fi(p);
         // "photo.jpg" -> "photo copy.jpg"; folders and dotfiles keep their whole name as the base.
         const bool split = !fi.isDir() && !fi.completeSuffix().isEmpty() && !fi.baseName().isEmpty();
@@ -550,6 +581,8 @@ QStringList Fm::makeAlias(const QStringList &paths)
 {
     QStringList out;
     for (const QString &p : paths) {
+        if (KioModel::isUrl(p))
+            continue;   // symlinks are local
         const QFileInfo fi(p);
         const QString dest = freeName(fi.absolutePath(), fi.fileName() + QStringLiteral(" alias"), QString());
         // linkAs is a CopyJob, so the undo manager knows exactly which link to remove.
@@ -561,6 +594,8 @@ QStringList Fm::makeAlias(const QStringList &paths)
 
 QString Fm::showOriginal(const QString &path) const
 {
+    if (KioModel::isUrl(path))
+        return {};
     const QFileInfo fi(path);
     return fi.isSymLink() ? fi.symLinkTarget() : QString();
 }
@@ -569,11 +604,64 @@ void Fm::pasteMove(const QString &dir)
 {
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
     if (mime && mime->hasUrls())
-        undoable(KIO::move(mime->urls(), QUrl::fromLocalFile(dir)));
+        undoable(KIO::move(mime->urls(), toUrl(dir)));
 }
+
+namespace
+{
+// Get Info / Quick Look / the preview pane for an item listed through KIO (no I/O: what the
+// listing said). `remote` tells the views not to load the file itself.
+QVariantMap remoteInfo(const QString &path, const Fm &fm)
+{
+    const KFileItem it = KioModel::findItem(path);
+    const QLocale loc;
+    auto date = [&](const QDateTime &d) {
+        return d.isValid() ? loc.toString(d, QStringLiteral("dddd, d MMMM yyyy 'at' ") + loc.timeFormat(QLocale::ShortFormat)) : QString();
+    };
+    const bool known = !it.isNull();
+    // the folder being shown (no item for it from some workers) counts as a folder
+    const bool isDir = known ? it.isDir() : true;
+    const QString mime = known ? it.mimetype() : QStringLiteral("inode/directory");
+    const qint64 size = known && !isDir && it.entry().contains(KIO::UDSEntry::UDS_SIZE) ? qint64(it.size()) : -1;
+    const KService::Ptr app = isDir ? KService::Ptr() : KApplicationTrader::preferredService(mime);
+    auto access = [&](mode_t r, mode_t w) {
+        const mode_t p = mode_t(it.permissions());
+        const bool cr = p & r, cw = p & w;
+        return !known ? QString() : cr && cw ? QStringLiteral("Read & Write") : cr ? QStringLiteral("Read only")
+                                   : cw ? QStringLiteral("Write only") : QStringLiteral("No access");
+    };
+    const QString parent = KioModel::parentUrl(path);
+    return {{QStringLiteral("name"), known && it.text() != QLatin1String(".") ? it.text() : KioModel::title(path)},
+            {QStringLiteral("path"), path},
+            {QStringLiteral("where"), parent.isEmpty() ? path : QUrl(parent).toDisplayString(QUrl::PreferLocalFile)},
+            {QStringLiteral("exists"), true},
+            {QStringLiteral("remote"), true},
+            {QStringLiteral("isDir"), isDir},
+            {QStringLiteral("isLink"), known && it.isLink()},
+            {QStringLiteral("target"), known ? it.linkDest() : QString()},
+            {QStringLiteral("mime"), mime},
+            {QStringLiteral("kindText"), isDir ? QStringLiteral("Folder") : known ? it.mimeComment() : QString()},
+            {QStringLiteral("size"), size},
+            {QStringLiteral("sizeText"), size >= 0 ? fm.humanSize(size) + QStringLiteral(" (%L1 bytes)").arg(size) : QString()},
+            {QStringLiteral("created"), known ? date(it.time(KFileItem::CreationTime)) : QString()},
+            {QStringLiteral("modified"), known ? date(it.time(KFileItem::ModificationTime)) : QString()},
+            {QStringLiteral("accessed"), known ? date(it.time(KFileItem::AccessTime)) : QString()},
+            {QStringLiteral("owner"), known ? it.user() : QString()},
+            {QStringLiteral("group"), known ? it.group() : QString()},
+            {QStringLiteral("permOwner"), access(S_IRUSR, S_IWUSR)},
+            {QStringLiteral("permGroup"), access(S_IRGRP, S_IWGRP)},
+            {QStringLiteral("permOther"), access(S_IROTH, S_IWOTH)},
+            {QStringLiteral("executable"), false},
+            {QStringLiteral("tags"), QStringList()},
+            {QStringLiteral("openWith"), app ? app->name() : QString()},
+            {QStringLiteral("openWithIcon"), app ? app->icon() : QString()}};
+}
+} // namespace
 
 QVariantMap Fm::info(const QString &path) const
 {
+    if (KioModel::isUrl(path))
+        return remoteInfo(path, *this);
     const QFileInfo fi(path);
     const QMimeType mime = QMimeDatabase().mimeTypeForFile(fi);
     QVariantMap m;
@@ -625,6 +713,10 @@ constexpr qint64 kSizeMaxAge = 60 * 60 * 1000;   // recount after an hour even i
 
 void Fm::folderSize(const QString &path)
 {
+    if (KioModel::isUrl(path)) {   // not counted over the network: "--"
+        QMetaObject::invokeMethod(this, [this, path] { Q_EMIT folderSizeReady(path, -1, 0, 0); }, Qt::QueuedConnection);
+        return;
+    }
     const QFileInfo fi(path);
     const auto it = m_sizeCache.constFind(path);
     const bool fresh = it != m_sizeCache.constEnd() && it->dirMtime == fi.lastModified().toMSecsSinceEpoch()
@@ -713,6 +805,8 @@ void Fm::startNextSize()
 
 QString Fm::textPreview(const QString &path, int maxBytes) const
 {
+    if (KioModel::isUrl(path))
+        return {};   // no downloads for a preview
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return {};
@@ -817,10 +911,17 @@ QString kindOf(const QFileInfo &fi)
     QMimeType mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchExtension);
     if (mime.isDefault())
         mime = db.mimeTypeForFile(fi, QMimeDatabase::MatchContent);
+    if (!mime.name().startsWith(QLatin1String("image/")) && fi.isExecutable())
+        return QStringLiteral("exe");
+    return kindOfMime(mime);
+}
+
+// image | exe | doc by MIME type alone (also for items listed through KIO)
+QString kindOfMime(const QMimeType &mime)
+{
     if (mime.name().startsWith(QLatin1String("image/")))
         return QStringLiteral("image");
-    if (fi.isExecutable() || mime.inherits(QStringLiteral("application/x-executable"))
-        || mime.inherits(QStringLiteral("application/x-shellscript")))
+    if (mime.inherits(QStringLiteral("application/x-executable")) || mime.inherits(QStringLiteral("application/x-shellscript")))
         return QStringLiteral("exe");
     return QStringLiteral("doc");
 }
@@ -828,6 +929,13 @@ QString kindOf(const QFileInfo &fi)
 
 QString Fm::kind(const QString &path) const
 {
+    if (KioModel::isUrl(path)) {   // from what KIO listed (no I/O), else by name
+        const KFileItem it = KioModel::findItem(path);
+        if (!it.isNull())
+            return it.isDir() ? QStringLiteral("folder") : kindOfMime(it.determineMimeType());
+        static const QMimeDatabase db;
+        return kindOfMime(db.mimeTypeForFile(QUrl(path).fileName(), QMimeDatabase::MatchExtension));
+    }
     const QFileInfo fi(path);
     const qint64 ctime = changeTime(fi);
     const auto it = m_kindCache.constFind(path);
@@ -844,6 +952,8 @@ QString Fm::kind(const QString &path) const
 
 void Fm::prefetchKinds(const QString &dir)
 {
+    if (KioModel::isUrl(dir))
+        return;
     const qint64 mtime = QFileInfo(dir).lastModified().toMSecsSinceEpoch();
     if (dir.isEmpty() || m_kindPrefetched.value(dir, -1) == mtime)
         return;   // done before, and no file was added, removed or renamed since
@@ -885,6 +995,8 @@ void Fm::prefetchKinds(const QString &dir)
 
 QVariantMap Fm::desktopInfo(const QString &path) const
 {
+    if (KioModel::isUrl(path))
+        return {};
     const qint64 ctime = changeTime(QFileInfo(path));
     const auto it = m_desktopCache.constFind(path);
     if (it != m_desktopCache.constEnd() && it->ctime == ctime)
@@ -901,6 +1013,8 @@ QVariantMap Fm::desktopInfo(const QString &path) const
 
 QString Fm::freeSpace(const QString &path) const
 {
+    if (KioModel::isUrl(path))
+        return {};
     const QStorageInfo info(path);
     return humanSize(info.bytesAvailable()) + QStringLiteral(" available");
 }
@@ -920,6 +1034,26 @@ QString Fm::uriList(const QStringList &paths) const
 
 QVariantMap Fm::resolvePath(const QString &text, const QString &base) const
 {
+    // KIO URLs (smb://host/share, sftp://user@host/…, remote:/, mtp:/…) aren't checked here: the
+    // view lists them asynchronously and shows an error if that fails. Unknown schemes are refused.
+    const QString t = text.trimmed();
+    if (t == QLatin1String("trash:") || t == QLatin1String("trash:/"))
+        return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), trashDir()}};   // the Trash fm lists as a folder
+    if (t == QLatin1String("network:") || t == QLatin1String("network:/"))
+        return {{QStringLiteral("ok"), !KProtocolInfo::isKnownProtocol(QStringLiteral("network"))},
+                {QStringLiteral("dir"), QStringLiteral("remote:/")}};   // without kio-extras' network:/, remote:/ is the Network
+    if (KioModel::isUrl(t)) {
+        const QUrl u(t);
+        if (!u.isValid() || !KProtocolInfo::isKnownProtocol(u.scheme()))
+            return {{QStringLiteral("ok"), false}};
+        return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), KioModel::normalize(t)}};
+    }
+    if (KioModel::isUrl(base) && !t.startsWith(QLatin1Char('/')) && !t.startsWith(QLatin1Char('~')) && !t.startsWith(QLatin1String("file:"))) {
+        QUrl b(KioModel::normalize(base));   // relative to a KIO folder
+        if (!b.path().endsWith(QLatin1Char('/')))
+            b.setPath(b.path() + QLatin1Char('/'));
+        return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), KioModel::normalize(b.resolved(QUrl(t)).toString())}};
+    }
     const QFileInfo fi(expandPath(text, base));
     if (fi.isDir())
         return {{QStringLiteral("ok"), true}, {QStringLiteral("dir"), fi.absoluteFilePath()}};
@@ -930,6 +1064,8 @@ QVariantMap Fm::resolvePath(const QString &text, const QString &base) const
 
 QString Fm::completePath(const QString &text, const QString &base) const
 {
+    if (KioModel::isUrl(text) || (KioModel::isUrl(base) && !text.startsWith(QLatin1Char('/')) && !text.startsWith(QLatin1Char('~'))))
+        return text;   // no completion over KIO (it would block on the network)
     // Split what was typed into the folder part (kept as typed, e.g. "~/Do") and the name prefix.
     const int slash = text.lastIndexOf(QLatin1Char('/'));
     const QString head = text.left(slash + 1);
@@ -961,7 +1097,8 @@ QString Fm::completePath(const QString &text, const QString &base) const
 
 void Fm::open(const QString &path)
 {
-    auto *job = new KIO::OpenUrlJob(QUrl::fromLocalFile(path));
+    // Remote files: KIO finds the type and hands the URL to the app, or downloads a copy first.
+    auto *job = new KIO::OpenUrlJob(toUrl(path));
     job->setRunExecutables(true);
     job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
     job->start();
@@ -974,7 +1111,7 @@ void Fm::openInDolphin(const QString &path)
 
 void Fm::openTerminal(const QString &dir)
 {
-    QProcess::startDetached(QStringLiteral("alacritty"), {QStringLiteral("--working-directory"), dir});
+    QProcess::startDetached(QStringLiteral("alacritty"), {QStringLiteral("--working-directory"), KioModel::isUrl(dir) ? QDir::homePath() : dir});
 }
 
 void Fm::openInFirefox(const QString &url)
@@ -1008,8 +1145,13 @@ void Fm::overview()
 
 void Fm::trash(const QStringList &paths)
 {
-    if (!paths.isEmpty())
-        undoable(KIO::trash(toUrls(paths)));
+    // Only local items have a Trash; the window asks before deleting remote ones (deletePermanently).
+    QStringList local;
+    for (const QString &p : paths)
+        if (!KioModel::isUrl(p))
+            local << p;
+    if (!local.isEmpty())
+        undoable(KIO::trash(toUrls(local)));
 }
 
 void Fm::copyToClipboard(const QStringList &paths)
@@ -1034,22 +1176,28 @@ void Fm::paste(const QString &dir)
 {
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
     if (mime && mime->hasUrls())
-        undoable(KIO::copy(mime->urls(), QUrl::fromLocalFile(dir)));
+        undoable(KIO::copy(mime->urls(), toUrl(dir)));
 }
 
 void Fm::drop(const QList<QUrl> &urls, const QString &dir, bool move)
 {
+    const QUrl dest = toUrl(dir);
     QList<QUrl> todo;
     for (const QUrl &u : urls) {
         // Dropping an item onto its own folder (or onto itself) is a no-op.
-        const QString local = u.toLocalFile();
-        if (QFileInfo(local).absolutePath() == QDir(dir).absolutePath() || local == dir)
-            continue;
+        if (u.isLocalFile() && dest.isLocalFile()) {
+            const QString local = u.toLocalFile();
+            if (QFileInfo(local).absolutePath() == QDir(dir).absolutePath() || local == dir)
+                continue;
+        } else {
+            const QString item = KioModel::normalize(u.toString()), target = KioModel::normalize(dest.toString());
+            if (item == target || KioModel::parentUrl(item) == target)
+                continue;
+        }
         todo << u;
     }
     if (todo.isEmpty())
         return;
-    const QUrl dest = QUrl::fromLocalFile(dir);
     undoable(move ? KIO::move(todo, dest) : KIO::copy(todo, dest));
 }
 
@@ -1067,6 +1215,15 @@ void Fm::dropInternal(const QList<QUrl> &urls, const QString &dir)
 {
     if (urls.isEmpty())
         return;
+    if (KioModel::isUrl(dir) || std::any_of(urls.begin(), urls.end(), [](const QUrl &u) { return !u.isLocalFile(); })) {
+        // KIO URLs: move within the same server (scheme + host), copy between servers and the disk.
+        const QUrl d(dir);
+        const bool same = KioModel::isUrl(dir) && std::all_of(urls.begin(), urls.end(), [&](const QUrl &u) {
+            return u.scheme() == d.scheme() && u.authority() == d.authority();
+        });
+        drop(urls, dir, same && !copyModifierHeld());
+        return;
+    }
     const QString destRoot = QStorageInfo(dir).rootPath();
     bool sameDisk = true;
     for (const QUrl &u : urls)
@@ -1076,6 +1233,16 @@ void Fm::dropInternal(const QList<QUrl> &urls, const QString &dir)
 
 QString Fm::makeFolder(const QString &dir)
 {
+    if (KioModel::isUrl(dir)) {   // a free name among the items the view has listed
+        QString name = QStringLiteral("New Folder");
+        for (int i = 2; !KioModel::findItem(KioModel::childUrl(dir, name)).isNull(); ++i)
+            name = QStringLiteral("New Folder %1").arg(i);
+        const QString url = KioModel::childUrl(dir, name);
+        KIO::SimpleJob *job = KIO::mkdir(QUrl(url));
+        KIO::FileUndoManager::self()->recordJob(KIO::FileUndoManager::Mkdir, {}, QUrl(url), job);
+        track(job);
+        return url;
+    }
     QString name = QStringLiteral("New Folder");
     for (int i = 2; QFileInfo::exists(dir + QLatin1Char('/') + name); ++i)
         name = QStringLiteral("New Folder %1").arg(i);
@@ -1088,6 +1255,13 @@ QString Fm::makeFolder(const QString &dir)
 
 void Fm::rename(const QString &path, const QString &newName)
 {
+    if (KioModel::isUrl(path)) {
+        const QString parent = KioModel::parentUrl(path);
+        if (parent.isEmpty() || newName.isEmpty() || newName.contains(QLatin1Char('/')) || newName == QUrl(path).fileName())
+            return;
+        undoable(KIO::moveAs(QUrl(path), QUrl(KioModel::childUrl(parent, newName)), KIO::HideProgressInfo));
+        return;
+    }
     const QFileInfo fi(path);
     if (newName.isEmpty() || newName.contains(QLatin1Char('/')) || newName == fi.fileName())
         return;
@@ -1137,11 +1311,15 @@ QString tagIndexFile()
 
 QStringList Fm::tags(const QString &path, int) const
 {
+    if (KioModel::isUrl(path))
+        return {};   // tags are xattrs on local files
     return readTags(path);
 }
 
 void Fm::setTags(const QString &path, const QStringList &list)
 {
+    if (KioModel::isUrl(path))
+        return;
     QStringList clean;
     for (const QString &t : list)
         if (!t.trimmed().isEmpty() && !t.contains(QLatin1Char(',')) && !hasTag(clean, t.trimmed()))
@@ -1238,7 +1416,7 @@ void Fm::startTagSearch(const QString &tag, const QString &here)
     QPointer<Fm> self(this);
     QStringList candidates = taggedCandidates(tag);
     // The folder on screen too: finds tags set by other tools where Baloo doesn't look.
-    if (!here.isEmpty())
+    if (!here.isEmpty() && !KioModel::isUrl(here))
         for (const QFileInfo &fi : QDir(here).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden))
             if (!candidates.contains(fi.absoluteFilePath()))
                 candidates << fi.absoluteFilePath();
