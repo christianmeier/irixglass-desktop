@@ -122,6 +122,8 @@ Always look at the image (Read the PNG) before reporting a visual change.
   or reused delegates show blank names (Performance: views).
 - **libvterm reflow is off on purpose**: libvterm 0.3.3 aborts the whole process when reflowing
   on resize (Performance: terminal; `terminal.cpp`).
+- **Box-drawing characters are painted** (`drawBoxChar()`), not taken from the font, so tmux/nvim
+  borders are unbroken lines; keep it when changing the terminal's `paint()` (Performance: terminal).
 - **One web profile**: `WebProfile.qml` is a single object shared by all web tabs and windows; two
   profiles on the same storage lock each other out (Web tabs).
 - **Single instance**: a local socket named after the binary's path; off-screen, bench and snapshot

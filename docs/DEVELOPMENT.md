@@ -467,6 +467,8 @@ wallpaper to judge it, e.g.
 - **Restart the user's fm with `systemd-run --user --collect`**, never from Claude's shell, and check
   `pgrep -ax irixfm` (all lines) before starting: a second launch only opens a window in the old
   process.
+- **Terminal box drawing is painted, not from the font** (`drawBoxChar()` in `terminal.cpp`): font
+  glyphs don't fill the cell, which made tmux borders dashed. Keep it when changing `paint()`.
 - **Never `git stash`** with several worktrees: the stash is shared between them.
 - **`QtCore.Settings` needs an organisation name** (`app.setOrganizationName`), or it silently fails
   to initialise.
@@ -570,6 +572,11 @@ rendered to `<dir>`, to compare before / after (`magick compare -metric AE`).
   QString, a shaping pass and a font switch per cell) was most of the time. The output is
   pixel-identical. 200×60: ls screen 7–11 → 2 ms, plain text 25–38 → 3 ms, colour per cell
   33–50 → 8 ms.
+- **Box drawing and block characters** (U+2500–U+2595: light / heavy / double lines, rounded
+  corners as arcs, blocks, shades) are drawn by `drawBoxChar()` as pixel-aligned shapes filling the
+  whole cell, like Alacritty, not taken from the font: the font's "│" is shorter than the line
+  height, so tmux's vertical pane borders came out dashed. Characters it doesn't handle fall back to
+  the font. `terminal_test` checks that a column of "│" is one unbroken line.
 - **Partial repaints**: libvterm damage and the cursor's old / new cell call `update(rect)`;
   `QQuickPaintedItem` clips the painter to the dirty area and `paint()` draws only those rows.
   Title changes (each prompt), key presses and focus changes no longer repaint everything.
