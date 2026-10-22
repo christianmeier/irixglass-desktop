@@ -1,29 +1,32 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
+import org.kde.kirigami as K
 
 // Get Info (Ctrl+I): one small window per item, like Finder. Folder sizes are counted in the
-// background (Fm.folderSize).
+// background (Fm.folderSize). With `device` (Fm.volumeInfo) it describes a device in Locations
+// instead: capacity, free space, file system, device node, mount point.
 Window {
     id: infoWin
     property string path
     property real tu: 1
     property string fontFamily
     property var assetFor
-    readonly property var info: Fm.info(path)
-    property string sizeText: info.isDir ? "Calculating…" : info.sizeText
+    property var device: null
+    readonly property var info: path ? Fm.info(path) : ({})
+    property string sizeText: device ? device.size || "" : info.isDir ? "Calculating…" : info.sizeText
 
-    title: info.name + " Info"
+    title: (device ? device.name : info.name) + " Info"
     width: 300 * tu; height: column.implicitHeight + 32 * tu
     minimumWidth: 260 * tu
     color: "#1e2028"
     visible: true
 
-    Component.onCompleted: if (info.isDir) Fm.folderSize(path)
+    Component.onCompleted: if (info.isDir && !device) Fm.folderSize(path)
     Connections {
         target: Fm
         function onFolderSizeReady(p, bytes, files, folders) {
-            if (p === infoWin.path)
+            if (p === infoWin.path && !infoWin.device)
                 infoWin.sizeText = bytes < 0 ? "--" : Fm.humanSize(bytes) + " on disk (" + (files + folders).toLocaleString() + " items)"
         }
     }
@@ -37,7 +40,14 @@ Window {
 
         RowLayout {
             spacing: 10 * infoWin.tu
+            K.Icon {   // a device: its symbolic icon, large
+                visible: !!infoWin.device
+                Layout.preferredWidth: 48 * infoWin.tu; Layout.preferredHeight: 48 * infoWin.tu
+                source: infoWin.device ? infoWin.device.icon : ""
+                isMask: true; color: "white"
+            }
             Image {
+                visible: !infoWin.device
                 Layout.preferredWidth: 56 * infoWin.tu; Layout.preferredHeight: 56 * infoWin.tu
                 source: infoWin.assetFor ? infoWin.assetFor(infoWin.info.isDir ? "folder"
                                                             : infoWin.info.mime.startsWith("image/") ? "image"
@@ -48,7 +58,7 @@ Window {
                 spacing: 2 * infoWin.tu
                 Text {
                     Layout.fillWidth: true; elide: Text.ElideMiddle
-                    text: infoWin.info.name; color: "white"
+                    text: infoWin.device ? infoWin.device.name : infoWin.info.name; color: "white"
                     font.family: infoWin.fontFamily; font.pixelSize: 14 * infoWin.tu; font.weight: Font.DemiBold
                 }
                 Text {
@@ -63,7 +73,16 @@ Window {
             columns: 2; columnSpacing: 10 * infoWin.tu; rowSpacing: 5 * infoWin.tu
             Layout.fillWidth: true
             Repeater {
-                model: [
+                model: infoWin.device ? [
+                    ["Kind:", infoWin.device.kind],
+                    ["Capacity:", infoWin.device.size],
+                    ["Available:", infoWin.device.free],
+                    ["Format:", infoWin.device.fsType],
+                    ["Mounted at:", infoWin.device.mountPoint],
+                    ["Device:", infoWin.device.device],
+                    ["Drive:", infoWin.device.drive],
+                    ["Address:", infoWin.device.url]
+                ].filter(r => r[1]) : [
                     ["Kind:", infoWin.info.kindText + (infoWin.info.isLink ? " (alias)" : "")],
                     ["Size:", infoWin.sizeText],
                     ["Where:", infoWin.info.where],
