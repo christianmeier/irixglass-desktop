@@ -1,7 +1,8 @@
 # fm (irixfm): build with plain g++ + pkg-config. No cmake needed.
 #   make            build ./build/irixfm
 #   make run        run from the source tree
-#   make test       scroll, path bar, sidebar and Finder-feature tests on an off-screen window
+#   make test       all tests, off-screen (scroll … browser, single instance); run under flock, see CLAUDE.md
+#   make tools      build/shot (screenshot harness) and build/leak (leak test); not part of make test
 #   make install    install into ~/.local (PREFIX=... to change)
 #   make uninstall
 PREFIX   ?= $(HOME)/.local
@@ -71,6 +72,15 @@ $(BUILD)/browser_test: tests/browser_test.cpp $(LIBSRC) src/fm.h
 $(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
 
+# Dev tools (tools/*.cpp, usage at the top of each file and in CLAUDE.md); not in TESTS.
+$(BUILD)/shot: tools/shot.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/shot.cpp $(LIBSRC) -o $@ $(LDLIBS)
+
+$(BUILD)/leak: tools/leak.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/leak.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+
+tools: $(BUILD)/shot $(BUILD)/leak
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
 TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test
 test: $(TESTS) $(BUILD)/irixfm
@@ -102,4 +112,4 @@ uninstall:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all icons run test install uninstall clean
+.PHONY: all icons run test tools install uninstall clean
