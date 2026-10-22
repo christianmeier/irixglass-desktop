@@ -51,6 +51,7 @@ Item {
         x: tab.s + 20 * tab.u; width: tab.width - 2 * tab.s - 30 * tab.u
         horizontalAlignment: Text.AlignHCenter; elide: Text.ElideMiddle
         text: tab.title; color: "white"; opacity: tab.active ? .95 : .55
+        textFormat: Text.PlainText   // titles come from web pages and terminal escapes: never markup
         font.family: tab.fontFamily; font.pixelSize: 12 * tab.tu
         font.weight: tab.active ? Font.Medium : Font.Normal
     }

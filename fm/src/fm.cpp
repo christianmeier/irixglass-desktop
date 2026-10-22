@@ -1695,7 +1695,10 @@ QString Fm::downloadTarget(const QString &fileName) const
     // Downloads go to the Downloads folder, under a free name (never over an existing file).
     const QString folder = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     QDir().mkpath(folder);
-    QString name = fileName.isEmpty() ? QStringLiteral("download") : fileName;
+    // Only a plain name: a page's suggested name must not climb out of Downloads ("../x", "/x").
+    QString name = QFileInfo(fileName).fileName();
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        name = QStringLiteral("download");
     const QFileInfo fi(name);
     for (int i = 1; QFileInfo::exists(folder + QLatin1Char('/') + name); ++i)
         name = fi.completeBaseName() + QStringLiteral(" (%1)").arg(i) + (fi.suffix().isEmpty() ? QString() : QLatin1Char('.') + fi.suffix());
