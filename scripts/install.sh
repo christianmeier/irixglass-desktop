@@ -49,7 +49,7 @@ install_file() {
     mkdir -p "$(dirname "$dst")"
     if [[ -e "$dst" ]] && ! cmp -s "$src" "$dst"; then
         mkdir -p "$BACKUP"
-        cp -a "$dst" "$BACKUP/$(echo "${dst#$HOME/}" | tr '/' '_')"
+        cp -a "$dst" "$BACKUP/$(echo "${dst#"$HOME"/}" | tr '/' '_')"
     fi
     cp "$src" "$dst"
 }
@@ -101,7 +101,7 @@ step_fonts() {
     fi
     for f in SF-Pro SF-Mono; do
         [[ -f "$dl/$f.dmg" ]] || curl -fsSL -o "$dl/$f.dmg" "https://devimages-cdn.apple.com/design/resources/download/$f.dmg"
-        rm -rf "$dl/$f" && mkdir -p "$dl/$f" && (cd "$dl/$f" && $z x -y "../$f.dmg" >/dev/null)
+        rm -rf "${dl:?}/$f" && mkdir -p "$dl/$f" && (cd "$dl/$f" && $z x -y "../$f.dmg" >/dev/null)
         local pkg; pkg=$(find "$dl/$f" -name '*.pkg' | head -1)
         mkdir -p "$dl/$f/p" && (cd "$dl/$f/p" && $z x -y "$pkg" >/dev/null && $z x -y 'Payload~' -ofonts >/dev/null)
     done

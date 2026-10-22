@@ -6,6 +6,7 @@ fm=$(realpath "${1:-build/irixfm}")
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 if [ -z "$IRIXFM_DBUS_TEST_INNER" ]; then
+    # shellcheck disable=SC2015  # intended: fail when either command is missing
     command -v dbus-run-session >/dev/null && command -v gdbus >/dev/null \
         || { echo "FAIL dbus-run-session and gdbus are needed"; exit 1; }
     work=$(mktemp -d)
@@ -49,6 +50,7 @@ fi
 work=$2; fails=0; pids=()
 check() { if [ "$1" = 0 ]; then printf 'PASS %s\n' "$2"; else printf 'FAIL %s\n' "$2"; fails=$((fails+1)); fi; }
 waitfor() { for _ in $(seq 75); do grep -qF -- "$1" "$2" 2>/dev/null && return 0; sleep 0.2; done; return 1; }
+# shellcheck disable=SC2329  # called by the EXIT trap
 cleanup() { for p in "${pids[@]}"; do kill -TERM "$p" 2>/dev/null; done; wait 2>/dev/null; }
 trap cleanup EXIT
 case "$DBUS_SESSION_BUS_ADDRESS" in
@@ -88,8 +90,7 @@ waitfor "window opened on $b" "$log"; check $? "…opens a window on the first f
 fm1 ShowItemProperties "['file://$a/one.txt', 'file://$b']" "" >/dev/null; check $? "ShowItemProperties"
 waitfor "info window for $a/one.txt" "$log" && waitfor "info window for $b" "$log"; check $? "…opens a Get Info window for each item"
 [ "$(ownerpid)" = "$first" ]; check $? "all of it in the one fm process"
-fm1 ShowItems "['sftp://example.org/x', 'file://$work/missing']" "" >/dev/null 2>&1
-[ $? != 0 ]; check $? "nothing local to show: the caller gets an error"
+! fm1 ShowItems "['sftp://example.org/x', 'file://$work/missing']" "" >/dev/null 2>&1; check $? "nothing local to show: the caller gets an error"
 fm1 ShowItems "['file://$a/.hidden']" "" >/dev/null; sleep 1.5
 ! grep -q "selected $a/.hidden" "$log"; check $? "a hidden file isn't selected while hidden files are off"
 
