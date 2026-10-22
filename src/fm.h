@@ -143,6 +143,7 @@ public:
     Q_INVOKABLE void deleteTagEverywhere(const QString &tag);
 
 Q_SIGNALS:
+    void newWindowRequested(const QString &dir);   // main() opens it in this process
     void undoChanged();
     void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
     void volumesChanged();

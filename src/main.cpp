@@ -11,6 +11,12 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QCryptographicHash>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QQmlComponent>
+#include <functional>
+#include <unistd.h>
 #include <QElapsedTimer>
 #include <QQuickItem>
 #include <cstdio>
@@ -44,16 +50,82 @@ int main(int argc, char *argv[])
                                                                              : QDir::homePath() + QStringLiteral("/.local/share/irixfm");
     }
 
-    QString start = app.arguments().value(1, QDir::homePath());
-    if (start.startsWith(QLatin1String("file://")))
-        start = QUrl(start).toLocalFile();
-    const QFileInfo startInfo(start);
-    start = startInfo.isDir() ? startInfo.absoluteFilePath() : startInfo.exists() ? startInfo.absolutePath() : QDir::homePath();
+    auto folderOf = [](QString start) {
+        if (start.startsWith(QLatin1String("file://")))
+            start = QUrl(start).toLocalFile();
+        const QFileInfo info(start);
+        return info.isDir() ? info.absoluteFilePath() : info.exists() ? info.absolutePath() : QDir::homePath();
+    };
+    const QString start = folderOf(app.arguments().value(1, QDir::homePath()));
+
+    // One fm process: launching fm again (dock, xdg-open, a terminal) hands the folder to the running
+    // one, which opens a window, instead of starting a second process (~200 MB more, and a second web
+    // profile on the same storage, which the first one has locked). The socket name includes this
+    // binary's path, so a development build and the installed one don't talk to each other.
+    // Benchmarks, snapshots and off-screen runs always run on their own (IRIXFM_SINGLE=1: test it anyway).
+    const bool alone = !qEnvironmentVariableIsSet("IRIXFM_SINGLE")
+        && (qEnvironmentVariableIsSet("IRIXFM_BENCH") || qEnvironmentVariableIsSet("IRIXFM_SNAPSHOT")
+            || QGuiApplication::platformName() == QLatin1String("offscreen"));
+    const QString serverName = QStringLiteral("irixfm-%1-%2").arg(getuid())
+        .arg(QString::fromLatin1(QCryptographicHash::hash(QCoreApplication::applicationFilePath().toUtf8(), QCryptographicHash::Md5).toHex().left(8)));
+    if (!alone) {
+        QLocalSocket other;
+        other.connectToServer(serverName);
+        if (other.waitForConnected(300)) {
+            other.write((app.arguments().size() < 2 ? QString() : start).toUtf8() + '\n');
+            other.waitForBytesWritten(300);
+            other.disconnectFromServer();
+            return 0;
+        }
+    }
 
     // Without a folder argument (dock, menu) the last session's tabs come back.
     Fm fm(start, assets, nullptr, app.arguments().size() < 2);
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Fm"), &fm);
+
+    // More windows: each has its own Fm (start folder, its window effects) in a child context.
+    QQmlComponent windowComponent(&engine, QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
+    std::function<void(const QString &)> openWindow = [&](const QString &dir) {
+        auto *wfm = new Fm(dir.isEmpty() ? QDir::homePath() : dir, assets, &app, false);
+        auto *ctx = new QQmlContext(engine.rootContext(), wfm);
+        ctx->setContextProperty(QStringLiteral("Fm"), wfm);
+        QObject *w = windowComponent.create(ctx);
+        if (!w) {
+            qWarning() << windowComponent.errorString();
+            delete wfm;
+            return;
+        }
+        QObject::connect(wfm, &Fm::newWindowRequested, &app, openWindow);
+        if (qEnvironmentVariableIsSet("IRIXFM_SINGLE"))
+            std::fprintf(stderr, "irixfm: window opened on %s\n", qPrintable(wfm->property("startDir").toString()));
+        // a closed window goes away with its Fm (the first one lives as long as fm does)
+        if (auto *qw = qobject_cast<QQuickWindow *>(w))
+            QObject::connect(qw, &QWindow::visibleChanged, wfm, [qw, wfm](bool visible) {
+                if (!visible) {
+                    qw->deleteLater();
+                    wfm->deleteLater();
+                }
+            });
+    };
+    QObject::connect(&fm, &Fm::newWindowRequested, &app, openWindow);
+    QLocalServer server;
+    if (!alone) {
+        QLocalServer::removeServer(serverName);   // a stale socket from a crashed fm
+        server.listen(serverName);
+        QObject::connect(&server, &QLocalServer::newConnection, &app, [&] {
+            while (QLocalSocket *c = server.nextPendingConnection()) {
+                QObject::connect(c, &QLocalSocket::readyRead, c, [c, &openWindow, folderOf] {
+                    if (!c->canReadLine())
+                        return;
+                    const QString dir = QString::fromUtf8(c->readLine()).trimmed();
+                    openWindow(dir.isEmpty() ? QDir::homePath() : folderOf(dir));
+                    c->disconnectFromServer();
+                });
+                QObject::connect(c, &QLocalSocket::disconnected, c, &QObject::deleteLater);
+            }
+        });
+    }
     QElapsedTimer clock;
     clock.start();
     engine.load(QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));

@@ -996,7 +996,7 @@ QString Fm::downloadTarget(const QString &fileName) const
 
 void Fm::newWindow(const QString &dir)
 {
-    QProcess::startDetached(QCoreApplication::applicationFilePath(), {dir});
+    Q_EMIT newWindowRequested(dir);   // a window in this process (one fm, one web profile)
 }
 
 void Fm::overview()

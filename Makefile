@@ -9,7 +9,7 @@ CXX      ?= g++
 BUILD    := build
 MOC      := $(shell pkg-config --variable=libexecdir Qt6Core 2>/dev/null || echo /usr/lib/qt6)/moc
 
-PKGS     := Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
+PKGS     := Qt6Network Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
 KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \
@@ -73,9 +73,11 @@ $(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.
 
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
 TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test
-test: $(TESTS)
+test: $(TESTS) $(BUILD)/irixfm
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
-	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; exit $$rc
+	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; \
+	echo "== single_instance_test"; tmp=$$(mktemp -d); XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache tests/single_instance_test.sh $(BUILD)/irixfm || rc=1; rm -rf $$tmp; \
+	exit $$rc
 
 icons:
 	python3 tools/make_icons.py
