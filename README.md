@@ -200,7 +200,10 @@ checking the look without touching the screen.
 
 ## Known limits
 
-- No licence file yet: pick one before publishing.
 - Plasma/KWin only: the blur and shadow use KDE protocols. Elsewhere the window is plain translucent.
 - No column view, no network browsing (Network opens Dolphin at `remote:/`).
 - Desks Overview triggers KWin's Overview effect.
+
+## Licence
+
+GPL-3.0-or-later (see [LICENSE](LICENSE)), like most KDE software. Copyright © 2026 Christian Meier.
