@@ -1,0 +1,38 @@
+# Maintainer: Christian Meier
+# Builds fm (irixfm) from the IrixGlass desktop release source tarball.
+# packaging/make-release.sh writes a copy with pkgver and sha256sums filled in as a release asset;
+# this template keeps SKIP so it can be checked with `makepkg --printsrcinfo` before a release.
+pkgname=irixfm
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="fm: IRIX Indigo Magic file manager with a macOS Tahoe glass look (KDE Plasma 6)"
+arch=('x86_64')
+url="https://github.com/christianmeier/irixglass-desktop"
+license=('GPL-3.0-or-later')
+depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-webengine' 'kio' 'kwindowsystem'
+         'kirigami' 'karchive' 'kconfig' 'kcoreaddons' 'kservice' 'solid' 'syntax-highlighting'
+         'kpty' 'libvterm' 'plasma-integration')
+makedepends=('pkgconf')
+_src="irixglass-desktop-${pkgver}"
+source=("${_src}.tar.gz::${url}/releases/download/v${pkgver}/${_src}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  make -C "${_src}/fm"
+}
+
+package() {
+  cd "${_src}/fm"
+  # fm looks for qml/ and icons/ next to its binary (or in ~/.local/share/irixfm), so they live
+  # together in /usr/lib/irixfm and /usr/bin/irixfm is a symlink (fm resolves /proc/self/exe).
+  install -Dm755 build/irixfm "${pkgdir}/usr/lib/irixfm/irixfm"
+  install -d "${pkgdir}/usr/lib/irixfm/qml" "${pkgdir}/usr/lib/irixfm/icons" "${pkgdir}/usr/bin"
+  install -m644 qml/*.qml "${pkgdir}/usr/lib/irixfm/qml/"
+  install -m644 icons/*.svg "${pkgdir}/usr/lib/irixfm/icons/"
+  ln -s ../lib/irixfm/irixfm "${pkgdir}/usr/bin/irixfm"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/irixfm/README.md"
+  install -Dm644 irixfm.desktop "${pkgdir}/usr/share/applications/irixfm.desktop"
+  sed 's|^Exec=irixfm|Exec=/usr/bin/irixfm|' org.freedesktop.FileManager1.service |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/dbus-1/services/org.freedesktop.FileManager1.service"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
