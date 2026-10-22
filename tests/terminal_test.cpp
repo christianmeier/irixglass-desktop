@@ -281,11 +281,38 @@ int main(int argc, char *argv[])
                 check(t->columns() < 180, QStringLiteral("(a 180-character line wraps at 12 pt)"), QString::number(t->columns()));
                 QTest::mouseClick(window, Qt::LeftButton, {}, home->mapToScene(QPointF(home->width() / 2, home->height() / 2)).toPoint());
                 QTest::qWait(600);
+                // (wrapped lines don't re-flow: libvterm's reflow aborts; printed again, it fits)
+                t->sendText(QStringLiteral("clear; printf '%0.s=' $(seq 1 180); echo\r"));
+                waitFor([&] { return t->screenText().contains(QString(180, QLatin1Char('='))); }, 3000);
                 check(t->columns() >= 181 && t->property("fontPointSize").toReal() < 12 && t->screenText().contains(QString(180, QLatin1Char('='))),
                       QStringLiteral("…and smaller, so the output fits without line breaks"),
                       QString::number(t->columns()) + " cols, " + QString::number(t->property("fontPointSize").toReal()) + " pt");
                 t->setFontSize(12);
                 t->forceActiveFocus();
+            }
+            // stress: random resizes (window and text size) while long lines wrap — libvterm's reflow
+            // used to abort the whole program here
+            {
+                t->sendText(QStringLiteral("clear; for i in $(seq 1 40); do printf '%0.s#' $(seq 1 $((RANDOM % 300))); echo; done\r"));
+                QTest::qWait(300);
+                const QSizeF orig = t->size();
+                quint32 seed = 12345;
+                auto rnd = [&](int n) { seed = seed * 1103515245 + 12345; return int((seed >> 16) % n); };
+                for (int i = 0; i < 300; ++i) {
+                    if (i % 3 == 0)
+                        t->setFontSize(6 + rnd(25));
+                    else
+                        t->setSize(QSizeF(40 + rnd(int(orig.width())), 30 + rnd(int(orig.height()))));
+                    if (i % 25 == 0) {
+                        t->sendText(QStringLiteral("printf '%0.s~' $(seq 1 250); echo\r"));
+                        QTest::qWait(30);
+                    }
+                    QCoreApplication::processEvents();
+                }
+                t->setSize(orig);
+                t->setFontSize(12);
+                t->sendText(QStringLiteral("clear; echo still-alive\r"));
+                check(waitFor([&] { return t->screenText().contains(QStringLiteral("still-alive")); }), QStringLiteral("300 random resizes while lines wrap: no crash"));
             }
             // two-finger touchpad scrolling: many small pixel deltas scroll back through the history
             {

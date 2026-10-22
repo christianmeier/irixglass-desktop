@@ -15,7 +15,11 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlComponent>
+#include <QPointer>
+#include <chrono>
+#include <cstdlib>
 #include <functional>
+#include <thread>
 #include <unistd.h>
 #include <QElapsedTimer>
 #include <QQuickItem>
@@ -86,6 +90,7 @@ int main(int argc, char *argv[])
 
     // More windows: each has its own Fm (start folder, its window effects) in a child context.
     QQmlComponent windowComponent(&engine, QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
+    QList<QPointer<QObject>> extraWindows;
     std::function<void(const QString &)> openWindow = [&](const QString &dir) {
         auto *wfm = new Fm(dir.isEmpty() ? QDir::homePath() : dir, assets, &app, false);
         auto *ctx = new QQmlContext(engine.rootContext(), wfm);
@@ -96,6 +101,7 @@ int main(int argc, char *argv[])
             delete wfm;
             return;
         }
+        extraWindows << w;
         QObject::connect(wfm, &Fm::newWindowRequested, &app, openWindow);
         if (qEnvironmentVariableIsSet("IRIXFM_SINGLE"))
             std::fprintf(stderr, "irixfm: window opened on %s\n", qPrintable(wfm->property("startDir").toString()));
@@ -188,5 +194,16 @@ int main(int argc, char *argv[])
             app.quit();
         });
     }
-    return app.exec();
+    const int rc = app.exec();
+    // Shutting down: windows (and their web tabs) go before the engine and QApplication, as Qt
+    // WebEngine's own clean-up waits for every web view to be gone. And if anything still hangs on
+    // the way out, end the process after 5 s (the settings are saved by then): fm processes from
+    // older builds hung in WebEngine's shutdown and stayed in the background, holding gigabytes.
+    for (const QPointer<QObject> &w : std::as_const(extraWindows))
+        delete w.data();
+    std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::_Exit(0);
+    }).detach();
+    return rc;
 }

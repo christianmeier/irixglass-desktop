@@ -14,7 +14,8 @@ sleep 1
 grep -q "window opened on $b" "$log"; check $? "…and the running fm opens a window on its folder"
 kill -0 $first 2>/dev/null; check $? "…which is still the one process"
 [ "$(pgrep -fc "$fm $b")" = 0 ]; check $? "no second fm process is left running"
-kill -TERM $first; wait $first 2>/dev/null
+t0=$(date +%s%N); kill -TERM $first; wait $first 2>/dev/null
+q=$(( ($(date +%s%N) - t0) / 1000000 )); [ $q -lt 6000 ]; check $? "SIGTERM: fm quits, with its second window ($q ms)"
 # after it quit, a launch starts a fresh fm (no stale socket in the way)
 IRIXFM_SINGLE=1 IRIXFM_ASSETS=$PWD QT_QPA_PLATFORM=offscreen $fm "$a" 2>"$log" & again=$!
 sleep 2

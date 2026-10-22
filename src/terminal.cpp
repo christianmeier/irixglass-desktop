@@ -143,7 +143,10 @@ TerminalView::TerminalView(QQuickItem *parent)
     vterm_screen_set_damage_merge(m_screen, VTERM_DAMAGE_SCROLL);
     vterm_screen_enable_altscreen(m_screen, 1);
     vterm_screen_reset(m_screen, 1);
-    vterm_screen_enable_reflow(m_screen, true);   // wrapped lines re-flow when the width changes
+    // No re-flow of wrapped lines on resize: libvterm 0.3.3's reflow aborts the whole program
+    // ("screen_resize failed to update cursor position") in cases no dry run caught reliably
+    // (user core dumps, 2026-10-21/22). New output uses the new width; the shell redraws its prompt.
+    vterm_screen_enable_reflow(m_screen, false);
 }
 
 TerminalView::~TerminalView()
@@ -424,64 +427,6 @@ void TerminalView::geometryChange(const QRectF &n, const QRectF &o)
         resizeTerminal();
 }
 
-// libvterm 0.3.3 aborts ("screen_resize failed to update cursor position") when re-flowing makes
-// the wrapped line the cursor ends in taller than the new screen: it drops off the top with the
-// cursor. This runs resize_buffer()'s row bookkeeping (screen.c) without moving any cells, so such
-// a resize can be done without reflow instead.
-bool TerminalView::reflowLosesCursor(int newRows, int newCols) const
-{
-    VTermState *state = vterm_obtain_state(m_vt);
-    VTermPos cursor;
-    vterm_state_get_cursorpos(state, &cursor);
-    auto continued = [&](int row) {
-        const VTermLineInfo *info = row >= 0 && row < m_rows ? vterm_state_get_lineinfo(state, row) : nullptr;
-        return info && info->continuation;
-    };
-    auto used = [&](int row) {   // libvterm's line_popcount
-        for (int col = m_cols - 1; col >= 0; --col) {
-            VTermScreenCell cell{};
-            vterm_screen_get_cell(m_screen, VTermPos{row, col}, &cell);
-            if (cell.chars[0])
-                return col + 1;
-        }
-        return 0;
-    };
-    int oldRow = m_rows - 1, newRow = newRows - 1, finalBlank = newRows, newCursor = -1;
-    while (oldRow >= 0) {
-        const int end = oldRow;
-        while (oldRow >= 0 && continued(oldRow))
-            --oldRow;
-        const int start = std::max(0, oldRow);
-        int width = 0;
-        for (int row = start; row <= end; ++row)
-            width += row < m_rows - 1 && continued(row + 1) ? m_cols : used(row);
-        if (finalBlank == newRow + 1 && width == 0)
-            finalBlank = newRow;
-        const int height = width ? (width + newCols - 1) / newCols : 1;
-        int newStart = newRow - height + 1;
-        const int spare = newRows - finalBlank;
-        if (newStart < 0 && spare >= 0 && (newCursor == -1 || newCursor - newStart < newRows)) {
-            const int down = std::min(-newStart, spare);   // scrolled down into the blank rows
-            newRow += down;
-            newStart += down;
-            if (newCursor >= 0)
-                newCursor += down;
-            finalBlank += down;
-        }
-        if (newStart < 0) {   // this line falls off the top
-            if (newCursor == -1 && start <= cursor.row && cursor.row < end)
-                newCursor = 0;
-            oldRow = start;
-            break;
-        }
-        if (cursor.row >= start && cursor.row <= end)
-            newCursor = newStart + std::min(height - 1, ((cursor.row - start) * m_cols + cursor.col) / newCols);
-        oldRow = start - 1;
-        newRow = newStart - 1;
-    }
-    return newCursor == -1 && cursor.row > oldRow;
-}
-
 void TerminalView::resizeTerminal()
 {
     if (width() < 1 || height() < 1 || !(m_cellW > 0) || !(m_cellH > 0))   // hidden / not laid out yet
@@ -490,12 +435,7 @@ void TerminalView::resizeTerminal()
     const int rows = std::clamp(int((height() - 6) / m_cellH), 3, 1000);
     if (cols != m_cols || rows != m_rows) {
         // Re-flow unless that would trip libvterm's abort (see above); the shell redraws anyway.
-        const bool noReflow = reflowLosesCursor(rows, cols);
-        if (noReflow)
-            vterm_screen_enable_reflow(m_screen, false);
         vterm_set_size(m_vt, rows, cols);
-        if (noReflow)
-            vterm_screen_enable_reflow(m_screen, true);
         m_cols = cols;
         m_rows = rows;
         vterm_screen_flush_damage(m_screen);

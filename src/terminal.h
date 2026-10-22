@@ -105,7 +105,6 @@ private:
     void updateMetrics();
     void resizeTerminal();
     void updateCells(int startRow, int startCol, int endRow, int endCol);
-    bool reflowLosesCursor(int newRows, int newCols) const;
     QRgb toRgb(const VTermColor &c, bool fg) const;
     quint32 glyphFor(int style, char32_t c) const;
     bool rowCells(int row, VTermScreenCell *out) const;
