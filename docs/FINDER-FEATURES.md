@@ -33,7 +33,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Show / hide sidebar (⌃⌘S) | ✅ Ctrl+Alt+S and the sidebar button, saved | | content slides left |
 | Recents | ⬜ | 3 | `~/.local/share/recently-used.xbel` |
 | Trash with Empty Trash / Put Back | ✅ sidebar, Empty (button, menu, Ctrl+Shift+Del), Put Back, Delete Immediately | | home trash folder + KIO restore / emptyTrash |
-| Removable drives and mounted volumes, Eject | ✅ in Locations, mount on click, ⏏ | | Solid |
+| Removable drives and mounted volumes, Eject | ✅ every device in Locations (USB, SD, discs, LUKS, phones, internal non-system partitions), mount on click, ⏏ = Safely Remove (unmount all, power off), Mount / Unmount, Get Info | | Solid + UDisks2 |
 | Network / servers (Connect to Server ⌘K) | 🟡 opens Dolphin | 3 | needs a KIO-based model (`KDirModel`) |
 | Tags section | ✅ see [TAGS.md](TAGS.md) | | `user.xdg.tags` xattr (Baloo-compatible) |
 | iCloud, AirDrop, Shared | ➖ | | (KDE Connect could stand in for AirDrop) |

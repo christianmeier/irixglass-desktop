@@ -154,8 +154,8 @@ See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation n
   folder; Put Back uses `KIO::restoreFromTrash` on `trash:/0-<name>`, Empty uses `KIO::emptyTrash`.
   Older saved sidebars get a Trash entry once (`trashAdded`). KIO won't trash files on tmpfs
   (`/tmp`); it asks to delete them instead.
-- **Drives** come from Solid (`Fm.volumes`): hot-pluggable or removable storage only. They're
-  appended to Locations at run time, not saved.
+- **Devices** come from Solid + UDisks2 (`Fm.volumes`, see Devices below). They're appended to
+  Locations at run time, not saved.
 - **Layout**: `sideShift` moves the toolbar when the sidebar is hidden (it keeps room for the traffic
   lights), `contentShift` moves the files, scope bar and status bar to the window's left edge so they
   use the whole width, and `previewW` makes room for the preview pane; all three are animated; the glass tint has holes for the sidebar and the preview pane.
@@ -321,6 +321,52 @@ preview pane shows the first 4 KB without pictures.
 - The window shadow's corner tiles reach `radius` into the window and the window shape is cut out
   of the shadow image, so the bottom corners (where the shadow is strongest) look like the top
   ones; the window and sidebar edges are also lit at the bottom (`EdgeRing.bottomAlpha`).
+
+### Devices
+
+Everything plugged in shows at the end of Locations (`Fm.volumes`, rows with `kind: "volume"` in
+`placeRows`). The code is the "Devices" part of `fm.cpp`.
+
+- **Listing**: `collectDevices()` makes one raw record (QVariantMap) per Solid `StorageAccess` on a
+  UDisks2 block device, plus every `PortableMediaPlayer` and `Camera`. What Solid doesn't say comes
+  from UDisks2 on the system bus (`Properties.GetAll`): the partition type GUID, `HintIgnore`,
+  `CryptoBackingDevice` (cached per udi) and `Encrypted.CleartextDevice` (unlocked or not).
+  `/org/kde/fstab/…` entries (network mounts) are left out. A burst of `deviceAdded` (a stick
+  brings its drive, table and partitions) is one refresh 150 ms later (`scheduleRefresh`);
+  `accessibilityChanged` refreshes on mounts done elsewhere.
+- **Filter**: `Fm::deviceRows(raw)` (static, unit-tested) drops ignored, loop, zram, swap and
+  LUKS-cleartext devices (the LUKS container is the row), anything that isn't a file system or a
+  LUKS container, partitions of type EFI / BIOS boot / MS reserved / Windows recovery / swap / LVM /
+  RAID, volumes mounted at a system place (`isSystemMount`: `/`, `/home`, `/boot…`, `/efi`, `/usr…`,
+  `/var…`, `/run…` except `/run/media`), and internal LUKS containers that are unlocked but not
+  mounted (LVM, the system). Plugged-in devices come first, then internal partitions. On this
+  laptop only "Windows" (NTFS, 134 GB) is left of the internal disk.
+- **Phones**: the URL is built like Dolphin's places (`KFilePlacesItem`): `mtp:udi=<udi>` for MTP,
+  otherwise `<protocol>://<udi's last part>/` (an iPhone: `afc://<udid>/`); cameras (PTP) get
+  `camera:/` (kio-extras' kamera, not installed here: the click shows a notice). `canBrowseUrl()`
+  checks `KProtocolInfo`. The URL goes to `openFolder()` like a folder: browsing it needs the KIO
+  list model of the views.
+- **Mount**: `mountVolume()` = `StorageAccess::setup()`. For LUKS, Solid itself asks for the
+  passphrase (kded's `soliduiserver` shows KDE's dialog), unlocks with UDisks and mounts the
+  cleartext device; `filePath()` of the container is the cleartext mount point. Internal partitions
+  ask polkit for the admin password (udisks' `filesystem-mount-system`).
+- **Unmount / Safely Remove**: `unmountVolume()` tears down one partition; `ejectVolume()` tears
+  down every mounted or unlocked partition of the same drive (one after the other; Solid locks a
+  LUKS container after unmounting it), then ejects a disc (`OpticalDrive::eject`) or calls UDisks2
+  `Drive.PowerOff` when `CanPowerOff` (Solid has no power off). An internal partition is only
+  unmounted. Signals: `volumeMounted`, `volumeUnmounted`, `volumeEjected(udi, label, how)`,
+  `volumeError`. The QML side (`ejectDevice`, `unmountDevice`) first calls `leaveVolumes(paths)`:
+  the active and other tabs, the split side and terminal shells inside go to the home folder. A
+  busy teardown is retried once after 0.9 s (the shell's `cd` takes a moment), then reported with
+  `blockers(path)`: the processes whose cwd or open files are on it (`/proc`, own processes only).
+  Nothing is ever forced.
+- **Without hardware**: `Fm::setFakeDevices(raw)` replaces Solid/UDisks with raw records (keys:
+  `udi drive label device fsType usage size mounted path removable optical driveType encrypted
+  unlocked cleartext ignored loop partType player camera protocols`, plus for the fakes `mountAt`,
+  `busy`, `failMount`); actions then only change the records and log `mount <udi>`,
+  `unmount <udi>`, `busy <udi>`, `poweroff <drive>`, `eject <drive>` (`deviceLog()`).
+  `tests/devices_test.cpp` uses it; `build/shot` can too (`Fm.setFakeDevices([...])` in the
+  expression) for screenshots. Real devices: `solid-hardware6 list details`, `udisksctl dump`.
 
 ### Sidebar sections
 
@@ -510,6 +556,10 @@ wallpaper to judge it, e.g.
 `magick bg.png -blur 0x30 -gravity center -crop WxH+0+0 +repage fm.png -composite out.png`.
 
 ## Gotchas
+
+- **Devices: never test Safely Remove on the user's real drives** (it powers them off). Use
+  `Fm::setFakeDevices` (Devices). The sidebar now also lists real internal partitions (here
+  "Windows"), so tests must not assume the number of Locations rows.
 
 - **QtQuick.Pdf + QtMultimedia in the start-up QML defeat the disk cache** (checksum mismatch on
   every start, see Performance): load such files by URL.

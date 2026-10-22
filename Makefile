@@ -10,7 +10,7 @@ CXX      ?= g++
 BUILD    := build
 MOC      := $(shell pkg-config --variable=libexecdir Qt6Core 2>/dev/null || echo /usr/lib/qt6)/moc
 
-PKGS     := Qt6Network Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
+PKGS     := Qt6DBus Qt6Network Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
 KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \
@@ -78,6 +78,9 @@ $(BUILD)/network_test: tests/network_test.cpp $(LIBSRC) src/fm.h src/terminal.h 
 $(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
 
+$(BUILD)/devices_test: tests/devices_test.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/devices_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+
 # Dev tools (tools/*.cpp, usage at the top of each file and in CLAUDE.md); not in TESTS.
 $(BUILD)/shot: tools/shot.cpp $(LIBSRC) src/fm.h src/terminal.h
 	$(CXX) $(CXXFLAGS) -Isrc tools/shot.cpp $(LIBSRC) -o $@ $(LDLIBS)
@@ -88,7 +91,7 @@ $(BUILD)/leak: tools/leak.cpp $(LIBSRC) src/fm.h src/terminal.h
 tools: $(BUILD)/shot $(BUILD)/leak
 
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test $(BUILD)/network_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/devices_test $(BUILD)/terminal_test $(BUILD)/browser_test $(BUILD)/network_test
 test: $(TESTS) $(BUILD)/irixfm
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; \
