@@ -1,0 +1,18 @@
+/* IrixGlass for Firefox's own pages (about:preferences, about:addons, new tab, …):
+ * fm's palette over WhiteSur's. Installed as chrome/userContent-irixglass.css and
+ * imported last from chrome/userContent.css. Web pages are not touched. */
+@media (prefers-color-scheme: dark) {
+  :root {
+	--gnome-browser-before-load-background: #181a22 !important;
+	--gnome-content-page-background: #181a22 !important;
+	--gnome-content-box-background: #23252f !important;
+	--gnome-content-page-dialog-background: #23252f !important;
+	--theme-primary-color: #0a84ff !important;
+	--theme-primary-hover-color: #409cff !important;
+	--theme-primary-active-color: #0060df !important;
+	--gnome-switch-pressed-background: #0a84ff !important;
+	--gnome-button-background: linear-gradient(#292c36, #292c36) !important;
+	--gnome-button-hover-background: linear-gradient(#31343f, #31343f) !important;
+	--focus-outline-color: rgba(10, 132, 255, 0.85) !important;
+  }
+}

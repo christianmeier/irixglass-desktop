@@ -1,0 +1,8 @@
+{
+  "id": "nord",
+  "name": "Nord (Alacritty)",
+  "author": "IrixGlass desktop",
+  "version": "1.0.0",
+  "description": "Nord palette matching ~/.config/alacritty/alacritty.toml. Use with Teams dark mode.",
+  "css": "theme.css"
+}

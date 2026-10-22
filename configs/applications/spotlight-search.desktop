@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Search
+Comment=Spotlight-style search (KRunner)
+Exec=krunner
+Icon=system-search-symbolic
+NoDisplay=true

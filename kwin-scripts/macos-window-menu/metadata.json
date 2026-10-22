@@ -1,0 +1,12 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Name": "IrixGlass desktop" }],
+        "Description": "macOS-style Move & Resize / Arrange menu in the window menu",
+        "Icon": "preferences-system-windows",
+        "Id": "macos-window-menu",
+        "License": "GPL",
+        "Name": "macOS Window Menu"
+    },
+    "X-Plasma-API": "javascript"
+}

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Trash
+Comment=Open the Trash
+Exec=dolphin trash:/
+Icon=@HOME@/.local/share/icons/WhiteSur/places/scalable/user-trash.svg
+NoDisplay=true

@@ -1,0 +1,11 @@
+[General]
+ActivateWhenTypingOnDesktop=true
+FreeFloating=true
+
+[Plugins]
+baloosearchEnabled=true
+krunner_servicesEnabled=true
+locationsEnabled=true
+
+[Plugins][Favorites]
+plugins=krunner_services,baloosearch

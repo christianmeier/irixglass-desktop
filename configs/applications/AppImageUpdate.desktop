@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=AppImageUpdate
+Type=Application
+Icon=appimageupdate
+Exec=@HOME@/Applications/AppImageUpdate/AppImageUpdate-x86_64.AppImage %f
+MimeType=application/vnd.appimage;application/x-iso9660-appimage;
+Comment=Update applications distributed in AppImage format
+Categories=Utility;

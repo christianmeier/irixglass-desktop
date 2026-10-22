@@ -1,0 +1,117 @@
+/*
+ * Nord theme for teams-for-linux, matching ~/.config/alacritty/alacritty.toml.
+ * Overrides Fluent UI v9 design tokens used by Teams v2.
+ * Enable Teams' own dark mode (Settings > Appearance) for best results.
+ *
+ * Polar Night: #2E3440 #3B4252 #434C5E #4C566A
+ * Snow Storm:  #D8DEE9 #E5E9F0 #ECEFF4
+ * Frost:       #8FBCBB #88C0D0 #81A1C1 #5E81AC
+ * Aurora:      #BF616A #D08770 #EBCB8B #A3BE8C #B48EAD
+ */
+
+:root,
+.fui-FluentProvider,
+[class*="fui-FluentProvider"] {
+  /* Backgrounds */
+  --colorNeutralBackground1: #2E3440 !important;
+  --colorNeutralBackground1Hover: #3B4252 !important;
+  --colorNeutralBackground1Pressed: #434C5E !important;
+  --colorNeutralBackground1Selected: #3B4252 !important;
+  --colorNeutralBackground2: #2B303B !important;
+  --colorNeutralBackground2Hover: #3B4252 !important;
+  --colorNeutralBackground2Pressed: #434C5E !important;
+  --colorNeutralBackground2Selected: #3B4252 !important;
+  --colorNeutralBackground3: #272C36 !important;
+  --colorNeutralBackground3Hover: #3B4252 !important;
+  --colorNeutralBackground3Pressed: #434C5E !important;
+  --colorNeutralBackground3Selected: #3B4252 !important;
+  --colorNeutralBackground4: #242933 !important;
+  --colorNeutralBackground5: #21252E !important;
+  --colorNeutralBackground6: #3B4252 !important;
+  --colorNeutralBackgroundInverted: #ECEFF4 !important;
+  --colorNeutralBackgroundStatic: #3B4252 !important;
+  --colorSubtleBackgroundHover: #3B4252 !important;
+  --colorSubtleBackgroundPressed: #434C5E !important;
+  --colorSubtleBackgroundSelected: #3B4252 !important;
+  --colorNeutralCardBackground: #3B4252 !important;
+  --colorNeutralCardBackgroundHover: #434C5E !important;
+  --colorNeutralCardBackgroundPressed: #4C566A !important;
+  --colorNeutralCardBackgroundSelected: #434C5E !important;
+
+  /* Foregrounds */
+  --colorNeutralForeground1: #ECEFF4 !important;
+  --colorNeutralForeground1Hover: #ECEFF4 !important;
+  --colorNeutralForeground1Pressed: #ECEFF4 !important;
+  --colorNeutralForeground1Selected: #ECEFF4 !important;
+  --colorNeutralForeground2: #D8DEE9 !important;
+  --colorNeutralForeground2Hover: #ECEFF4 !important;
+  --colorNeutralForeground2Pressed: #ECEFF4 !important;
+  --colorNeutralForeground2Selected: #ECEFF4 !important;
+  --colorNeutralForeground3: #B6BECC !important;
+  --colorNeutralForeground4: #8C96A8 !important;
+  --colorNeutralForegroundDisabled: #616E88 !important;
+  --colorNeutralForegroundInverted: #2E3440 !important;
+
+  /* Strokes */
+  --colorNeutralStroke1: #4C566A !important;
+  --colorNeutralStroke1Hover: #5A657B !important;
+  --colorNeutralStroke1Pressed: #616E88 !important;
+  --colorNeutralStroke2: #434C5E !important;
+  --colorNeutralStroke3: #3B4252 !important;
+  --colorNeutralStrokeAccessible: #81A1C1 !important;
+
+  /* Brand / accent (Frost) */
+  --colorBrandBackground: #5E81AC !important;
+  --colorBrandBackgroundHover: #81A1C1 !important;
+  --colorBrandBackgroundPressed: #4C6E99 !important;
+  --colorBrandBackgroundSelected: #5E81AC !important;
+  --colorBrandBackground2: #3B4252 !important;
+  --colorCompoundBrandBackground: #88C0D0 !important;
+  --colorCompoundBrandBackgroundHover: #8FBCBB !important;
+  --colorCompoundBrandBackgroundPressed: #81A1C1 !important;
+  --colorBrandForeground1: #88C0D0 !important;
+  --colorBrandForeground2: #8FBCBB !important;
+  --colorBrandForegroundLink: #88C0D0 !important;
+  --colorBrandForegroundLinkHover: #8FBCBB !important;
+  --colorNeutralForeground2BrandHover: #88C0D0 !important;
+  --colorNeutralForeground2BrandSelected: #88C0D0 !important;
+  --colorNeutralForeground3BrandHover: #88C0D0 !important;
+  --colorNeutralForeground3BrandSelected: #88C0D0 !important;
+  --colorCompoundBrandForeground1: #88C0D0 !important;
+  --colorCompoundBrandStroke: #88C0D0 !important;
+  --colorBrandStroke1: #88C0D0 !important;
+  --colorBrandStroke2: #5E81AC !important;
+  --colorStrokeFocus2: #88C0D0 !important;
+
+  /* Status (Aurora) */
+  --colorPaletteRedBackground3: #BF616A !important;
+  --colorPaletteRedForeground1: #BF616A !important;
+  --colorPaletteGreenBackground3: #A3BE8C !important;
+  --colorPaletteGreenForeground1: #A3BE8C !important;
+  --colorPaletteYellowBackground3: #EBCB8B !important;
+  --colorPaletteYellowForeground1: #EBCB8B !important;
+  --colorPaletteDarkOrangeBackground3: #D08770 !important;
+  --colorPaletteBerryForeground1: #B48EAD !important;
+  --colorStatusDangerForeground1: #BF616A !important;
+  --colorStatusSuccessForeground1: #A3BE8C !important;
+  --colorStatusWarningForeground1: #EBCB8B !important;
+}
+
+body {
+  background-color: #2E3440 !important;
+  color: #D8DEE9 !important;
+}
+
+::selection {
+  background: #4C566A !important;
+  color: #ECEFF4 !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar-thumb {
+  background-color: #4C566A !important;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background-color: #2E3440 !important;
+}

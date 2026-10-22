@@ -1,0 +1,22 @@
+#%PAM-1.0
+# Plasma Login with password OR fingerprint (overrides /usr/lib/pam.d/plasmalogin).
+# A typed password is checked first; an empty password + Enter falls through to the fingerprint reader.
+auth        [success=1 new_authtok_reqd=1 default=ignore] pam_unix.so try_first_pass likeauth nullok
+auth        sufficient  pam_fprintd.so
+
+# SPDX-License-Identifier: CC0-1.0
+# SPDX-FileCopyrightText: none
+
+auth        include     system-login
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+
+account     include     system-login
+
+password    include     system-login
+-password   optional    pam_gnome_keyring.so    use_authtok
+
+session     optional    pam_keyinit.so          force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so    auto_start
+-session    optional    pam_kwallet5.so         auto_start

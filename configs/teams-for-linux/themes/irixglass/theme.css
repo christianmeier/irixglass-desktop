@@ -1,0 +1,126 @@
+/*
+ * IrixGlass theme for teams-for-linux: fm's look (~/CODE/irixfm), like the
+ * IrixGlass KDE colour scheme, Kvantum theme and Firefox customChrome.css.
+ * Overrides Fluent UI v9 design tokens used by Teams v2. Use Teams' dark mode.
+ *
+ * glass #1e2029 (fm's rgb(20,22,29) @ .62 over the wallpaper), views #181a22,
+ * pills #292c36, selection white .16 -> #363842, accent #0a84ff,
+ * macOS dark status colours. Corners rounder than Fluent's, as in fm.
+ */
+
+:root,
+.fui-FluentProvider,
+[class*="fui-FluentProvider"] {
+  /* Backgrounds */
+  --colorNeutralBackground1: #1e2029 !important;
+  --colorNeutralBackground1Hover: #292c36 !important;
+  --colorNeutralBackground1Pressed: #31343f !important;
+  --colorNeutralBackground1Selected: #363842 !important;
+  --colorNeutralBackground2: #1b1d25 !important;
+  --colorNeutralBackground2Hover: #292c36 !important;
+  --colorNeutralBackground2Pressed: #31343f !important;
+  --colorNeutralBackground2Selected: #363842 !important;
+  --colorNeutralBackground3: #181a22 !important;
+  --colorNeutralBackground3Hover: #292c36 !important;
+  --colorNeutralBackground3Pressed: #31343f !important;
+  --colorNeutralBackground3Selected: #363842 !important;
+  --colorNeutralBackground4: #16181f !important;
+  --colorNeutralBackground5: #14161c !important;
+  --colorNeutralBackground6: #292c36 !important;
+  --colorNeutralBackgroundInverted: #f2f2f7 !important;
+  --colorNeutralBackgroundStatic: #292c36 !important;
+  --colorSubtleBackgroundHover: #292c36 !important;
+  --colorSubtleBackgroundPressed: #31343f !important;
+  --colorSubtleBackgroundSelected: #363842 !important;
+  --colorNeutralCardBackground: #23252f !important;
+  --colorNeutralCardBackgroundHover: #292c36 !important;
+  --colorNeutralCardBackgroundPressed: #31343f !important;
+  --colorNeutralCardBackgroundSelected: #363842 !important;
+
+  /* Foregrounds */
+  --colorNeutralForeground1: #ffffff !important;
+  --colorNeutralForeground1Hover: #ffffff !important;
+  --colorNeutralForeground1Pressed: #ffffff !important;
+  --colorNeutralForeground1Selected: #ffffff !important;
+  --colorNeutralForeground2: #e4e5ea !important;
+  --colorNeutralForeground2Hover: #ffffff !important;
+  --colorNeutralForeground2Pressed: #ffffff !important;
+  --colorNeutralForeground2Selected: #ffffff !important;
+  --colorNeutralForeground3: #a3a6b0 !important;
+  --colorNeutralForeground4: #80838d !important;
+  --colorNeutralForegroundDisabled: #5b5e68 !important;
+  --colorNeutralForegroundInverted: #1e2029 !important;
+
+  /* Strokes: fm's faint white edges */
+  --colorNeutralStroke1: #3a3d48 !important;
+  --colorNeutralStroke1Hover: #464a56 !important;
+  --colorNeutralStroke1Pressed: #4f5360 !important;
+  --colorNeutralStroke2: #2e313b !important;
+  --colorNeutralStroke3: #262832 !important;
+  --colorNeutralStrokeAccessible: #8a8d97 !important;
+
+  /* Brand / accent: fm blue */
+  --colorBrandBackground: #0a84ff !important;
+  --colorBrandBackgroundHover: #409cff !important;
+  --colorBrandBackgroundPressed: #0060df !important;
+  --colorBrandBackgroundSelected: #0a84ff !important;
+  --colorBrandBackground2: #1c2c44 !important;
+  --colorCompoundBrandBackground: #0a84ff !important;
+  --colorCompoundBrandBackgroundHover: #409cff !important;
+  --colorCompoundBrandBackgroundPressed: #0060df !important;
+  --colorBrandForeground1: #409cff !important;
+  --colorBrandForeground2: #66b0ff !important;
+  --colorBrandForegroundLink: #409cff !important;
+  --colorBrandForegroundLinkHover: #66b0ff !important;
+  --colorNeutralForeground2BrandHover: #409cff !important;
+  --colorNeutralForeground2BrandSelected: #409cff !important;
+  --colorNeutralForeground3BrandHover: #409cff !important;
+  --colorNeutralForeground3BrandSelected: #409cff !important;
+  --colorCompoundBrandForeground1: #409cff !important;
+  --colorCompoundBrandStroke: #0a84ff !important;
+  --colorBrandStroke1: #0a84ff !important;
+  --colorBrandStroke2: #0060df !important;
+  --colorStrokeFocus2: rgba(10, 132, 255, 0.85) !important;
+
+  /* Status: macOS dark system colours */
+  --colorPaletteRedBackground3: #ff453a !important;
+  --colorPaletteRedForeground1: #ff6961 !important;
+  --colorPaletteGreenBackground3: #30d158 !important;
+  --colorPaletteGreenForeground1: #30d158 !important;
+  --colorPaletteYellowBackground3: #ffd60a !important;
+  --colorPaletteYellowForeground1: #ffd60a !important;
+  --colorPaletteDarkOrangeBackground3: #ff9f0a !important;
+  --colorPaletteBerryForeground1: #bf5af2 !important;
+  --colorStatusDangerForeground1: #ff6961 !important;
+  --colorStatusSuccessForeground1: #30d158 !important;
+  --colorStatusWarningForeground1: #ffd60a !important;
+
+  /* fm's rounder corners */
+  --borderRadiusMedium: 8px !important;
+  --borderRadiusLarge: 10px !important;
+  --borderRadiusXLarge: 14px !important;
+}
+
+body {
+  background-color: #1e2029 !important;
+  color: #e4e5ea !important;
+}
+
+::selection {
+  background: rgba(10, 132, 255, 0.45) !important;
+  color: #ffffff !important;
+}
+
+/* Scrollbars: fm's thin round glass thumbs */
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.35) !important;
+}
+::-webkit-scrollbar-track {
+  background-color: transparent !important;
+}

@@ -1,0 +1,297 @@
+/* IrixGlass for Firefox: fm's look (~/CODE/irixfm) on top of the WhiteSur theme.
+ * Installed as chrome/customChrome.css, which WhiteSur's userChrome.css imports last.
+ * Firefox draws its own title bar (tabs in titlebar), so KWin's IrixGlass decoration
+ * doesn't reach it; this file repeats the look in CSS.
+ * fm values (qml/Main.qml, Pill.qml, EdgeRing.qml, TrafficLights.qml):
+ *   glass rgb(20,22,29) @ .62 over the blurred wallpaper  ->  about #1e2029
+ *   pills rgba(58,61,72,.40), fully rounded, with an edge ring brightest at the top
+ *   accent #0a84ff, focus ring 2px #0a84ff @ .85, 22 px window corners
+ *   traffic lights #ff5f57 #febc2e #28c840, 13.3 px, 26 px apart, glyphs on hover
+ * Firefox can't blur what's behind it, so the glass is opaque here. */
+
+:root {
+	--irix-glass: #1e2029;
+	--irix-glass-inactive: #1b1d25;
+	--irix-view: #181a22;                 /* IrixGlass.colors "View" (24,26,34) */
+	--irix-pill: #292c36;                 /* fm pill tint over the glass */
+	--irix-pill-hover: #31343f;
+	--irix-tab: #363842;                  /* fm active tab: white .12 over the glass */
+	--irix-accent: #0a84ff;
+	--irix-focus: rgba(10, 132, 255, 0.85);
+	--irix-line: rgba(255, 255, 255, 0.08);
+	/* fm's EdgeRing: white .65 at the top -> .10 -> .16 at the bottom */
+	--irix-ring: linear-gradient(rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.10) 25%,
+	                             rgba(255, 255, 255, 0.10) 75%, rgba(255, 255, 255, 0.16));
+	--irix-ring-soft: linear-gradient(rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.08) 30%,
+	                                  rgba(255, 255, 255, 0.08) 70%, rgba(255, 255, 255, 0.12));
+	--irix-menu: rgba(30, 32, 41, 0.97);
+}
+
+/* WhiteSur's palette, moved to fm's. */
+@media (prefers-color-scheme: dark) {
+  :root {
+	--gnome-browser-before-load-background: var(--irix-view) !important;
+	--gnome-content-page-background: var(--irix-view) !important;
+	--gnome-content-box-background: #23252f !important;
+	--gnome-content-page-dialog-background: #2a2d38 !important;
+	--theme-primary-color: var(--irix-accent) !important;
+	--theme-primary-hover-color: #409cff !important;
+	--theme-primary-active-color: #0060df !important;
+
+	--gnome-toolbar-background: var(--irix-glass) !important;
+	--gnome-tabstoolbar-background: var(--irix-glass) !important;
+	--gnome-headerbar-background: var(--irix-glass) !important;
+	--gnome-findbar-background: var(--irix-glass) !important;
+	--gnome-inactive-toolbar-background: var(--irix-glass-inactive) !important;
+	--gnome-inactive-headerbar-background: var(--irix-glass-inactive) !important;
+	--gnome-toolbar-border-color: #111219 !important;
+	--gnome-headerbar-box-shadow: none !important;
+	--gnome-inactive-headerbar-box-shadow: none !important;
+
+	--sidebar-background-color: var(--irix-glass) !important;
+	--gnome-sidebar-background: var(--irix-glass) !important;
+	--gnome-inactive-sidebar-background: var(--irix-glass-inactive) !important;
+	--gnome-sidebar-border-color: var(--irix-line) !important;
+
+	--gnome-menu-background: var(--irix-menu) !important;
+	--gnome-popover-background: var(--irix-menu) !important;
+	--gnome-menu-border-color: rgba(255, 255, 255, 0.14) !important;
+	--gnome-popover-border-color: rgba(255, 255, 255, 0.14) !important;
+	--gnome-popover-shadow: 0 10px 30px rgba(0, 0, 0, 0.45) !important;
+	--gnome-popover-button-hover-background: rgba(255, 255, 255, 0.10) !important;
+	--gnome-popover-button-active-background: rgba(255, 255, 255, 0.16) !important;
+
+	--gnome-button-background: linear-gradient(var(--irix-pill), var(--irix-pill)) !important;
+	--gnome-button-hover-background: linear-gradient(var(--irix-pill-hover), var(--irix-pill-hover)) !important;
+	--gnome-button-active-background: linear-gradient(#3a3d49, #3a3d49) !important;
+	--gnome-inactive-button-background: linear-gradient(var(--irix-pill), var(--irix-pill)) !important;
+	--gnome-button-border-color: rgba(255, 255, 255, 0.10) !important;
+	--gnome-button-border-bottom-color: rgba(255, 255, 255, 0.10) !important;
+	--gnome-button-box-shadow: inset 0 1px rgba(255, 255, 255, 0.22) !important;
+	--gnome-button-suggested-action-background: linear-gradient(var(--irix-accent), var(--irix-accent)) !important;
+	--gnome-button-suggested-action-hover-background: linear-gradient(#409cff, #409cff) !important;
+	--gnome-button-suggested-action-active-background: linear-gradient(#0060df, #0060df) !important;
+	--gnome-headerbar-button-hover-background: rgba(255, 255, 255, 0.08) !important;
+	--gnome-headerbar-button-active-background: rgba(255, 255, 255, 0.16) !important;
+
+	--gnome-urlbar-background: var(--irix-pill) !important;
+	--gnome-inactive-urlbar-background: var(--irix-pill) !important;
+	--gnome-urlbar-border-color: rgba(255, 255, 255, 0.10) !important;
+	--gnome-focused-urlbar-border-color: var(--irix-focus) !important;
+	--gnome-focused-urlbar-highlight-color: var(--irix-accent) !important;
+
+	--gnome-tabbar-tab-color: rgba(255, 255, 255, 0.55) !important;
+	--gnome-tabbar-tab-hover-color: rgba(255, 255, 255, 0.85) !important;
+	--gnome-tabbar-tab-active-color: #ffffff !important;
+	--gnome-inactive-tabbar-tab-color: rgba(255, 255, 255, 0.40) !important;
+	--gnome-inactive-tabbar-tab-active-color: rgba(255, 255, 255, 0.70) !important;
+	--gnome-tab-attention-icon-color: var(--irix-accent) !important;
+
+	--gnome-switch-background: var(--irix-pill) !important;
+	--gnome-switch-pressed-background: var(--irix-accent) !important;
+	--gnome-switch-pressed-hover-background: #409cff !important;
+	--gnome-switch-pressed-active-background: #0060df !important;
+
+	--focus-outline-color: var(--irix-focus) !important;
+	--urlbarView-highlight-background: var(--irix-accent) !important;
+	--urlbarView-highlight-color: #ffffff !important;
+  }
+}
+
+/* ---- Window: fm's 22 px corners and edge ring (KWin draws the shadow) ---- */
+:root[sizemode="normal"]:not([gtktiledwindow="true"]) {
+	#nav-bar {
+		border-top-left-radius: 22px !important;
+		border-top-right-radius: 22px !important;
+	}
+	body, dialog, body::backdrop, dialog::backdrop {
+		border-radius: 22px !important;
+	}
+	/* The ring lies over everything, page included, and lets clicks through. */
+	body::after {
+		content: "";
+		position: fixed;
+		inset: 0;
+		z-index: 2147483647;
+		pointer-events: none;
+		border: 1.34px solid transparent;    /* 2 device px at 150 %, like fm's 1.2 px ring */
+		border-radius: 22px;
+		background: var(--irix-ring) border-box;
+		mask: linear-gradient(#000 0 0) padding-box exclude, linear-gradient(#000 0 0);
+	}
+	&:-moz-window-inactive body::after { opacity: .6; }
+}
+
+/* One continuous glass from the title bar to the page, no grey bands. */
+#TabsToolbar { box-shadow: none !important; }
+#navigator-toolbox { border-bottom-color: #0f1016 !important; }
+
+/* ---- Traffic lights (fm's TrafficLights.qml); #navigator-toolbox outranks WhiteSur ---- */
+/* Placed exactly like fm's (and every other window's): first centre 30 px from the window's left
+   edge and 31 px from its top, 26 px apart, in a bar as tall as fm's toolbar row (62 px). */
+#navigator-toolbox #nav-bar {
+	min-height: 62px !important;
+	.titlebar-buttonbox-container {
+		padding: 0 !important;
+		left: 17px !important;
+		top: 0 !important;
+	}
+	.titlebar-button {
+		width: 13.333px !important;
+		height: 13.333px !important;
+		min-width: 0 !important;
+		min-height: 0 !important;
+		padding: 0 !important;
+		margin: 24.333px 6.333px !important;    /* 26 px apart; centre 24.333 + 6.667 = 31 px down */
+		border-radius: 50% !important;
+		box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, 0.25) !important;
+		background: none no-repeat center / 100% !important;
+	}
+	/* grey all the time (the user's choice); glyphs on hover in the active window */
+	:is(.titlebar-close, .titlebar-min, .titlebar-max, .titlebar-restore) { background-color: rgba(255, 255, 255, 0.22) !important; }
+	.titlebar-buttonbox:hover {
+		.titlebar-close { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M11.2 11.2L28.8 28.8M28.8 11.2L11.2 28.8' stroke='%23000' stroke-opacity='.6' stroke-width='3.9' stroke-linecap='round'/%3E%3C/svg%3E") !important; }
+		.titlebar-min { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M9.44 20H30.56' stroke='%23000' stroke-opacity='.6' stroke-width='3.9' stroke-linecap='round'/%3E%3C/svg%3E") !important; }
+		:is(.titlebar-max, .titlebar-restore) { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M9.44 20H30.56M20 9.44V30.56' stroke='%23000' stroke-opacity='.6' stroke-width='3.9' stroke-linecap='round'/%3E%3C/svg%3E") !important; }
+	}
+	.titlebar-button:active { filter: brightness(.8); }
+	/* macOS: grey lights on inactive windows, also under the mouse (no glyphs) */
+	&:-moz-window-inactive .titlebar-button {
+		background-image: none !important;
+		background-color: rgba(255, 255, 255, 0.22) !important;
+	}
+}
+/* Room for the lights: they end at 17 + 3 x 26 = 95 px */
+@media (-moz-gtk-csd-reversed-placement) {
+	:root:not([inFullscreen]) #navigator-toolbox #nav-bar { padding-left: 104px !important; }
+}
+
+/* ---- Header bar buttons: clear, with a round soft highlight like fm ---- */
+#nav-bar #nav-bar-customization-target toolbarbutton.toolbarbutton-1 {
+	border-radius: 999px !important;
+}
+:root:-moz-window-inactive #nav-bar #nav-bar-customization-target toolbarbutton.toolbarbutton-1 {
+	background: none !important;
+	box-shadow: none !important;
+}
+/* Back and forward share one pill, as in fm's toolbar. */
+#nav-bar #nav-bar-customization-target > :is(#back-button, #forward-button) {
+	border: 1px solid transparent !important;
+	background: linear-gradient(var(--irix-pill), var(--irix-pill)) padding-box,
+	            var(--irix-ring) border-box !important;
+	min-width: 40px !important;
+}
+#nav-bar #nav-bar-customization-target > :is(#back-button, #forward-button):not([disabled]):hover {
+	background: linear-gradient(var(--irix-pill-hover), var(--irix-pill-hover)) padding-box,
+	            var(--irix-ring) border-box !important;
+}
+#nav-bar #nav-bar-customization-target > #back-button:has(+ #forward-button) {
+	border-right: none !important;
+	border-radius: 999px 0 0 999px !important;
+	margin-right: 0 !important;
+}
+#nav-bar #nav-bar-customization-target > #back-button + #forward-button {
+	border-left: none !important;
+	border-radius: 0 999px 999px 0 !important;
+	margin-left: 0 !important;
+}
+
+/* ---- URL bar and search field: fm's toolbar pills ---- */
+#nav-bar #urlbar .urlbar-input-container,
+#nav-bar #nav-bar-customization-target #searchbar {
+	border: 1px solid transparent !important;
+	border-radius: 999px !important;
+	background: linear-gradient(var(--irix-pill), var(--irix-pill)) padding-box,
+	            var(--irix-ring) border-box !important;
+	box-shadow: none !important;
+}
+#nav-bar #urlbar:not([focused]) .urlbar-input-container:hover,
+#nav-bar #nav-bar-customization-target #searchbar:hover:not(:focus-within) {
+	background: linear-gradient(var(--irix-pill-hover), var(--irix-pill-hover)) padding-box,
+	            var(--irix-ring) border-box !important;
+}
+#nav-bar #urlbar[focused] .urlbar-input-container,
+#nav-bar #nav-bar-customization-target #searchbar:focus-within {
+	box-shadow: 0 0 0 2px var(--irix-focus) !important;
+}
+#urlbar[breakout][breakout-extend] {
+	outline: none !important;
+	border-radius: 999px !important;
+}
+#urlbar :is(#urlbar-searchmode-switcher, #identity-icon-box, #identity-permission-box, #tracking-protection-icon-container,
+            .urlbar-page-action, #star-button-box) {
+	border-radius: 999px !important;
+}
+.urlbarView {
+	border-radius: 16px !important;
+	border-color: rgba(255, 255, 255, 0.14) !important;
+	border-top-color: rgba(255, 255, 255, 0.30) !important;
+}
+.urlbarView-row { border-radius: 8px !important; }
+
+/* ---- Tabs: fm-style pills on the glass ---- */
+#TabsToolbar {
+	.tabbrowser-tab { border-left: none !important; }
+	#pinned-tabs-container { border-right: none !important; }
+	#tabbrowser-tabs .tabbrowser-tab .tab-background {
+		margin: 3px 2px !important;
+		border: 1px solid transparent !important;
+		border-radius: 999px !important;
+		background: transparent !important;
+		box-shadow: none !important;
+	}
+	#tabbrowser-tabs .tabbrowser-tab:not([selected]):hover .tab-background {
+		background: rgba(255, 255, 255, 0.06) !important;
+	}
+	#tabbrowser-tabs .tabbrowser-tab .tab-background:is([selected], [multiselected]) {
+		background: linear-gradient(var(--irix-tab), var(--irix-tab)) padding-box,
+		            var(--irix-ring-soft) border-box !important;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.30) !important;
+	}
+	#tabbrowser-tabs .tabbrowser-tab .tab-background[selected]:-moz-window-inactive {
+		background: linear-gradient(#30323b, #30323b) padding-box,
+		            var(--irix-ring-soft) border-box !important;
+	}
+	/* New tab / all tabs: no separators, round hover */
+	.toolbarbutton-1:not(#_) { border-left: none !important; }
+	.toolbarbutton-1 > :is(.toolbarbutton-icon, .toolbarbutton-badge-stack) {
+		border-radius: 999px !important;
+		transform: scale(.82);
+	}
+	.toolbarbutton-1:not(#_):hover { background: none !important; }
+	.toolbarbutton-1:hover > :is(.toolbarbutton-icon, .toolbarbutton-badge-stack) {
+		background: rgba(255, 255, 255, 0.10) !important;
+	}
+}
+.tab-close-button { border-radius: 999px !important; }
+
+/* ---- Menus and panels: fm glass with a top-lit edge; macOS blue highlight in menus ---- */
+menupopup, panel {
+	--panel-border-radius: 12px !important;
+	--panel-shadow: var(--gnome-popover-shadow), 0 0 0 1px rgba(255, 255, 255, 0.14),
+	                inset 0 1px rgba(255, 255, 255, 0.22) !important;
+}
+menupopup :is(menuitem, menu):not([disabled="true"]):is(:hover, [_moz-menuactive]) {
+	background-color: var(--irix-accent) !important;
+	color: #ffffff !important;
+	> label, > .menu-accel-container > label { color: #ffffff !important; }
+}
+.subviewbutton, panelview toolbarbutton { border-radius: 8px !important; }
+
+/* ---- Sidebar: fm's glass, rows as rounded selections ---- */
+#browser { background: var(--irix-glass) !important; }   /* behind the sidebar launcher strip (was grey) */
+.sidebar-splitter { background: var(--irix-glass) !important; border-left-color: var(--irix-line) !important; }
+
+/* ---- Find bar: glass with a pill entry ---- */
+findbar { border-top-color: var(--irix-line) !important; }
+.findbar-textbox {
+	border-radius: 999px 0 0 999px !important;
+	border-color: rgba(255, 255, 255, 0.10) !important;
+	border-top-color: rgba(255, 255, 255, 0.30) !important;
+	padding-inline: 12px !important;
+}
+.findbar-textbox:is([focused], :focus) {
+	border-color: transparent !important;
+	box-shadow: 0 0 0 2px var(--irix-focus) !important;
+}
+.findbar-find-next { border-radius: 0 999px 999px 0 !important; }

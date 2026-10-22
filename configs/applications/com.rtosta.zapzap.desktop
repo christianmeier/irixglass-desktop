@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Name=WhatsApp
+GenericName=ZapZap
+Comment=WhatsApp Desktop for Linux
+Exec=@HOME@/Applications/ZapZap/AppRun %u
+Icon=com.rtosta.zapzap
+Type=Application
+Categories=Chat;Network;InstantMessaging;Qt;
+Keywords=WhatsApp;Chat;ZapZap;
+StartupWMClass=zapzap
+MimeType=x-scheme-handler/whatsapp;
+Terminal=false
+SingleMainWindow=true
