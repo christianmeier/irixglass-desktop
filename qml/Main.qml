@@ -698,7 +698,7 @@ Window {
                 { label: "", path: "~" }, { label: "Desktop", path: "~/Desktop" }, { label: "Documents", path: "~/Documents" },
                 { label: "Downloads", path: "~/Downloads" }, { label: "Applications", path: "~/Applications" }] },
             { title: "Indigo Magic", color: "#bf5af2", items: [
-                { label: "Icon Catalog", path: "/usr/share/applications" }, { label: "Desks Overview", action: "overview" },
+                { label: "Applications", path: "/usr/share/applications" }, { label: "Desks Overview", action: "overview" },
                 { label: "File QuickFind", action: "find" }] },
             { title: "Locations", color: "#98989d", items: [
                 { label: "cachyOS", path: "/" }, { label: "Network", action: "network" }, { label: "Trash", action: "trash" }] }
@@ -706,7 +706,10 @@ Window {
     }
     function expand(p) { return p === "~" ? Fm.home : p.startsWith("~/") ? Fm.home + p.substring(1) : p }
     function shorten(p) { return p === Fm.home ? "~" : p.startsWith(Fm.home + "/") ? "~" + p.substring(Fm.home.length) : p }
-    function placeLabel(item) { return item.label || (item.path === "~" ? Fm.userName : Kio.isUrl(item.path) ? Kio.title(item.path) : item.path.split("/").pop() || "/") }
+    // The machine section ("Indigo Magic" in saved sidebars) shows the computer's host name; the old
+    // "Icon Catalog" entry is called Applications. Only the display changes: saved titles stay keys.
+    function sectionTitle(t) { return t === "Indigo Magic" ? Fm.hostName : t }
+    function placeLabel(item) { return item.label === "Icon Catalog" ? "Applications" : item.label || (item.path === "~" ? Fm.userName : Kio.isUrl(item.path) ? Kio.title(item.path) : item.path.split("/").pop() || "/") }
     function setPlaces(p) { placesJson = JSON.stringify(p); settings.sync() }   // saved right away
     function copyPlaces() { return JSON.parse(JSON.stringify(places)) }
     // Adds folder `path` to section `si` at position `at` (default: end). Returns false for duplicates.
@@ -1168,13 +1171,15 @@ Window {
                 // Header rows carry the gap above them, so baselines match the mockup.
                 // Header rows carry the gap above them; after a folded section it's small, so folded
                 // sections stack tightly.
-                readonly property real gap: head && !modelData.first ? (modelData.afterFolded ? 4 * win.tu : 30 * win.tu) : 0
+                readonly property real gap: head && !modelData.first ? (modelData.afterFolded ? 4 * win.tu : (win.dolphinSidebar ? 8 : 30) * win.tu) : 0
+                // Dolphin's Places panel has taller rows (34 px) with the highlight nearly filling them.
+                readonly property real dy: win.dolphinSidebar && !head ? 2 * win.tu : 0
                 width: placesView.width
-                height: gap + (head ? 28 : 30) * win.tu
+                height: gap + (head ? 28 : win.dolphinSidebar ? 34 : 30) * win.tu
 
                 Rectangle {
                     visible: (row.item || row.tagRow) && (row.current || hov.hovered || drop.containsDrag)
-                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: 4 * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: 26 * win.tu; radius: (win.dolphinSidebar ? 6 : 8) * win.tu
+                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: (win.dolphinSidebar ? 2 : 4) * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: (win.dolphinSidebar ? 30 : 26) * win.tu; radius: (win.dolphinSidebar ? 6 : 8) * win.tu
                     color: Qt.rgba(1, 1, 1, row.current || drop.containsDrag ? .16 : .07)
                 }
                 Rectangle {   // drop target line for headers / empty sections
@@ -1184,7 +1189,7 @@ Window {
                 }
                 Rectangle {   // a tag: a filled Nord colour dot
                     visible: row.tagRow
-                    x: 23 * win.u; y: 8.5 * win.tu; width: 13 * win.tu; height: width; radius: width / 2
+                    x: 23 * win.u; y: 8.5 * win.tu + row.dy; width: 13 * win.tu; height: width; radius: width / 2
                     color: row.tagRow ? row.modelData.tag.color : "transparent"
                     border.color: Qt.rgba(1, 1, 1, .35); border.width: 1
                 }
@@ -1193,7 +1198,7 @@ Window {
                 K.Icon {   // the standard icon: the theme's symbolic one, in the section's colour (as in Finder)
                     objectName: "placeStdIcon"
                     visible: row.item && !row.glyph
-                    x: 21 * win.u; y: 6.5 * win.tu; width: 17 * win.tu; height: width
+                    x: 21 * win.u; y: 6.5 * win.tu + row.dy; width: 17 * win.tu; height: width
                     source: visible ? (row.vol ? row.modelData.item.icon || "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
                     opacity: row.dimmed ? .6 : 1
                     fallback: "folder-symbolic"
@@ -1203,7 +1208,7 @@ Window {
                 Text {
                     objectName: "placeEmoji"
                     visible: row.glyph.startsWith("emoji:")
-                    x: 20 * win.u; width: 19 * win.tu; y: 4 * win.tu
+                    x: 20 * win.u; width: 19 * win.tu; y: 4 * win.tu + row.dy
                     horizontalAlignment: Text.AlignHCenter
                     text: visible ? row.glyph.slice(6) : ""
                     font.family: "Noto Color Emoji"; font.pixelSize: 15 * win.tu
@@ -1211,7 +1216,7 @@ Window {
                 K.Icon {
                     objectName: "placeAppIcon"
                     visible: !!row.glyph && !row.glyph.startsWith("emoji:")
-                    x: 21 * win.u; y: 6 * win.tu; width: 18 * win.tu; height: width
+                    x: 21 * win.u; y: 6 * win.tu + row.dy; width: 18 * win.tu; height: width
                     source: visible ? row.glyph : ""
                     roundToIconSize: false
                 }
@@ -1221,13 +1226,13 @@ Window {
                     x: (row.head ? 16 : row.item || row.tagRow ? 48 : 22) * win.u
                     width: placesView.width - (row.head ? 60 : 90) * win.u
                     elide: Text.ElideRight
-                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
-                    text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item)
+                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu + row.dy
+                    text: row.head ? win.sectionTitle(row.modelData.title) : row.item ? win.placeLabel(row.modelData.item)
                           : row.tagRow ? row.modelData.tag.name : (row.modelData.hint || "Drop folders here")
-                    color: "white"; opacity: row.head ? (win.dolphinSidebar ? .55 : .45) : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
+                    color: "white"; opacity: row.head ? .55 : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
                     font.family: win.fontFamily
-                    font.pixelSize: (row.head ? (win.dolphinSidebar ? 12.5 : 11) : row.item || row.tagRow ? 13.5 : 12) * win.tu
-                    font.weight: row.head && !win.dolphinSidebar ? Font.DemiBold : Font.Normal   // Dolphin: plain section titles
+                    font.pixelSize: (row.head ? (win.dolphinSidebar ? 13.5 : 11) : row.item || row.tagRow ? 13.5 : 12) * win.tu   // Dolphin: titles at the entries' (system) size
+                    font.weight: row.head && !win.dolphinSidebar ? Font.DemiBold : Font.Normal   // Dolphin: grey, plain, entry size
                 }
                 Rename {
                     active: row.item && !row.vol && win.renamingPlace === row.key
@@ -1240,7 +1245,7 @@ Window {
                 Rename {   // a section title (double-click, or Rename Section…)
                     active: row.head && !row.tagHead && win.renamingSection === row.modelData.si
                     x: 12 * win.u; width: 170 * win.u; y: row.gap + 4 * win.tu
-                    name: row.head ? row.modelData.title : ""
+                    name: row.head ? win.sectionTitle(row.modelData.title) : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
                     onCommitted: text => win.renameSection(row.modelData.si, text)
                     onDone: { win.renamingSection = -1; keys.forceActiveFocus() }
@@ -1275,7 +1280,7 @@ Window {
                     objectName: "removeButton"
                     visible: ((row.item && !row.vol && win.renamingPlace !== row.key) || (row.tagRow && win.renamingTag !== row.modelData.tag.name)) && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 20 * win.u
-                    y: 8.5 * win.tu; width: 14 * win.tu; height: width; radius: width / 2
+                    y: 8.5 * win.tu + row.dy; width: 14 * win.tu; height: width; radius: width / 2
                     color: removeHover.hovered ? "#ff453a" : Qt.rgba(1, 1, 1, .25)
                     Rectangle { anchors.centerIn: parent; width: parent.width * .5; height: 1.6 * win.u; color: "white" }
                     HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
@@ -1286,7 +1291,7 @@ Window {
                     objectName: "ejectButton"
                     visible: row.ejectable
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
-                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu
+                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu + row.dy
                     text: "⏏"; color: "white"; opacity: ejectHover.hovered ? .95 : .55
                     font.pixelSize: 13 * win.tu
                     HoverHandler { id: ejectHover; cursorShape: Qt.PointingHandCursor }
@@ -2583,7 +2588,7 @@ Window {
             delegate: P.MenuItem {
                 required property int index
                 visible: index !== placeMenu.si
-                text: "Move to " + (win.places[index] ? win.places[index].title : "")
+                text: "Move to " + (win.places[index] ? win.sectionTitle(win.places[index].title) : "")
                 onTriggered: win.placeMoveTo(placeMenu.si, placeMenu.ii, index)
             }
             onObjectAdded: (i, o) => placeMenu.insertItem(7 + i, o)   // after Move Down
@@ -2619,7 +2624,7 @@ Window {
     P.FolderDialog {
         id: folderPicker
         property int si: 0
-        title: "Add Folder to " + (win.places[si] ? win.places[si].title : "Sidebar")
+        title: "Add Folder to " + (win.places[si] ? win.sectionTitle(win.places[si].title) : "Sidebar")
         onAccepted: win.placeAdd(si, decodeURIComponent(folder.toString().replace(/^file:\/\//, "")))
     }
 
@@ -2694,7 +2699,7 @@ Window {
                 model: win.places.length
                 delegate: P.MenuItem {
                     required property int index
-                    text: win.places[index] ? win.places[index].title : ""
+                    text: win.places[index] ? win.sectionTitle(win.places[index].title) : ""
                     onTriggered: { for (const p of win.paths()) if (Fm.kind(p) === "folder") win.placeAdd(index, p) }
                 }
                 onObjectAdded: (i, o) => addToSidebar.insertItem(i, o)
@@ -3092,7 +3097,7 @@ Window {
             P.MenuItem { text: "Documents\tCtrl+Shift+O"; onTriggered: win.go(Fm.home + "/Documents") }
             P.MenuItem { text: "Downloads\tCtrl+Alt+L"; onTriggered: win.go(Fm.home + "/Downloads") }
             P.MenuItem { text: "Applications\tCtrl+Shift+A"; onTriggered: win.go(Fm.home + "/Applications") }
-            P.MenuItem { text: "Icon Catalog"; onTriggered: win.go("/usr/share/applications") }
+            P.MenuItem { text: "Applications (all apps)"; onTriggered: win.go("/usr/share/applications") }
             P.MenuItem { text: "Computer\tCtrl+Shift+C"; onTriggered: win.go("/") }
             P.MenuItem { text: "Network\tCtrl+Shift+K"; onTriggered: win.go("remote:/") }
             P.MenuItem { text: "Trash"; onTriggered: win.go(Fm.trashDir) }

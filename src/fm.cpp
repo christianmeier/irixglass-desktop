@@ -6,6 +6,7 @@
 
 #include <QClipboard>
 #include <QDir>
+#include <QSysInfo>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
@@ -1389,6 +1390,11 @@ QString Fm::home() const
 QString Fm::userName() const
 {
     return QDir::home().dirName();
+}
+
+QString Fm::hostName() const
+{
+    return QSysInfo::machineHostName();
 }
 
 void Fm::updateWindow(QQuickWindow *window, int radius, bool shadow, const QVariantList &clear)
