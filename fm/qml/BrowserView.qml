@@ -169,6 +169,11 @@ FocusScope {   // activeFocus while the page or the address has the keyboard
             zoomFactor: b.fontPointSize / 12
             onNewWindowRequested: request => { url = request.requestedUrl }   // target=_blank: same tab
             settings.pluginsEnabled: true
+            // A local page (a downloaded .html opened in a web tab) must not read other local files
+            // with XMLHttpRequest and send them away (window.open → this tab carries the data out).
+            // Qt then also blocks the pictures and styles such a page loads from disk; web pages,
+            // and local images, PDFs and self-contained .html files, still show.
+            settings.localContentCanAccessFileUrls: false
             settings.fullScreenSupportEnabled: true
             onFullScreenRequested: request => request.accept()
         }

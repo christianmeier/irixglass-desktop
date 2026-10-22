@@ -19,6 +19,7 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -480,6 +481,49 @@ int main(int argc, char *argv[])
             // deleting a terminal whose shell ignores SIGTERM (interactive bash) crashed in ~KPtyProcess
             delete c;
             check(true, QStringLiteral("closing a terminal with a running shell doesn't crash"));
+        }
+
+        // Folder names can't run commands when the shell follows the folder view (cd): quoting
+        // for bash and fish (fish reads \\ and \' inside '…'), and names with control characters
+        // (Ctrl+C would cancel the line and run the rest) aren't typed at all.
+        {
+            QStringList shells{QStringLiteral("/bin/bash")};
+            const QString fishBin = QStandardPaths::findExecutable(QStringLiteral("fish"));
+            if (!fishBin.isEmpty()) {   // a wrapper named fish: without the user's config
+                QDir().mkpath(base + QStringLiteral("/shells"));
+                QFile w(base + QStringLiteral("/shells/fish"));
+                if (w.open(QIODevice::WriteOnly))
+                    w.write("#!/bin/sh\nexec " + fishBin.toUtf8() + " --no-config \"$@\"\n");
+                w.close();
+                w.setPermissions(w.permissions() | QFileDevice::ExeOwner);
+                shells << w.fileName();
+            }
+            const QByteArray oldShell = qgetenv("IRIXFM_SHELL");
+            int n = 0;
+            for (const QString &sh : shells) {
+                const QString safe = base + QStringLiteral("/cdtest%1").arg(++n);
+                const QString quoteDir = safe + QStringLiteral("/x\\'; touch INJECTED; echo \\'");
+                const QString ctrlDir = safe + QStringLiteral("/c\x03 touch INJECTED #");
+                QDir().mkpath(quoteDir);
+                QDir().mkpath(ctrlDir);
+                qputenv("IRIXFM_SHELL", sh.toUtf8());
+                auto *c = new TerminalView;
+                c->setParentItem(window->contentItem());
+                c->setSize(QSizeF(800, 500));
+                c->setProperty("workingDirectory", safe);
+                c->start();
+                QTest::qWait(1500);   // the prompt
+                const QString name = QFileInfo(sh).fileName();
+                check(c->changeDirectory(quoteDir),
+                      name + QStringLiteral(": cd into a folder with quotes and backslashes"));
+                QTest::qWait(1000);
+                check(!c->changeDirectory(ctrlDir), name + QStringLiteral(": a name with a control character isn't typed"));
+                QTest::qWait(800);
+                check(!QFileInfo::exists(safe + QStringLiteral("/INJECTED")) && !QFileInfo::exists(quoteDir + QStringLiteral("/INJECTED")),
+                      name + QStringLiteral(": …and no folder name ran a command"));
+                delete c;
+            }
+            qputenv("IRIXFM_SHELL", oldShell);
         }
 
         // Neovim on the selected file

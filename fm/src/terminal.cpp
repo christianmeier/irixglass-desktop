@@ -182,6 +182,7 @@ void TerminalView::start()
         return;
     m_pty = new KPtyProcess(this);
     const QString shell = loginShell();
+    m_shell = shell;
     const QString program = m_program.isEmpty() ? shell : m_program;
     m_pty->setProgram(program, m_arguments);
     if (!m_cwd.isEmpty())
@@ -267,7 +268,8 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *val)
         static QByteArray buffer;
         if (val->string.initial)
             buffer.clear();
-        buffer.append(val->string.str, int(val->string.len));
+        if (buffer.size() < 4096)   // a title that never ends mustn't grow without limit
+            buffer.append(val->string.str, int(qMin<size_t>(val->string.len, size_t(4096 - buffer.size()))));
         if (val->string.final) {
             m_title = QString::fromUtf8(buffer);
             Q_EMIT titleChanged();
@@ -1088,10 +1090,33 @@ void TerminalView::dropEvent(QDropEvent *e)
     forceActiveFocus();
 }
 
-static QString shellQuote(const QString &p)
+// A path quoted for the tab's shell, or "" when it can't be typed safely. The text goes to the
+// shell as keys, so a control character in a name (Ctrl+C, Enter, Ctrl+U …) would act as a key even
+// inside quotes and run the rest of the name as a command: such paths are refused. POSIX shells:
+// '…' with ' as '\''. fish also reads \\ and \' inside '…' as escapes, so a folder named
+// x\'; cmd; echo \' ran cmd with the POSIX quoting: fish gets both escaped.
+static QString shellQuote(const QString &p, const QString &shell)
 {
+    for (const QChar c : p)
+        if (c.unicode() < 0x20 || c.unicode() == 0x7f)
+            return {};
     static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_@%+=:,./~-]+$"));
-    return plain.match(p).hasMatch() ? p : QLatin1Char('\'') + QString(p).replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QLatin1Char('\'');
+    if (plain.match(p).hasMatch())
+        return p;
+    QString q = p;
+    if (QFileInfo(shell).fileName() == QLatin1String("fish"))
+        q.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('\''), QStringLiteral("\\'"));
+    else
+        q.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QLatin1Char('\'') + q + QLatin1Char('\'');
+}
+
+// Shells whose quoting shellQuote knows; others (nu, xonsh, elvish …) only get plain paths.
+static bool knownShell(const QString &shell)
+{
+    static const QStringList known{QStringLiteral("sh"), QStringLiteral("bash"), QStringLiteral("zsh"), QStringLiteral("dash"),
+                                   QStringLiteral("ksh"), QStringLiteral("mksh"), QStringLiteral("yash"), QStringLiteral("fish")};
+    return known.contains(QFileInfo(shell).fileName());
 }
 
 bool TerminalView::changeDirectory(const QString &path)
@@ -1103,8 +1128,11 @@ bool TerminalView::changeDirectory(const QString &path)
     const pid_t fg = tcgetpgrp(m_pty->pty()->masterFd());
     if (fg <= 0 || fg != m_pty->processId())   // a program runs in the shell: leave it alone
         return false;
+    const QString quoted = shellQuote(path, m_shell);
+    if (quoted.isEmpty() || (quoted != path && !knownShell(m_shell)))
+        return false;   // a name that can't be typed safely: the shell stays where it is
     // Ctrl+E Ctrl+U clears what's typed; the leading space keeps it out of the history.
-    sendText(QStringLiteral("\x05\x15 cd -- ") + shellQuote(path) + QLatin1Char('\r'));
+    sendText(QStringLiteral("\x05\x15 cd -- ") + quoted + QLatin1Char('\r'));
     m_cwd = path;
     return true;
 }
@@ -1113,7 +1141,8 @@ void TerminalView::insertPaths(const QStringList &paths)
 {
     QStringList quoted;
     for (const QString &p : paths)
-        quoted << shellQuote(p);
+        if (const QString q = shellQuote(p, m_shell); !q.isEmpty())   // names with control characters are left out
+            quoted << q;
     if (quoted.isEmpty())
         return;
     m_scrollOffset = 0;
