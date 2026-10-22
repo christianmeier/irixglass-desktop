@@ -117,7 +117,7 @@ All of it is checked by `tests/finder_test.cpp` in `make test` (21 checks, real 
 
 Trash, Open With, removable drives with Eject, spring-loaded folders, hide sidebar, preview pane,
 search through subfolders (this also fixed search: folders are filtered now), folder sizes in the
-list, Compress / Expand, Recent Folders. Checked by `tests/phase2_test.cpp` (34 checks).
+list, Compress / Expand, Recent Folders. Checked by `tests/phase2_test.cpp` (40 checks).
 
 ## Phase 3 (later)
 

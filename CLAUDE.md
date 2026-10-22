@@ -2,7 +2,7 @@
 
 fm (`irixfm`) is an IRIX-style file manager with the macOS Tahoe "Liquid Glass" look, for KDE
 Plasma 6 on Wayland: Qt 6 QML + C++, KDE Frameworks, libvterm. It replaces Dolphin on the user's
-desktop. **Read `docs/DEVELOPMENT.md` before changing code**: architecture, design rules,
+desktop. Licence: GPL-3.0-or-later (`LICENSE`). **Read `docs/DEVELOPMENT.md` before changing code**: architecture, design rules,
 performance notes and gotchas. The project skill `.claude/skills/irixfm/SKILL.md` has the
 workflow in short.
 
