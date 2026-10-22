@@ -45,7 +45,11 @@
 #include <KIO/DeleteJob>
 #include <KIO/EmptyTrashJob>
 #include <KIO/RestoreJob>
+#include <Solid/Block>
+#include <Solid/Camera>
 #include <Solid/Device>
+#include <Solid/OpticalDisc>
+#include <Solid/PortableMediaPlayer>
 #include <Solid/DeviceNotifier>
 #include <Solid/OpticalDrive>
 #include <Solid/StorageAccess>
@@ -53,6 +57,14 @@
 #include <Solid/StorageVolume>
 
 #include <KDesktopFile>
+#include <KProtocolInfo>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusMetaType>
+#include <QDBusObjectPath>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <memory>
 #include <KApplicationTrader>
 #include <QSet>
 #include <KFileItem>
@@ -179,8 +191,11 @@ Fm::Fm(const QString &startDir, const QString &assetDir, QObject *parent, bool r
 {
     connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Fm::undoChanged);
     connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoTextChanged, this, &Fm::undoChanged);
-    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceAdded, this, &Fm::refreshVolumes);
-    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceRemoved, this, &Fm::refreshVolumes);
+    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceAdded, this, &Fm::scheduleRefresh);
+    connect(Solid::DeviceNotifier::instance(), &Solid::DeviceNotifier::deviceRemoved, this, [this](const QString &udi) {
+        m_udisksCache.remove(udi);
+        scheduleRefresh();
+    });
     refreshVolumes();
     loadTagIndex();
     loadSizeCache();
@@ -309,44 +324,372 @@ void Fm::openWith(const QStringList &paths, const QString &appId)
     job->start();
 }
 
-// ---- Removable drives ------------------------------------------------------------------
+// ---- Devices (Locations) -------------------------------------------------------------------
+// Solid lists them, UDisks2 (system D-Bus) fills in what Solid doesn't say (partition type,
+// HintIgnore, LUKS state) and powers drives off. Everything goes through raw records (QVariantMap),
+// so deviceRows() — the filter — and the actions can be tested with fakes (setFakeDevices).
+
+namespace
+{
+const QString kUDisks = QStringLiteral("org.freedesktop.UDisks2");
+
+// org.freedesktop.DBus.Properties.GetAll on a UDisks2 object ({} when it hasn't that interface).
+QVariantMap udisksProps(const QString &path, const QString &iface)
+{
+    QDBusMessage m = QDBusMessage::createMethodCall(kUDisks, path, QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("GetAll"));
+    m << QStringLiteral("org.freedesktop.UDisks2.") + iface;
+    const QDBusMessage r = QDBusConnection::systemBus().call(m, QDBus::Block, 1000);
+    if (r.type() != QDBusMessage::ReplyMessage || r.arguments().isEmpty())
+        return {};
+    return qdbus_cast<QVariantMap>(r.arguments().constFirst());
+}
+
+QString objectPath(const QVariant &v)
+{
+    return v.canConvert<QDBusObjectPath>() ? v.value<QDBusObjectPath>().path() : v.toString();
+}
+
+QString sizeText(qint64 bytes)
+{
+    // Decimal units like Finder ("32 GB" for a 32 GB stick).
+    return bytes > 0 ? QLocale().formattedDataSize(bytes, bytes >= 1000LL * 1000 * 1000 * 10 ? 0 : 1, QLocale::DataSizeSIFormat) : QString();
+}
+
+bool truthy(const QVariantMap &d, const char *key)
+{
+    return d.value(QLatin1String(key)).toBool();
+}
+} // namespace
 
 QVariantList Fm::volumes() const
 {
     return m_volumes;
 }
 
-void Fm::refreshVolumes()
+bool Fm::isSystemMount(const QString &path)
 {
+    if (path.isEmpty())
+        return false;
+    static const QStringList exact = {QStringLiteral("/"),    QStringLiteral("/home"), QStringLiteral("/boot"), QStringLiteral("/efi"),
+                                      QStringLiteral("/usr"), QStringLiteral("/var"),  QStringLiteral("/opt"),  QStringLiteral("/srv"),
+                                      QStringLiteral("/root"), QStringLiteral("/tmp"), QStringLiteral("/nix"),  QStringLiteral("/gnu"),
+                                      QStringLiteral("/snap"), QStringLiteral("/recovery"), QStringLiteral("[SWAP]")};
+    static const QStringList under = {QStringLiteral("/boot/"), QStringLiteral("/efi/"), QStringLiteral("/usr/"), QStringLiteral("/var/"),
+                                      QStringLiteral("/snap/"), QStringLiteral("/proc/"), QStringLiteral("/sys/"), QStringLiteral("/dev/"),
+                                      QStringLiteral("/nix/"), QStringLiteral("/opt/")};
+    const QString p = path.size() > 1 && path.endsWith(QLatin1Char('/')) ? path.chopped(1) : path;
+    if (exact.contains(p))
+        return true;
+    for (const QString &u : under)
+        if (p.startsWith(u))
+            return true;
+    // /run is the system's, except udisks' /run/media/<user>/…
+    return p.startsWith(QLatin1String("/run/")) && !p.startsWith(QLatin1String("/run/media/"));
+}
+
+QVariantList Fm::deviceRows(const QVariantList &raw)
+{
+    // Partition types that are never a place to open: EFI system, BIOS boot, Microsoft reserved,
+    // Windows recovery, Linux swap / LVM / RAID members (GPT GUIDs, and the MBR codes).
+    static const QSet<QString> hiddenTypes = {
+        QStringLiteral("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"), QStringLiteral("21686148-6449-6e6f-744e-656564454649"),
+        QStringLiteral("e3c9e316-0b5c-4db8-817d-f92df00215ae"), QStringLiteral("de94bba4-06d1-4d40-a16a-bfd50179d6ac"),
+        QStringLiteral("0657fd6d-a4ab-43c4-84e5-0933c84b4f4f"), QStringLiteral("e6d6d379-f507-44c2-a23c-238f2a3df928"),
+        QStringLiteral("a19d880f-05fc-4d3b-a006-743f0f84911e"), QStringLiteral("0xef"), QStringLiteral("0x82"), QStringLiteral("0x27"),
+        QStringLiteral("0x8e"), QStringLiteral("0xfd")};
+    QVariantList outside, inside;
+    QSet<QString> seen;
+    for (const QVariant &v : raw) {
+        const QVariantMap d = v.toMap();
+        const QString udi = d.value(QStringLiteral("udi")).toString();
+        if (udi.isEmpty() || seen.contains(udi))
+            continue;
+        const QString name = d.value(QStringLiteral("label")).toString();
+        // Phones, media players and cameras: browsed through a KIO worker URL, no mounting.
+        if (truthy(d, "player") || truthy(d, "camera")) {
+            const QStringList protocols = d.value(QStringLiteral("protocols")).toStringList();
+            QString url;
+            if (truthy(d, "player") && !protocols.isEmpty()) {
+                // As KFilePlacesItem (Dolphin) does: mtp:udi=<udi>, otherwise <protocol>://<udi's last part>/ (afc).
+                const QString proto = protocols.constFirst();
+                url = proto == QLatin1String("mtp") ? QStringLiteral("mtp:udi=") + udi
+                                                    : proto + QStringLiteral("://") + udi.section(QLatin1Char('/'), -1) + QLatin1Char('/');
+            } else if (truthy(d, "camera") && protocols.contains(QLatin1String("ptp"))) {
+                url = QStringLiteral("camera:/");   // kio-extras' kamera (gphoto2)
+            }
+            if (url.isEmpty())
+                continue;
+            seen.insert(udi);
+            const QString icon = truthy(d, "camera") ? QStringLiteral("camera-photo-symbolic")
+                                 : (d.value(QStringLiteral("icon")).toString().contains(QLatin1String("phone")) || protocols.contains(QLatin1String("mtp"))
+                                    || protocols.contains(QLatin1String("afc")))
+                                     ? QStringLiteral("phone-symbolic")
+                                     : QStringLiteral("multimedia-player-symbolic");
+            const QString label = name.isEmpty() ? QStringLiteral("Phone") : name;
+            const QString kindText = truthy(d, "camera") ? QStringLiteral("Camera") : icon == QLatin1String("phone-symbolic") ? QStringLiteral("Phone") : QStringLiteral("Media player");
+            outside << QVariantMap{{QStringLiteral("udi"), udi},          {QStringLiteral("drive"), udi},
+                                   {QStringLiteral("kind"), QStringLiteral("phone")}, {QStringLiteral("label"), label},
+                                   {QStringLiteral("icon"), icon},        {QStringLiteral("mounted"), false},
+                                   {QStringLiteral("path"), QString()},   {QStringLiteral("url"), url},
+                                   {QStringLiteral("removable"), true},   {QStringLiteral("optical"), false},
+                                   {QStringLiteral("encrypted"), false},  {QStringLiteral("internal"), false},
+                                   {QStringLiteral("size"), 0},           {QStringLiteral("sizeText"), QString()},
+                                   {QStringLiteral("fsType"), QString()}, {QStringLiteral("device"), QString()},
+                                   {QStringLiteral("kindText"), kindText},
+                                   {QStringLiteral("tip"), label + QStringLiteral(" — ") + kindText + QStringLiteral(" (") + url.section(QLatin1Char(':'), 0, 0) + QLatin1Char(')')}};
+            continue;
+        }
+        // Storage: what the system uses, hides or can't open stays out.
+        const QString device = d.value(QStringLiteral("device")).toString();
+        const QString fsType = d.value(QStringLiteral("fsType")).toString();
+        const QString usage = d.value(QStringLiteral("usage")).toString();
+        const QString path = d.value(QStringLiteral("path")).toString();
+        const bool mounted = truthy(d, "mounted");
+        const bool optical = truthy(d, "optical");
+        const bool encrypted = truthy(d, "encrypted");
+        const bool removable = truthy(d, "removable") || optical;
+        if (truthy(d, "ignored") || truthy(d, "cleartext") || truthy(d, "loop"))
+            continue;
+        if (device.startsWith(QLatin1String("/dev/loop")) || device.startsWith(QLatin1String("/dev/zram")) || device.startsWith(QLatin1String("/dev/ram")))
+            continue;
+        if (fsType == QLatin1String("swap") || (usage != QLatin1String("filesystem") && !(encrypted && usage == QLatin1String("encrypted"))))
+            continue;
+        if (hiddenTypes.contains(d.value(QStringLiteral("partType")).toString().toLower()))
+            continue;
+        if (mounted && isSystemMount(path))
+            continue;
+        // An internal LUKS container that's unlocked but has no mounted file system holds the system
+        // (LVM, swap, root mounted elsewhere): not a place to open.
+        if (encrypted && !removable && truthy(d, "unlocked") && !mounted)
+            continue;
+        seen.insert(udi);
+        const qint64 size = d.value(QStringLiteral("size")).toLongLong();
+        const QString sz = sizeText(size);
+        const QString label = !name.isEmpty() ? name : sz.isEmpty() ? QStringLiteral("Untitled") : sz + QStringLiteral(" Volume");
+        const QString driveType = d.value(QStringLiteral("driveType")).toString();
+        const bool flash = driveType == QLatin1String("flash");
+        const QString icon = optical ? QStringLiteral("media-optical-symbolic")
+                             : flash ? QStringLiteral("media-flash-symbolic")
+                             : removable ? QStringLiteral("drive-removable-media-symbolic")
+                                         : QStringLiteral("drive-harddisk-symbolic");
+        const QString kindText = optical ? QStringLiteral("Disc") : flash ? QStringLiteral("Memory card")
+                                 : removable ? QStringLiteral("External drive") : QStringLiteral("Internal disk");
+        QStringList facts;
+        if (!sz.isEmpty())
+            facts << sz;
+        facts << kindText.toLower();
+        if (!fsType.isEmpty() && !(encrypted && fsType.startsWith(QLatin1String("crypto"))))
+            facts << fsType;
+        if (encrypted)
+            facts << QStringLiteral("encrypted");
+        if (!mounted)
+            facts << QStringLiteral("not mounted: click to open");
+        const QVariantMap row{{QStringLiteral("udi"), udi},
+                              {QStringLiteral("drive"), d.value(QStringLiteral("drive")).toString()},
+                              {QStringLiteral("kind"), QStringLiteral("volume")},
+                              {QStringLiteral("label"), label},
+                              {QStringLiteral("icon"), icon},
+                              {QStringLiteral("mounted"), mounted},
+                              {QStringLiteral("path"), mounted ? path : QString()},
+                              {QStringLiteral("url"), QString()},
+                              {QStringLiteral("removable"), removable},
+                              {QStringLiteral("optical"), optical},
+                              {QStringLiteral("encrypted"), encrypted},
+                              {QStringLiteral("internal"), !removable},
+                              {QStringLiteral("size"), size},
+                              {QStringLiteral("sizeText"), sz},
+                              {QStringLiteral("fsType"), fsType},
+                              {QStringLiteral("device"), device},
+                              {QStringLiteral("kindText"), kindText},
+                              {QStringLiteral("tip"), label + QStringLiteral(" — ") + facts.join(QStringLiteral(", "))}};
+        (removable ? outside : inside) << row;
+    }
+    // Plugged-in things first (in the order they came), then the internal partitions.
+    return outside + inside;
+}
+
+QVariantList Fm::collectDevices()
+{
+    if (m_fakeDevices)
+        return m_rawDevices;
     QVariantList list;
     for (const Solid::Device &dev : Solid::Device::listFromType(Solid::DeviceInterface::StorageAccess)) {
-        const auto *vol = dev.as<Solid::StorageVolume>();
-        const auto *access = dev.as<Solid::StorageAccess>();
-        if (!access || (vol && vol->isIgnored()))
+        const QString udi = dev.udi();
+        // fstab-only entries (/org/kde/fstab/…) are network shares and the like: not devices.
+        if (!udi.startsWith(QLatin1String("/org/freedesktop/UDisks2/")))
             continue;
-        // Only hot-pluggable or removable media (USB sticks, SD cards, discs), like Finder's Locations.
+        auto *access = dev.as<Solid::StorageAccess>();
+        if (!access)
+            continue;
+        const auto *vol = dev.as<Solid::StorageVolume>();
+        const auto *block = dev.as<Solid::Block>();
         Solid::Device drive = dev;
         while (drive.isValid() && !drive.is<Solid::StorageDrive>())
             drive = drive.parent();
         const auto *sd = drive.isValid() ? drive.as<Solid::StorageDrive>() : nullptr;
-        if (!sd || !(sd->isHotpluggable() || sd->isRemovable()))
+        // UDisks facts that don't change while the device is there; the LUKS state does.
+        QVariantMap facts = m_udisksCache.value(udi);
+        if (facts.isEmpty()) {
+            const QVariantMap b = udisksProps(udi, QStringLiteral("Block"));
+            const QVariantMap p = udisksProps(udi, QStringLiteral("Partition"));
+            facts = {{QStringLiteral("hintIgnore"), b.value(QStringLiteral("HintIgnore")).toBool()},
+                     {QStringLiteral("cryptoBacking"), objectPath(b.value(QStringLiteral("CryptoBackingDevice")))},
+                     {QStringLiteral("partType"), p.value(QStringLiteral("Type")).toString()},
+                     {QStringLiteral("ok"), true}};
+            m_udisksCache.insert(udi, facts);
+        }
+        const QString backing = facts.value(QStringLiteral("cryptoBacking")).toString();
+        const bool encrypted = access->isEncrypted() || (vol && vol->usage() == Solid::StorageVolume::Encrypted);
+        bool unlocked = false;
+        if (encrypted) {
+            const QString clear = objectPath(udisksProps(udi, QStringLiteral("Encrypted")).value(QStringLiteral("CleartextDevice")));
+            unlocked = !clear.isEmpty() && clear != QLatin1String("/");
+        }
+        QString usage;
+        switch (vol ? vol->usage() : Solid::StorageVolume::Other) {
+        case Solid::StorageVolume::FileSystem: usage = QStringLiteral("filesystem"); break;
+        case Solid::StorageVolume::Encrypted: usage = QStringLiteral("encrypted"); break;
+        default: usage = QStringLiteral("other"); break;
+        }
+        QString driveType;
+        if (sd) {
+            switch (sd->driveType()) {
+            case Solid::StorageDrive::CdromDrive: driveType = QStringLiteral("optical"); break;
+            case Solid::StorageDrive::SdMmc:
+            case Solid::StorageDrive::CompactFlash:
+            case Solid::StorageDrive::MemoryStick:
+            case Solid::StorageDrive::SmartMedia:
+            case Solid::StorageDrive::Xd: driveType = QStringLiteral("flash"); break;
+            default: driveType = QStringLiteral("disk"); break;
+            }
+        }
+        const bool optical = dev.is<Solid::OpticalDisc>() || driveType == QLatin1String("optical");
+        list << QVariantMap{{QStringLiteral("udi"), udi},
+                            {QStringLiteral("drive"), drive.isValid() ? drive.udi() : QString()},
+                            {QStringLiteral("label"), vol && !vol->label().isEmpty() ? vol->label() : QString()},
+                            {QStringLiteral("product"), drive.isValid() ? (drive.vendor() + QLatin1Char(' ') + drive.product()).trimmed() : QString()},
+                            {QStringLiteral("icon"), dev.icon()},
+                            {QStringLiteral("device"), block ? block->device() : QString()},
+                            {QStringLiteral("fsType"), vol ? vol->fsType() : QString()},
+                            {QStringLiteral("usage"), usage},
+                            {QStringLiteral("size"), vol ? qint64(vol->size()) : 0},
+                            {QStringLiteral("mounted"), access->isAccessible()},
+                            {QStringLiteral("path"), access->filePath()},
+                            {QStringLiteral("encrypted"), encrypted},
+                            {QStringLiteral("unlocked"), unlocked},
+                            {QStringLiteral("cleartext"), !backing.isEmpty() && backing != QLatin1String("/")},
+                            {QStringLiteral("ignored"), facts.value(QStringLiteral("hintIgnore")).toBool() || (vol && vol->isIgnored())},
+                            {QStringLiteral("partType"), facts.value(QStringLiteral("partType"))},
+                            {QStringLiteral("removable"), sd && (sd->isHotpluggable() || sd->isRemovable())},
+                            {QStringLiteral("optical"), optical},
+                            {QStringLiteral("driveType"), driveType}};
+        // Keep the list current when it gets mounted or unmounted elsewhere.
+        connect(access, &Solid::StorageAccess::accessibilityChanged, this, &Fm::scheduleRefresh, Qt::UniqueConnection);
+    }
+    for (const Solid::Device &dev : Solid::Device::listFromType(Solid::DeviceInterface::PortableMediaPlayer)) {
+        const auto *player = dev.as<Solid::PortableMediaPlayer>();
+        if (!player)
             continue;
         list << QVariantMap{{QStringLiteral("udi"), dev.udi()},
-                            {QStringLiteral("label"), dev.description()},
-                            {QStringLiteral("icon"), dev.icon()},
-                            {QStringLiteral("mounted"), access->isAccessible()},
-                            {QStringLiteral("path"), access->filePath()}};
-        // Keep the list current when it gets mounted or unmounted elsewhere.
-        connect(access, &Solid::StorageAccess::accessibilityChanged, this, &Fm::refreshVolumes, Qt::UniqueConnection);
+                            {QStringLiteral("player"), true},
+                            {QStringLiteral("protocols"), player->supportedProtocols()},
+                            {QStringLiteral("label"), !dev.product().isEmpty() ? dev.product() : dev.description()},
+                            {QStringLiteral("icon"), dev.icon()}};
     }
+    for (const Solid::Device &dev : Solid::Device::listFromType(Solid::DeviceInterface::Camera)) {
+        const auto *camera = dev.as<Solid::Camera>();
+        if (!camera)
+            continue;
+        list << QVariantMap{{QStringLiteral("udi"), dev.udi()},
+                            {QStringLiteral("camera"), true},
+                            {QStringLiteral("protocols"), camera->supportedProtocols()},
+                            {QStringLiteral("label"), !dev.product().isEmpty() ? dev.product() : dev.description()},
+                            {QStringLiteral("icon"), dev.icon()}};
+    }
+    return list;
+}
+
+void Fm::scheduleRefresh()
+{
+    // Plugging in a stick sends a burst of deviceAdded (drive, table, partitions): one refresh.
+    if (!m_refreshTimer) {
+        m_refreshTimer = new QTimer(this);
+        m_refreshTimer->setSingleShot(true);
+        m_refreshTimer->setInterval(150);
+        connect(m_refreshTimer, &QTimer::timeout, this, &Fm::refreshVolumes);
+    }
+    m_refreshTimer->start();
+}
+
+void Fm::refreshVolumes()
+{
+    const QVariantList raw = collectDevices();
+    if (!m_fakeDevices)
+        m_rawDevices = raw;
+    const QVariantList list = deviceRows(raw);
     if (list != m_volumes) {
         m_volumes = list;
         Q_EMIT volumesChanged();
     }
 }
 
+void Fm::setFakeDevices(const QVariantList &raw)
+{
+    m_fakeDevices = true;
+    m_rawDevices = raw;
+    m_deviceLog.clear();
+    refreshVolumes();
+}
+
+QVariantMap Fm::rawDevice(const QString &udi) const
+{
+    for (const QVariant &v : m_rawDevices)
+        if (v.toMap().value(QStringLiteral("udi")).toString() == udi)
+            return v.toMap();
+    return {};
+}
+
+static QString rowLabel(const QVariantList &rows, const QString &udi)
+{
+    for (const QVariant &v : rows)
+        if (v.toMap().value(QStringLiteral("udi")).toString() == udi)
+            return v.toMap().value(QStringLiteral("label")).toString();
+    return QStringLiteral("the device");
+}
+
+bool Fm::canBrowseUrl(const QString &url) const
+{
+    const QString scheme = QUrl(url).scheme();
+    return !scheme.isEmpty() && KProtocolInfo::isKnownProtocol(scheme);
+}
+
 void Fm::mountVolume(const QString &udi)
 {
+    const QString label = rowLabel(m_volumes, udi);
+    if (m_fakeDevices) {
+        QTimer::singleShot(0, this, [this, udi] {
+            for (QVariant &v : m_rawDevices) {
+                QVariantMap d = v.toMap();
+                if (d.value(QStringLiteral("udi")).toString() != udi)
+                    continue;
+                if (d.contains(QStringLiteral("failMount"))) {
+                    Q_EMIT volumeError(d.value(QStringLiteral("failMount")).toString());
+                    return;
+                }
+                m_deviceLog << QStringLiteral("mount ") + udi;
+                const QString path = d.value(QStringLiteral("mountAt"), QStringLiteral("/run/media/") + userName() + QLatin1Char('/') + d.value(QStringLiteral("label")).toString()).toString();
+                d[QStringLiteral("mounted")] = true;
+                d[QStringLiteral("path")] = path;
+                if (truthy(d, "encrypted"))
+                    d[QStringLiteral("unlocked")] = true;
+                v = d;
+                refreshVolumes();
+                Q_EMIT volumeMounted(udi, path);
+                return;
+            }
+        });
+        return;
+    }
     Solid::Device dev(udi);
     auto *access = dev.as<Solid::StorageAccess>();
     if (!access)
@@ -355,38 +698,260 @@ void Fm::mountVolume(const QString &udi)
         Q_EMIT volumeMounted(udi, access->filePath());
         return;
     }
-    connect(access, &Solid::StorageAccess::setupDone, this, [this, udi](Solid::ErrorType error, const QVariant &details) {
+    // A LUKS volume: Solid's setup() asks for the passphrase (KDE's dialog via kded's
+    // soliduiserver), unlocks it with UDisks and mounts the unlocked file system.
+    connect(access, &Solid::StorageAccess::setupDone, this, [this, udi, label](Solid::ErrorType error, const QVariant &details) {
         Solid::Device d(udi);
-        if (error == Solid::NoError)
+        if (error == Solid::NoError && d.as<Solid::StorageAccess>())
             Q_EMIT volumeMounted(udi, d.as<Solid::StorageAccess>()->filePath());
-        else
-            Q_EMIT volumeError(details.toString());
-        refreshVolumes();
+        else if (error != Solid::UserCanceled)
+            Q_EMIT volumeError(QStringLiteral("Couldn't open “%1”").arg(label) + (details.toString().isEmpty() ? QString() : QStringLiteral(": ") + details.toString()));
+        scheduleRefresh();
     }, Qt::SingleShotConnection);
     access->setup();
 }
 
-void Fm::ejectVolume(const QString &udi)
+QStringList Fm::blockers(const QString &mountPath)
 {
+    QStringList out;
+    if (mountPath.isEmpty() || mountPath == QLatin1String("/"))
+        return out;
+    auto inside = [&](const QString &p) { return p == mountPath || p.startsWith(mountPath + QLatin1Char('/')); };
+    const QStringList pids = QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &pid : pids) {
+        if (pid.isEmpty() || !pid.at(0).isDigit())
+            continue;
+        const QString base = QStringLiteral("/proc/") + pid;
+        QString where;
+        const QString cwd = QFileInfo(base + QStringLiteral("/cwd")).symLinkTarget();
+        if (inside(cwd))
+            where = cwd;
+        else {
+            QDirIterator fds(base + QStringLiteral("/fd"), QDir::System | QDir::Files | QDir::NoDotAndDotDot);
+            while (fds.hasNext()) {
+                const QString t = QFileInfo(fds.next()).symLinkTarget();
+                if (inside(t)) {
+                    where = t;
+                    break;
+                }
+            }
+        }
+        if (where.isEmpty())
+            continue;
+        QFile comm(base + QStringLiteral("/comm"));
+        QString name = comm.open(QIODevice::ReadOnly) ? QString::fromLocal8Bit(comm.readAll()).trimmed() : pid;
+        if (name == QLatin1String("irixfm"))
+            name = QStringLiteral("fm");
+        const QString rel = where.mid(mountPath.size());
+        const QString entry = rel.isEmpty() ? name : name + QStringLiteral(" (") + rel.mid(1) + QLatin1Char(')');
+        if (!out.contains(entry))
+            out << entry;
+    }
+    return out;
+}
+
+QString Fm::busyMessage(const QString &label, const QString &path, const QString &details) const
+{
+    const QStringList who = blockers(path);
+    QString msg = QStringLiteral("“%1” is in use").arg(label);
+    if (!who.isEmpty())
+        msg += QStringLiteral(" by ") + who.mid(0, 4).join(QStringLiteral(", ")) + (who.size() > 4 ? QStringLiteral(", …") : QString());
+    msg += QStringLiteral(". Close what's open on it, then try again.");
+    Q_UNUSED(details)
+    return msg;
+}
+
+void Fm::teardownOne(const QString &udi, std::function<void(int, const QString &)> done)
+{
+    if (m_fakeDevices) {
+        QTimer::singleShot(0, this, [this, udi, done] {
+            for (QVariant &v : m_rawDevices) {
+                QVariantMap d = v.toMap();
+                if (d.value(QStringLiteral("udi")).toString() != udi)
+                    continue;
+                if (truthy(d, "busy")) {
+                    m_deviceLog << QStringLiteral("busy ") + udi;
+                    done(Solid::DeviceBusy, QStringLiteral("target is busy"));
+                    return;
+                }
+                m_deviceLog << QStringLiteral("unmount ") + udi;
+                d[QStringLiteral("mounted")] = false;
+                d[QStringLiteral("path")] = QString();
+                d[QStringLiteral("unlocked")] = false;
+                v = d;
+            }
+            done(Solid::NoError, {});
+        });
+        return;
+    }
     Solid::Device dev(udi);
     auto *access = dev.as<Solid::StorageAccess>();
-    if (!access)
+    if (!access) {
+        done(Solid::NoError, {});   // gone already
         return;
-    connect(access, &Solid::StorageAccess::teardownDone, this, [this, udi](Solid::ErrorType error, const QVariant &details) {
-        if (error != Solid::NoError) {
-            Q_EMIT volumeError(details.toString());
+    }
+    // For a LUKS volume Solid unmounts the unlocked file system, then locks it.
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(access, &Solid::StorageAccess::teardownDone, this, [conn, done](Solid::ErrorType error, const QVariant &details, const QString &) {
+        QObject::disconnect(*conn);
+        done(error, details.toString());
+    });
+    if (!access->teardown()) {
+        QObject::disconnect(*conn);
+        done(Solid::OperationFailed, QString());
+    }
+}
+
+void Fm::teardownAll(QStringList udis, const QString &label, std::function<void(const QString &)> done, bool retried)
+{
+    if (udis.isEmpty()) {
+        done({});
+        return;
+    }
+    const QString udi = udis.takeFirst();
+    const QString path = rawDevice(udi).value(QStringLiteral("path")).toString();
+    teardownOne(udi, [this, udi, udis, label, done, retried, path](int error, const QString &details) {
+        if (error == Solid::NoError) {
+            teardownAll(udis, label, done);
             return;
         }
-        // Discs come out of the drive; USB drives are just unmounted (safe to unplug).
-        Solid::Device d(udi);
-        for (Solid::Device p = d; p.isValid(); p = p.parent())
-            if (auto *optical = p.as<Solid::OpticalDrive>()) {
-                optical->eject();
-                break;
-            }
+        if (error == Solid::UserCanceled) {
+            done(QStringLiteral("cancel"));
+            return;
+        }
+        const bool busy = error == Solid::DeviceBusy || details.contains(QLatin1String("busy"), Qt::CaseInsensitive);
+        if (busy && !retried) {
+            // fm just moved its views and terminals off it: a shell needs a moment to leave.
+            QTimer::singleShot(m_fakeDevices ? 50 : 900, this, [this, udi, udis, label, done] { teardownAll(QStringList{udi} + udis, label, done, true); });
+            return;
+        }
+        done(busy ? busyMessage(label, path, details)
+                  : QStringLiteral("Couldn't unmount “%1”").arg(label) + (details.isEmpty() ? QString() : QStringLiteral(": ") + details));
+    });
+}
+
+void Fm::powerOff(const QString &drive, std::function<void()> done)
+{
+    if (m_fakeDevices) {
+        QTimer::singleShot(0, this, [this, drive, done] {
+            m_deviceLog << QStringLiteral("poweroff ") + drive;
+            // A powered-off drive disappears.
+            QVariantList keep;
+            for (const QVariant &v : std::as_const(m_rawDevices))
+                if (v.toMap().value(QStringLiteral("drive")).toString() != drive)
+                    keep << v;
+            m_rawDevices = keep;
+            done();
+        });
+        return;
+    }
+    if (!drive.startsWith(QLatin1String("/org/freedesktop/UDisks2/drives/"))
+        || !udisksProps(drive, QStringLiteral("Drive")).value(QStringLiteral("CanPowerOff")).toBool()) {
+        done();   // unmounted is safe to unplug too
+        return;
+    }
+    QDBusMessage m = QDBusMessage::createMethodCall(kUDisks, drive, QStringLiteral("org.freedesktop.UDisks2.Drive"), QStringLiteral("PowerOff"));
+    m << QVariantMap();
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(m, 30000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher, done] {
+        if (watcher->isError())
+            qWarning("irixfm: power off failed: %s", qPrintable(watcher->error().message()));
+        watcher->deleteLater();
+        done();
+    });
+}
+
+void Fm::unmountVolume(const QString &udi)
+{
+    const QString label = rowLabel(m_volumes, udi);
+    teardownAll({udi}, label, [this, udi, label](const QString &error) {
+        if (error.isEmpty())
+            Q_EMIT volumeUnmounted(udi, label);
+        else if (error != QLatin1String("cancel"))
+            Q_EMIT volumeError(error);
         refreshVolumes();
-    }, Qt::SingleShotConnection);
-    access->teardown();
+    });
+}
+
+void Fm::ejectVolume(const QString &udi)
+{
+    const QVariantMap d = rawDevice(udi);
+    if (d.isEmpty())
+        return;
+    const QString label = rowLabel(m_volumes, udi);
+    const QString drive = d.value(QStringLiteral("drive")).toString();
+    const bool optical = truthy(d, "optical");
+    const bool internal = !truthy(d, "removable") && !optical;
+    // Finder's eject on a plugged-in drive: every mounted (or unlocked) partition of it.
+    QStringList targets;
+    if (internal || drive.isEmpty())
+        targets << udi;
+    else
+        for (const QVariant &v : std::as_const(m_rawDevices)) {
+            const QVariantMap p = v.toMap();
+            if (p.value(QStringLiteral("drive")).toString() == drive && !truthy(p, "cleartext") && !truthy(p, "player")
+                && (truthy(p, "mounted") || (truthy(p, "encrypted") && truthy(p, "unlocked"))))
+                targets << p.value(QStringLiteral("udi")).toString();
+        }
+    teardownAll(targets, label, [this, udi, label, drive, optical, internal](const QString &error) {
+        if (!error.isEmpty()) {
+            if (error != QLatin1String("cancel"))
+                Q_EMIT volumeError(error);
+            refreshVolumes();
+            return;
+        }
+        if (internal) {
+            Q_EMIT volumeEjected(udi, label, QStringLiteral("unmount"));
+        } else if (optical) {
+            if (m_fakeDevices)
+                m_deviceLog << QStringLiteral("eject ") + drive;
+            else
+                for (Solid::Device p(udi); p.isValid(); p = p.parent())
+                    if (auto *od = p.as<Solid::OpticalDrive>()) {
+                        od->eject();
+                        break;
+                    }
+            Q_EMIT volumeEjected(udi, label, QStringLiteral("disc"));
+        } else {
+            powerOff(drive, [this, udi, label] {
+                Q_EMIT volumeEjected(udi, label, QStringLiteral("remove"));
+                refreshVolumes();
+            });
+            return;
+        }
+        refreshVolumes();
+    });
+}
+
+QVariantMap Fm::volumeInfo(const QString &udi) const
+{
+    QVariantMap row;
+    for (const QVariant &v : m_volumes)
+        if (v.toMap().value(QStringLiteral("udi")).toString() == udi)
+            row = v.toMap();
+    if (row.isEmpty())
+        return {};
+    const QVariantMap raw = rawDevice(udi);
+    const QString path = row.value(QStringLiteral("path")).toString();
+    QString free;
+    if (row.value(QStringLiteral("mounted")).toBool() && !m_fakeDevices) {
+        const QStorageInfo si(path);
+        if (si.isValid())
+            free = sizeText(si.bytesAvailable()) + QStringLiteral(" available of ") + sizeText(si.bytesTotal());
+    }
+    QString fs = row.value(QStringLiteral("fsType")).toString();
+    if (row.value(QStringLiteral("encrypted")).toBool())
+        fs = QStringLiteral("Encrypted (LUKS)");
+    return {{QStringLiteral("name"), row.value(QStringLiteral("label"))},
+            {QStringLiteral("kind"), row.value(QStringLiteral("kindText"))},
+            {QStringLiteral("size"), row.value(QStringLiteral("sizeText"))},
+            {QStringLiteral("free"), free},
+            {QStringLiteral("fsType"), fs},
+            {QStringLiteral("device"), row.value(QStringLiteral("device"))},
+            {QStringLiteral("mountPoint"), row.value(QStringLiteral("mounted")).toBool() ? path : QStringLiteral("Not mounted")},
+            {QStringLiteral("drive"), raw.value(QStringLiteral("product"))},
+            {QStringLiteral("url"), row.value(QStringLiteral("url"))},
+            {QStringLiteral("icon"), row.value(QStringLiteral("icon"))}};
 }
 
 // ---- Search through subfolders -------------------------------------------------------------
