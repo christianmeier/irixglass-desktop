@@ -16,7 +16,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Go to Folder (⇧⌘G) with completion | ✅ | | path bar |
 | Recent folders (Go ▸ Recent Folders) | ✅ Go ▸ Recent Folders + ⌄ menu, saved, Clear Menu | | |
 | Path bar, proxy icon drag (title bar) | ✅ crumbs + drop pocket | | |
-| New window (⌘N), close (⌘W) | ✅ | | |
+| New window (⌘N), close (⌘W) | ✅ (all windows in one fm process; a second launch opens a window there) | | local socket, `main.cpp` |
 | Tabs (⌘T, ⇧⌘[ ], drag tabs out, Merge All Windows) | ✅ IRIX notebook tabs at the bottom; folders and places open in tabs; reopen, move, to new window; session restore (no drag-out, no merge) | | active tab = live window state, others are snapshots |
 | Open folder in new tab/window (⌘-double-click) | ✅ opening a folder gives it a tab; middle-click = background tab; Ctrl+double-click = same tab | | |
 | Spring-loaded folders (hover while dragging opens) | ✅ icons, list rows and sidebar (0.9 s) | | DropArea + timer |
@@ -45,6 +45,7 @@ Phase: when it gets built (1 = this branch first, 2 = next, 3 = later).
 | Icon view (⌘1), icon size slider | ✅ thumbwheel | | |
 | List view (⌘2) | ✅ | | |
 | Sort by clicking a list column, ascending / descending | ✅ | | `FolderListModel.sortField` / `sortReversed` |
+| List view columns (View Options: Date Created, Last Opened, …; right-click a heading) | ✅ Date Modified / Created / Last Opened / Changed, Size, Kind, Tags, Permissions, Owner; View ▸ Show Columns, both sides | | `qml/ListColumns.qml`, `Fm::fileMeta` |
 | View ▸ Sort By (Name, Kind, Date, Size), also in icon view | ✅ View menu + right-click, saved | | |
 | Disclosure triangles in list view (expand folders inline) | ⬜ | 3 | tree model |
 | Column view (⌘3) | ⬜ | 3 | row of ListViews, one per level, with preview column |
