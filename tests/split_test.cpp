@@ -206,6 +206,34 @@ int main(int argc, char *argv[])
             win->setProperty("activePane", 0);
             key(Qt::Key_1, Qt::ControlModifier);
         }
+        // list columns (Finder's View Options): the split side has Kind too, both sides follow the
+        // chosen columns, narrow sides drop the extra ones first, the choice is saved
+        {
+            win->setProperty("splitViewMode", 1);
+            win->setProperty("viewMode", 1);
+            QTest::qWait(300);
+            auto *splitHeading = pane->findChild<QQuickItem *>(QStringLiteral("splitListHeading"));
+            check(splitHeading && splitHeading->property("cols").toStringList().contains(QStringLiteral("kind")),
+                  QStringLiteral("the split side's list shows Kind"), splitHeading ? splitHeading->property("cols").toStringList().join(",") : QStringLiteral("no heading"));
+            for (const char *k : {"created", "permissions", "owner"})
+                QMetaObject::invokeMethod(win, "toggleColumn", Q_ARG(QVariant, QString::fromLatin1(k)));
+            QTest::qWait(200);
+            const QStringList chosen = win->property("listColumns").toStringList();
+            check(chosen.contains(QStringLiteral("created")) && chosen.contains(QStringLiteral("owner")) && win->property("listColumnsJson").toString().contains(QStringLiteral("permissions")),
+                  QStringLiteral("columns can be added (and are saved)"), chosen.join(","));
+            const QStringList narrow = splitHeading->property("cols").toStringList();
+            check(narrow.contains(QStringLiteral("kind")) && narrow.contains(QStringLiteral("size")) && !narrow.contains(QStringLiteral("owner")),
+                  QStringLiteral("a narrow side drops the extra columns first, keeps Size and Kind"), narrow.join(","));
+            const QVariant wide = [&] { QVariant v; QMetaObject::invokeMethod(win, "columnsFor", Q_RETURN_ARG(QVariant, v), Q_ARG(QVariant, 2000.0)); return v; }();
+            check(wide.toStringList().size() == 6, QStringLiteral("…and a wide one shows them all"), wide.toStringList().join(","));
+            for (const char *k : {"created", "permissions", "owner", "kind"})
+                QMetaObject::invokeMethod(win, "toggleColumn", Q_ARG(QVariant, QString::fromLatin1(k)));
+            QTest::qWait(200);
+            check(!splitHeading->property("cols").toStringList().contains(QStringLiteral("kind")) && !win->property("listColumns").toStringList().contains(QStringLiteral("created")),
+                  QStringLiteral("columns can be removed again"), splitHeading->property("cols").toStringList().join(","));
+            QMetaObject::invokeMethod(win, "toggleColumn", Q_ARG(QVariant, QStringLiteral("kind")));
+            win->setProperty("viewMode", 0);
+        }
         // View ▸ Transparency: the glass tint follows
         {
             const QColor before = win->property("bodyTint").value<QColor>();

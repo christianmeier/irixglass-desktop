@@ -21,6 +21,16 @@ Item {
     property string fontFamily
     property var assetFor
     property var tagsFor                 // function(path) -> tags
+    // list columns, shared with the main side (the window's listColumns / columnDefs)
+    property var columnDefs: ({})
+    property var columnsFor              // function(width) -> keys that fit
+    property var kindTextFor             // function(isDir, kind) -> "Folder", "Image", …
+    property int sortField: FolderListModel.Name
+    property bool sortReversed: false
+    signal sortRequested(int field)
+    signal columnsMenuRequested()
+    readonly property var listCols: columnsFor ? columnsFor(rows.width - iconSize - 20 * u) : []
+    readonly property real listNameW: rows.width - iconSize - 20 * u - listCols.reduce((s, k) => s + columnDefs[k][1] * u, 0)
     property var colorFor                // function(tag) -> colour
     property bool showHidden: false
     // Its own view (0 icons, 1 list, 2 previews), set by the toolbar's view buttons while active.
@@ -183,6 +193,8 @@ Item {
         showDotAndDotDot: false
         caseSensitive: false
         sortCaseSensitive: false
+        sortField: pane.sortField
+        sortReversed: pane.sortReversed
         onFolderChanged: if (pane.dir) Fm.prefetchKinds(pane.dir)   // as on the main side
     }
 
@@ -215,15 +227,27 @@ Item {
         visible: pane.viewMode === 1 && !pane.termActive
         // the same height as the main side's list header, so rows line up across the sides
         x: 6 * pane.u; y: bar.y + bar.height + 2 * pane.u; width: pane.width - 12 * pane.u; height: 26 * pane.tu
-        Text {
-            x: pane.iconSize + 12 * pane.u; anchors.verticalCenter: parent.verticalCenter
-            text: "Name"; color: "white"; opacity: .45
-            font.family: pane.fontFamily; font.pixelSize: 11 * pane.tu; font.weight: Font.DemiBold
-        }
-        Text {
-            anchors.right: parent.right; anchors.rightMargin: 8 * pane.u; anchors.verticalCenter: parent.verticalCenter
-            text: "Size"; color: "white"; opacity: .45
-            font.family: pane.fontFamily; font.pixelSize: 11 * pane.tu; font.weight: Font.DemiBold
+        Row {   // the same columns as the main side (right-click: Show Columns)
+            x: pane.iconSize + 12 * pane.u; height: parent.height
+            Text {
+                readonly property bool active: pane.sortField === FolderListModel.Name
+                width: pane.listNameW; anchors.verticalCenter: parent.verticalCenter
+                text: "Name" + (active ? (pane.sortReversed ? "  ▾" : "  ▴") : "")
+                color: "white"; opacity: active ? .85 : .45
+                font.family: pane.fontFamily; font.pixelSize: 11 * pane.tu; font.weight: Font.DemiBold
+                MouseArea {
+                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: m => { pane.activated(); m.button === Qt.RightButton ? pane.columnsMenuRequested() : pane.sortRequested(FolderListModel.Name) }
+                }
+            }
+            ListColumns {
+                objectName: "splitListHeading"
+                heading: true; cols: pane.listCols; defs: pane.columnDefs
+                height: parent.height; u: pane.u; tu: pane.tu; fontFamily: pane.fontFamily
+                sortField: pane.sortField; sortReversed: pane.sortReversed
+                onSortRequested: f => { pane.activated(); pane.sortRequested(f) }
+                onMenuRequested: { pane.activated(); pane.columnsMenuRequested() }
+            }
         }
     }
     PaneFrame { anchors.fill: parent; u: pane.u; lineY: bar.y + bar.height; active: pane.active }
@@ -255,6 +279,7 @@ Item {
             required property string filePath
             required property bool fileIsDir
             required property var fileSize
+            required property date fileModified
             readonly property bool sel: pane.selection[filePath] === true
             readonly property string kind: fileIsDir ? "folder" : Fm.kind(filePath)
             readonly property var tags: pane.tagsFor ? pane.tagsFor(filePath) : []
@@ -273,7 +298,7 @@ Item {
             Text {
                 id: nameText
                 x: pane.iconSize + 12 * pane.u; anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - x - 90 * pane.u
+                width: pane.listNameW - 8 * pane.u
                 text: r.fileName; elide: Text.ElideMiddle; color: "white"
                 font.family: pane.fontFamily; font.pixelSize: 13 * pane.tu
                 Loader {   // only tagged items have dots
@@ -283,10 +308,13 @@ Item {
                     sourceComponent: TagDots { tags: r.tags; colorFor: pane.colorFor; size: 9 * pane.tu }
                 }
             }
-            Text {
-                anchors.right: parent.right; anchors.rightMargin: 8 * pane.u; anchors.verticalCenter: parent.verticalCenter
-                text: r.fileIsDir ? "" : Fm.humanSize(r.fileSize); color: "white"; opacity: .5
-                font.family: pane.fontFamily; font.pixelSize: 11.5 * pane.tu
+            ListColumns {
+                x: pane.iconSize + 12 * pane.u + pane.listNameW; height: parent.height
+                cols: pane.listCols; defs: pane.columnDefs
+                u: pane.u; tu: pane.tu; fontFamily: pane.fontFamily; sel: r.sel
+                path: r.filePath; isDir: r.fileIsDir; modified: r.fileModified; size: r.fileSize; tags: r.tags
+                kindText: pane.kindTextFor ? pane.kindTextFor(r.fileIsDir, r.kind) : ""
+                sizeText: r.fileIsDir ? Fm.cachedFolderSize(r.filePath) || "--" : ""
             }
             Item {
                 id: dragProxy

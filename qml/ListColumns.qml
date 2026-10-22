@@ -28,12 +28,7 @@ Row {
     property var tags: []
     property bool sel: false
 
-    // key: [title, width (units), FolderListModel sort field or -1]
-    readonly property var defs: ({
-        modified: ["Date Modified", 160, FolderListModel.Time], created: ["Date Created", 160, -1],
-        opened: ["Date Last Opened", 160, -1], changed: ["Date Changed", 160, -1],
-        size: ["Size", 80, FolderListModel.Size], kind: ["Kind", 100, FolderListModel.Type],
-        tags: ["Tags", 90, -1], permissions: ["Permissions", 100, -1], owner: ["Owner", 90, -1] })
+    property var defs: ({})               // the window's columnDefs: key → [title, width, sort field]
     function shown(key) { return cols.indexOf(key) >= 0 }
     // The extra details only for columns that need them (one stat per row).
     readonly property var meta: !heading && (shown("created") || shown("opened") || shown("changed") || shown("permissions") || shown("owner"))

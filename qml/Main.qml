@@ -79,7 +79,38 @@ Window {
     property real splitRatio: .5                // the main side's share; drag the divider to change it
     property bool draggingSplit: false
     property real splitW: splitView ? contentAreaW * (1 - splitRatio) : 0
-    readonly property bool compactList: list.width < 640 * u   // narrow list (split view): no Date column
+    readonly property bool compactList: list.width < 640 * u   // narrow list (split view)
+    // List view columns after the name (Finder's View Options), saved; both sides use them. When a
+    // side is too narrow (the name keeps 200 units), the least useful go first (`dropOrder`), so a
+    // narrow split side still shows Size and Kind.
+    property string listColumnsJson: ""
+    readonly property var listColumns: listColumnsJson ? JSON.parse(listColumnsJson) : ["modified", "size", "kind"]
+    readonly property var columnOrder: ["modified", "created", "opened", "changed", "size", "kind", "tags", "permissions", "owner"]
+    readonly property var columnDefs: ({   // key: [title, width (units), FolderListModel sort field or -1]
+        modified: ["Date Modified", 160, FolderListModel.Time], created: ["Date Created", 160, -1],
+        opened: ["Date Last Opened", 160, -1], changed: ["Date Changed", 160, -1],
+        size: ["Size", 80, FolderListModel.Size], kind: ["Kind", 100, FolderListModel.Type],
+        tags: ["Tags", 90, -1], permissions: ["Permissions", 100, -1], owner: ["Owner", 90, -1] })
+    function toggleColumn(key) {
+        const c = listColumns.indexOf(key) >= 0 ? listColumns.filter(k => k !== key) : listColumns.concat([key])
+        listColumnsJson = JSON.stringify(columnOrder.filter(k => c.indexOf(k) >= 0))
+    }
+    readonly property var dropOrder: ["owner", "permissions", "changed", "opened", "created", "tags", "modified", "size", "kind"]
+    function columnsFor(width) {
+        let cols = columnOrder.filter(k => listColumns.indexOf(k) >= 0)
+        const sum = c => c.reduce((s, k) => s + columnDefs[k][1] * u, 0)
+        for (const k of dropOrder) {
+            if (width - sum(cols) >= 200 * u) break
+            cols = cols.filter(c => c !== k)
+        }
+        return cols
+    }
+    function columnsWidth(cols) { return cols.reduce((s, k) => s + columnDefs[k][1] * u, 0) }
+    function kindText(isDir, kind) {
+        return isDir ? "Folder" : kind === "app" ? "Application" : kind === "image" ? "Image" : kind === "exe" ? "Executable" : "Document"
+    }
+    readonly property var mainColumns: columnsFor(list.width - listTextX - 16 * u)
+    readonly property real mainNameW: list.width - listTextX - columnsWidth(mainColumns) - 16 * u
     // While split, the main side gets the same header as the split side (‹ ↑ path + marker line),
     // so the two sides look the same; its views start that much lower.
     readonly property real splitHeaderH: splitView ? 26 * tu - 8 * u : 0   // = split side's header (4u + 26tu + 2u) - 6u
@@ -184,6 +215,7 @@ Window {
         property alias showHidden: win.showHidden
         property alias places: win.placesJson
         property alias sortField: win.sortField
+        property alias listColumns: win.listColumnsJson
         property alias sortReversed: win.sortReversed
         property alias sidebarShown: win.sidebarShown
         property alias previewShown: win.previewShown
@@ -1767,23 +1799,26 @@ Window {
         headerPositioning: ListView.OverlayHeader
         header: Item {
             z: 2; width: list.width; height: 26 * win.tu
-            Row {
+            Row {   // click a column to sort by it, again to reverse; right-click: Show Columns
                 x: win.listTextX; height: parent.height
-                Repeater {
-                    // Click a column to sort by it; click again to reverse.
-                    model: [["Name", list.width - (win.compactList ? 250 : 430) * win.u, FolderListModel.Name],
-                            ["Date Modified", win.compactList ? 0 : 180 * win.u, FolderListModel.Time],
-                            ["Size", 90 * win.u, FolderListModel.Size], [win.searchActive ? "Where" : "Kind", 110 * win.u, FolderListModel.Type]]
-                    Text {
-                        required property var modelData
-                        readonly property bool active: win.sortField === modelData[2]
-                        width: modelData[1]; visible: width > 0
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData[0] + (active ? (win.sortReversed ? "  ▾" : "  ▴") : "")
-                        color: "white"; opacity: active ? .85 : .45
-                        font.family: win.fontFamily; font.pixelSize: 11 * win.tu; font.weight: Font.DemiBold
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.sortBy(parent.modelData[2]) }
+                Text {
+                    readonly property bool active: win.sortField === FolderListModel.Name
+                    width: win.mainNameW; anchors.verticalCenter: parent.verticalCenter
+                    text: "Name" + (active ? (win.sortReversed ? "  ▾" : "  ▴") : "")
+                    color: "white"; opacity: active ? .85 : .45
+                    font.family: win.fontFamily; font.pixelSize: 11 * win.tu; font.weight: Font.DemiBold
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: m => m.button === Qt.RightButton ? columnsMenu.popup() : win.sortBy(FolderListModel.Name)
                     }
+                }
+                ListColumns {
+                    objectName: "listHeading"
+                    heading: true; cols: win.mainColumns; defs: win.columnDefs
+                    height: parent.height; u: win.u; tu: win.tu; fontFamily: win.fontFamily
+                    sortField: win.sortField; sortReversed: win.sortReversed; searching: win.searchActive
+                    onSortRequested: f => win.sortBy(f)
+                    onMenuRequested: columnsMenu.popup()
                 }
             }
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Qt.rgba(1, 1, 1, .08) }
@@ -1830,7 +1865,7 @@ Window {
                 x: win.listTextX; height: parent.height
                 Text {
                     id: rowName
-                    width: list.width - (win.compactList ? 250 : 430) * win.u - (row.tags.length ? 30 * win.u : 0); anchors.verticalCenter: parent.verticalCenter
+                    width: win.mainNameW - (row.tags.length ? 30 * win.u : 0); anchors.verticalCenter: parent.verticalCenter
                     visible: win.renaming !== row.filePath
                     text: row.info && row.info.name ? row.info.name : row.fileName
                     elide: Text.ElideRight; color: "white"
@@ -1844,35 +1879,18 @@ Window {
                 }
                 Rename {
                     active: win.renaming === row.filePath
-                    width: list.width - (win.compactList ? 260 : 440) * win.u; anchors.verticalCenter: parent.verticalCenter
+                    width: win.mainNameW - 10 * win.u; anchors.verticalCenter: parent.verticalCenter
                     path: row.filePath; name: row.fileName; u: win.tu; fontFamily: win.fontFamily
                     onDone: { win.renaming = ""; keys.forceActiveFocus() }
                 }
-                // Date, Size, Kind (Where while searching): plain Texts, as a Repeater per row cost a
-                // model and three more incubations on every scroll.
-                Text {
-                    width: (win.compactList ? 0 : 180) * win.u
-                    text: Qt.formatDateTime(row.fileModified, "d MMM yyyy 'at' HH:mm")
-                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
-                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
-                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
-                }
-                Text {
-                    width: 90 * win.u
-                    // folder sizes: the fresh count, else the cached one (shown at once), else "…"
-                    text: row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--")
-                                        : Fm.humanSize(row.fileSize)
-                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
-                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
-                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
-                }
-                Text {
-                    width: 110 * win.u
-                    text: win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
-                          : row.fileIsDir ? "Folder" : row.kind === "app" ? "Application" : row.kind === "image" ? "Image" : row.kind === "exe" ? "Executable" : "Document"
-                    anchors.verticalCenter: parent.verticalCenter; visible: width > 0
-                    color: "white"; opacity: row.sel ? .9 : .55; elide: Text.ElideRight
-                    font.family: win.fontFamily; font.pixelSize: 12 * win.tu
+                // the chosen columns (Date Modified, Size, Kind … ; Where instead of Kind while searching)
+                ListColumns {
+                    height: parent.height; cols: win.mainColumns; defs: win.columnDefs
+                    u: win.u; tu: win.tu; fontFamily: win.fontFamily; sel: row.sel
+                    path: row.filePath; isDir: row.fileIsDir; modified: row.fileModified; size: row.fileSize; tags: row.tags
+                    sizeText: row.fileIsDir ? (win.calcSizes ? (win.folderSizes[row.filePath] || Fm.cachedFolderSize(row.filePath) || "…") : "--") : ""
+                    kindText: win.searchActive ? win.shorten(row.filePath.substring(0, row.filePath.lastIndexOf("/")) || "/")
+                                               : win.kindText(row.fileIsDir, row.kind)
                 }
             }
             Item {
@@ -2019,6 +2037,10 @@ Window {
         onZoomRequested: d => { win.activePane = 1; wheelCtl.nudge(d) }
         assetFor: win.asset
         tagsFor: win.tagsOf
+        columnDefs: win.columnDefs; columnsFor: win.columnsFor; kindTextFor: win.kindText
+        onColumnsMenuRequested: columnsMenu.popup()
+        // its own sort, by the same headings
+        onSortRequested: f => { if (sortField === f) sortReversed = !sortReversed; else { sortField = f; sortReversed = false } }
         colorFor: win.tagColor
         showHidden: win.showHidden
         onActivated: { win.activePane = 1; keys.forceActiveFocus() }
@@ -2307,6 +2329,22 @@ Window {
             iconPickerPopup = p
         }
         return iconPickerPopup
+    }
+    // Right-click a list heading: which columns show (as in Finder).
+    P.Menu {
+        id: columnsMenu
+        objectName: "columnsMenu"
+        Instantiator {
+            model: win.columnOrder
+            delegate: P.MenuItem {
+                required property string modelData
+                text: win.columnDefs[modelData][0]; checkable: true
+                checked: win.listColumns.indexOf(modelData) >= 0
+                onTriggered: win.toggleColumn(modelData)
+            }
+            onObjectAdded: (i, o) => columnsMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => columnsMenu.removeItem(o)
+        }
     }
     // Sidebar menus: `si`/`ii` say which section/entry was right-clicked (ii = -1 for a header).
     P.Menu {
@@ -2729,6 +2767,21 @@ Window {
                 P.MenuItem { text: "Size"; checkable: true; checked: win.sortField === FolderListModel.Size; onTriggered: win.sortBy(FolderListModel.Size) }
                 P.MenuSeparator {}
                 P.MenuItem { text: "Reverse Order"; checkable: true; checked: win.sortReversed; onTriggered: win.sortReversed = !win.sortReversed }
+            }
+            P.Menu {
+                id: viewColumnsMenu
+                title: "Show Columns"
+                Instantiator {
+                    model: win.columnOrder
+                    delegate: P.MenuItem {
+                        required property string modelData
+                        text: win.columnDefs[modelData][0]; checkable: true
+                        checked: win.listColumns.indexOf(modelData) >= 0
+                        onTriggered: win.toggleColumn(modelData)
+                    }
+                    onObjectAdded: (i, o) => viewColumnsMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => viewColumnsMenu.removeItem(o)
+                }
             }
             P.MenuSeparator {}
             P.Menu {
