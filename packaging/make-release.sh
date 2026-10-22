@@ -3,6 +3,7 @@
 #
 # Usage:
 #   packaging/make-release.sh [--binary <irixfm>] [--ref <git ref>] <version> <outdir>
+#   packaging/make-release.sh --check [--ref <git ref>] <version>    # only validate the version
 #
 #   <version>   semver without "v" (0.1.0, 0.2.0-rc.1); must match the VERSION file at <ref>
 #   <outdir>    created if missing; must be empty
@@ -23,18 +24,20 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BINARY="" REF="HEAD"
+BINARY="" REF="HEAD" CHECK=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --binary) BINARY="$(realpath "$2")"; shift 2 ;;
         --ref)    REF="$2"; shift 2 ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        --check)  CHECK=1; shift ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *) break ;;
     esac
 done
-[[ $# -eq 2 ]] || { echo "usage: $0 [--binary <irixfm>] [--ref <ref>] <version> <outdir>" >&2; exit 2; }
-V="$1" OUT="$2"
+[[ $# -eq 2 || ( -n "$CHECK" && $# -eq 1 ) ]] || {
+    echo "usage: $0 [--binary <irixfm>] [--ref <ref>] <version> <outdir>  |  $0 --check [--ref <ref>] <version>" >&2; exit 2; }
+V="$1" OUT="${2:-}"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -47,6 +50,7 @@ cd "$REPO"
 SHA="$(git rev-parse --verify "$REF^{commit}")" || die "unknown ref $REF"
 FILE_V="$(git show "$SHA:VERSION" 2>/dev/null | tr -d '[:space:]')" || die "no VERSION file at $REF"
 [[ "$FILE_V" == "$V" ]] || die "VERSION at $REF is '$FILE_V', not '$V': bump VERSION (and CHANGELOG.md) in a commit first"
+if [[ -n "$CHECK" ]]; then echo "ok: $V matches VERSION at ${SHA:0:12}"; exit 0; fi
 
 mkdir -p "$OUT"; OUT="$(realpath "$OUT")"
 [[ -z "$(ls -A "$OUT")" ]] || die "$OUT is not empty"
