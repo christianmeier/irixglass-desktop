@@ -109,7 +109,8 @@ int main(int argc, char *argv[])
             }
         QCoreApplication::processEvents();
         const double y = list->property("contentY").toDouble();
-        const double end = list->property("originY").toDouble() + contentH - listH;
+        // contentHeight is re-read: ListView only estimates it until the rows at the end exist
+        const double end = list->property("originY").toDouble() + list->property("contentHeight").toDouble() - listH;
         check(y > 0 && qAbs(y - end) < 1, QStringLiteral("touchpad scrolls the sidebar to the end (Locations)"),
               QString::number(y) + " / " + QString::number(end));
         window->setHeight(830 * .85);

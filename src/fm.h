@@ -9,6 +9,8 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <functional>
+
 class QQuickWindow;
 class KWindowShadow;
 
@@ -109,14 +111,36 @@ public:
 
     // Open With: apps for the item's type (default first); an empty id shows KDE's "Open With" dialog.
     Q_INVOKABLE QVariantList appsFor(const QString &path) const;
-    Q_INVOKABLE QVariantList applications() const;
+    Q_INVOKABLE QVariantList applications() const;   // every visible app with an icon: {name, icon}, by name
     // list view columns: {created, opened, changed (QDateTime), permissions ("rwxr-xr-x"), owner}
-    Q_INVOKABLE QVariantMap fileMeta(const QString &path) const;   // every visible app with an icon: {name, icon}, by name
+    Q_INVOKABLE QVariantMap fileMeta(const QString &path) const;
     Q_INVOKABLE void openWith(const QStringList &paths, const QString &appId);
 
-    // Removable drives (Solid): mount on click, eject.
+    // Devices in Locations (Solid + UDisks2, see "Devices" in docs/DEVELOPMENT.md): every plugged-in
+    // drive's partitions, discs, internal non-system partitions, phones and cameras. Rows:
+    // {udi, drive, kind ("volume" | "phone"), label, icon (symbolic), mounted, path, url, removable,
+    //  optical, encrypted, internal, size, sizeText, fsType, device, tip}.
+    // mountVolume: mounts (a LUKS volume: Solid's passphrase prompt first), then volumeMounted.
     Q_INVOKABLE void mountVolume(const QString &udi);
+    // unmountVolume: just this partition (volumeUnmounted). ejectVolume: Finder's eject = Safely
+    // Remove: every mounted partition of the drive, then the disc is ejected or the drive powered
+    // off (UDisks2 Drive.PowerOff); an internal partition is only unmounted. Then volumeEjected.
+    Q_INVOKABLE void unmountVolume(const QString &udi);
     Q_INVOKABLE void ejectVolume(const QString &udi);
+    // Get Info for a device row: {name, kind, size, free, fsType, device, mountPoint, drive, url}.
+    Q_INVOKABLE QVariantMap volumeInfo(const QString &udi) const;
+    // True when a KIO worker exists for the URL's scheme (mtp:, afc:, camera:, …).
+    Q_INVOKABLE bool canBrowseUrl(const QString &url) const;
+    // The filter: raw device records (from Solid/UDisks, or a test's fakes) -> sidebar rows.
+    Q_INVOKABLE static QVariantList deviceRows(const QVariantList &raw);
+    // "/", "/home", "/boot", "/efi", "/usr", … : a volume mounted there is the system, not a device.
+    Q_INVOKABLE static bool isSystemMount(const QString &path);
+    // Tests: replace Solid/UDisks with these raw records; actions then only change the fakes and
+    // log ("mount <udi>", "unmount <udi>", "poweroff <drive>", "eject <drive>") into deviceLog.
+    Q_INVOKABLE void setFakeDevices(const QVariantList &raw);
+    Q_INVOKABLE QStringList deviceLog() const { return m_deviceLog; }
+    // What keeps a mount point busy: "fish (~/x)", "nvim", … from /proc (this user's processes).
+    Q_INVOKABLE static QStringList blockers(const QString &mountPath);
 
     // Search by name in a background thread (in root only, or with all subfolders); results
     // arrive in batches as searchBatch, then searchDone.
@@ -148,6 +172,8 @@ Q_SIGNALS:
     void folderSizeReady(const QString &path, qint64 bytes, qint64 files, qint64 folders);
     void volumesChanged();
     void volumeMounted(const QString &udi, const QString &path);
+    void volumeUnmounted(const QString &udi, const QString &label);
+    void volumeEjected(const QString &udi, const QString &label, const QString &how);   // how: "remove" | "disc" | "unmount"
     void volumeError(const QString &message);
     void searchBatch(const QVariantList &items);
     void searchDone(int count, bool truncated);
@@ -157,6 +183,15 @@ Q_SIGNALS:
 
 private:
     void refreshVolumes();
+    void scheduleRefresh();
+    QVariantList collectDevices();                      // raw records from Solid + UDisks2 (or the fakes)
+    QVariantMap rawDevice(const QString &udi) const;    // from the last collectDevices()
+    // Unmount these (one after the other, retrying a busy one once, since a terminal's shell may
+    // still be leaving it); done(error) with "" on success.
+    void teardownAll(QStringList udis, const QString &label, std::function<void(const QString &)> done, bool retried = false);
+    void teardownOne(const QString &udi, std::function<void(int error, const QString &details)> done);
+    void powerOff(const QString &drive, std::function<void()> done);
+    QString busyMessage(const QString &label, const QString &path, const QString &details) const;
     void loadTagIndex();
     void saveTagIndex() const;
     void indexTags(const QString &path, const QStringList &tags);
@@ -171,6 +206,11 @@ private:
     QString m_assetDir;
     QPointer<KWindowShadow> m_shadow;
     QVariantList m_volumes;
+    QVariantList m_rawDevices;      // the last collectDevices()
+    bool m_fakeDevices = false;
+    QStringList m_deviceLog;
+    QHash<QString, QVariantMap> m_udisksCache;   // block udi -> UDisks2 facts that don't change (partition type, …)
+    class QTimer *m_refreshTimer = nullptr;
     QStringList m_sizeQueue;    // folder-size requests waiting; at most kMaxSizeJobs run at once
     int m_sizeRunning = 0;
     // Folder sizes survive navigation and restarts (~/.cache/irixfm/folder-sizes.json).

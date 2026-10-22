@@ -39,8 +39,15 @@ manager icon; the IRIX icons are only inside the window.
   Duplicate (Ctrl+D), Make Alias, Show Original (Ctrl+R), Move Item Here (Ctrl+Alt+V), Undo (Ctrl+Z),
   type to select, Sort By (click a list column or View ▸ Sort By). Plan and status of every Finder
   feature: [docs/FINDER-FEATURES.md](docs/FINDER-FEATURES.md).
-- More Finder: Trash in the sidebar (Put Back, Empty, Delete Immediately), Open With, USB drives with
-  Eject, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
+- Devices in Locations, live as they're plugged in: every partition of a USB stick or external disk,
+  SD cards, discs, encrypted (LUKS) volumes (KDE asks for the passphrase), phones (Android over MTP,
+  iPhones over AFC) and internal partitions that aren't the system (e.g. Windows). Unmounted ones
+  are dimmed; a click mounts and opens them; the tooltip shows size and format. ⏏ is Finder's eject:
+  Safely Remove unmounts every partition of the drive and powers it off ("Safe to remove “X”"), a
+  disc comes out, an internal partition is unmounted. If something still uses it, fm says what
+  (e.g. "in use by nvim"); tabs, the split side and terminal shells inside it go home first.
+  Right-click: Open, Open in New Tab, Mount / Unmount, Eject / Safely Remove, Get Info.
+- More Finder: Trash in the sidebar (Put Back, Empty, Delete Immediately), Open With, spring-loaded folders, hide the sidebar (Ctrl+Alt+S), preview pane (Ctrl+Shift+P), search
   through subfolders (scope bar: this folder / subfolders / Home), folder sizes in the list,
   Compress / Expand, Recent Folders.
 - Tags (colour labels) in Nord colours, like Finder's: right-click ▸ Tags, Ctrl+Alt+1…7 (Ctrl+Alt+0
@@ -64,7 +71,8 @@ manager icon; the IRIX icons are only inside the window.
   Ctrl+wheel change only the active side (the one with the blue line).
 - Terminal tabs (F4, or the >_ button): a shell in a tab, in the folder that's open, on either side
   of the split view. Shift+F4 opens Neovim on the selected file. It looks like the Alacritty setup
-  (Noto Sans Mono 12, Nord colours, see-through); Ctrl+Shift+C / V copy and paste, the tab closes
+  (Noto Sans Mono 12, Nord colours, 80 % opaque, with no glass blur or tint behind it, so the
+  wallpaper shows through as in Alacritty); Ctrl+Shift+C / V copy and paste, the tab closes
   when the program exits. "Open Alacritty Window" in the >_ menu starts a real Alacritty there.
   It runs your login shell (fish), so tmux inside it gets fish too.
   Pinch on the touchpad, roll the bottom thumbwheel, or Ctrl+wheel / Ctrl++ / Ctrl+- / Ctrl+0 to
@@ -74,9 +82,15 @@ manager icon; the IRIX icons are only inside the window.
   when it's at its prompt, and a `cd` in the shell moves the path bar along.
 - Web tabs (F7, or the >_ menu): a web page in a tab, on either side, like the terminal tabs.
   Firefox can't be embedded on Wayland, so this is Qt WebEngine (Chromium) with its own saved
-  profile (cookies, logins); **Open in Firefox** hands the page over. ‹ › ↻ and an address field
+  profile (cookies, logins), shared by all web tabs in all windows; **Open in Firefox** hands the
+  page over. Downloads go to Downloads (progress and "Show in Downloads" in the tab). ‹ › ↻ and an address field
   that takes URLs, paths or search words (DuckDuckGo); Ctrl+L focuses it, Back / Forward act on the
   page, the thumbwheel zooms it (its button: 100 %). With an .html / .pdf / image selected, F7 opens it.
+- List columns like Finder's: Date Modified, Date Created, Date Last Opened, Date Changed, Size,
+  Kind, Tags, Permissions, Owner. Right-click a column heading or View ▸ Show Columns; both sides
+  use the same columns, and a narrow side leaves out the least useful ones.
+- One fm process: launching fm again (dock, `xdg-open`, `irixfm <folder>`) or New Window (Ctrl+N)
+  opens a window in the running fm.
 - The view buttons in the toolbar always show the active side's view (icons / list / previews).
 - Sidebar icons: the theme's own symbolic icons (home, desktop, documents, downloads, applications,
   trash, network…) in the section's colour, like Finder. Right-click an entry ▸ **Icon…** to give it
@@ -114,7 +128,7 @@ KDE Plasma 6 on Wayland (KWin draws the blur and the shadow), Qt 6.8 or newer, K
 On Arch / CachyOS:
 
 ```
-sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting plasma-integration
+sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm plasma-integration
 ```
 
 The text uses **SF Pro Text** if it's installed and falls back to the system font otherwise.
@@ -126,7 +140,8 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # scroll, path bar, sidebar and Finder-feature tests, off-screen (268 checks, incl. split view and terminal tabs)
+make test         # all tests, off-screen (372 checks: views, path bar, sidebar, Finder features, tags, tabs, split view, devices, terminal and web tabs, single instance, Show in folder over D-Bus)
+make tools        # build/shot (screenshot harness) and build/leak (leak test), for development
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
 ```
@@ -192,25 +207,27 @@ busctl --user status org.freedesktop.FileManager1 | grep -E '^(PID|Comm)='
 
 ## Layout of the code
 
-How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Working on fm
+with Claude Code (or as a new contributor): start with [CLAUDE.md](CLAUDE.md), which has the
+commands, the test and snapshot recipes and how to restart fm safely.
 
 ```
 src/terminal.*  C++: the terminal for tabs (libvterm on a KPty, painted in QML)
 src/filemanager1.h  C++: the org.freedesktop.FileManager1 D-Bus interface (Show in folder)
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
-qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, tag dots, notebook tabs, web tab (BrowserView), sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
+qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, list columns, tag dots, notebook tabs, web tab (BrowserView) + shared web profile, sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test, single_instance_test.sh, dbus_test.sh (make test)
-tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, devices_test, terminal_test, browser_test, single_instance_test.sh, dbus_test.sh (make test)
+tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png), bench.sh (timings), shot.cpp (screenshots), leak.cpp (leak test)
+CLAUDE.md       how to work on fm: commands, safe restart, team rules (read first)
 ```
 
-`IRIXFM_SNAPSHOT=out.png irixfm <dir>` renders the window to a PNG and quits, which is handy for
-checking the look without touching the screen.
+`IRIXFM_SNAPSHOT=out.png QT_QPA_PLATFORM=offscreen irixfm <dir>` renders the window to a PNG and
+quits, which is handy for checking the look without touching the screen.
 
 ## Known limits
 
-- No licence file yet: pick one before publishing.
 - Plasma/KWin only: the blur and shadow use KDE protocols. Elsewhere the window is plain translucent.
 - No column view, no network browsing (Network opens Dolphin at `remote:/`).
 - Show in folder only shows local files: `sftp://`, `smb://` and other remote URIs are refused, so
@@ -218,3 +235,7 @@ checking the look without touching the screen.
 - A window opened by another app comes to the front only if that app passes its activation token
   (Firefox, Chromium and KDE apps do); otherwise KWin's focus-stealing prevention decides.
 - Desks Overview triggers KWin's Overview effect.
+
+## Licence
+
+GPL-3.0-or-later (see [LICENSE](LICENSE)), like most KDE software. Copyright © 2026 Christian Meier.

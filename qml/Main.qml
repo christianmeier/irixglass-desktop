@@ -52,7 +52,9 @@ Window {
     property var searchResults: []              // [{name, path, where, isDir, modified, size}]
     property bool searching: false
     property bool searchTruncated: false
-    property var volumes: Fm.volumes            // removable drives (Solid); a property so tests can fake one
+    property var volumes: Fm.volumes            // devices in Locations (Fm::deviceRows); a property so tests can fake one
+    property string deviceNotice: ""            // "Safe to remove “X”", device errors (a glass notice, bottom centre)
+    property string mountThen: ""               // after a mount from the menu: "tab" (Open in New Tab) or "stay" (Mount)
     readonly property bool searchActive: search.text.length > 0
     // ---- tags (docs/TAGS.md): names and Nord colours here, the tags themselves on the files (user.xdg.tags)
     property string tagsJson: ""
@@ -440,6 +442,8 @@ Window {
         if (t.dir === Fm.trashDir || t.dir.startsWith(Fm.trashDir + "/")) return "Trash"
         if (t.dir === Fm.home) return Fm.userName
         if (t.dir === "/") return "cachyOS"
+        const dev = volumes.find(v => v.url ? v.url === t.dir : v.mounted && v.path === t.dir)   // a device: its name
+        if (dev) return dev.label
         return t.dir.split("/").pop()
     }
     function termTitle(t) {
@@ -750,6 +754,7 @@ Window {
         setPlaces(p)
     }
     function activatePlace(item) {
+        if (item.url) { openDevice(item, false); return }   // a phone or camera: its KIO URL
         if (splitActive) {   // the split side: its own tab (or folder)
             const p = item.udi !== undefined ? (item.mounted ? item.path : "") : item.action === "trash" ? Fm.trashDir : item.path ? expand(item.path) : ""
             if (p) { folderTabs ? splitPane.openTabFor(p) : splitPane.go(p); return }
@@ -761,6 +766,54 @@ Window {
         else if (item.action === "overview") Fm.overview()
         else if (item.action === "find") search.forceActiveFocus()
         else if (item.action === "network") Fm.openInDolphin("remote:/")
+    }
+    // ---- devices (Locations) ---------------------------------------------------------------
+    function showNotice(text) { deviceNotice = text; noticeHide.restart() }
+    // A phone / camera opens its KIO URL (mtp:udi=…, afc://…/) in the views, a volume its folder.
+    function openDevice(item, inNewTab) {
+        if (item.url) {
+            if (!Fm.canBrowseUrl(item.url)) { showNotice("Can't open “" + item.label + "”: no " + item.url.split(":")[0] + ":/ support installed"); return }
+            if (inNewTab) newTab(item.url, true)
+            else if (splitActive) folderTabs ? splitPane.openTabFor(item.url) : splitPane.go(item.url)
+            else openFolder(item.url, false)
+            return
+        }
+        if (item.mounted) { inNewTab ? newTab(item.path, true) : activatePlace(item); return }
+        mountThen = inNewTab ? "tab" : ""
+        Fm.mountVolume(item.udi)
+    }
+    function insideOf(root, p) { return !!root && !!p && (p === root || p.startsWith(root + "/")) }
+    // Before unmounting, fm lets go of the volumes so it doesn't keep them busy itself: tabs and
+    // the split side showing a folder on them go home, terminal shells there cd home.
+    function leaveVolumes(roots) {
+        roots = roots.filter(r => !!r && r !== "/")
+        if (!roots.length) return
+        const on = p => roots.some(r => insideOf(r, p))
+        const home = Fm.home
+        if (on(dir)) go(home)
+        tabs = tabs.map((t, i) => i !== tabIndex && on(t.dir) ? Object.assign({}, t, { dir: home, back: [], fwd: [] }) : t)
+        if (on(splitPane.dir)) splitPane.go(home)
+        splitPane.tabs = splitPane.tabs.map((t, i) => i !== splitPane.tabIndex && on(t.dir) ? Object.assign({}, t, { dir: home, back: [] }) : t)
+        for (const id in terminals) {
+            const t = terminals[id]
+            if (isTerminal(id) && on(t.currentDirectory)) t.changeDirectory(home)
+        }
+        persistTabs()
+    }
+    // ⏏ / Eject / Safely Remove: every mounted partition of the drive (Fm powers it off after);
+    // an internal partition is just unmounted.
+    function ejectDevice(item) {
+        const all = item.internal ? [item] : volumes.filter(v => v.drive === item.drive)
+        leaveVolumes(all.filter(v => v.mounted).map(v => v.path))
+        Fm.ejectVolume(item.udi)
+    }
+    function unmountDevice(item) {
+        leaveVolumes([item.path])
+        Fm.unmountVolume(item.udi)
+    }
+    function deviceInfo(item) {
+        infoComponent.createObject(null, item.mounted ? { path: item.path, device: Fm.volumeInfo(item.udi), tu: tu, fontFamily: fontFamily, assetFor: asset }
+                                                      : { device: Fm.volumeInfo(item.udi), tu: tu, fontFamily: fontFamily, assetFor: asset })
     }
     function dropOnPlaces(urls, si, at) {
         let pos = at
@@ -778,7 +831,7 @@ Window {
             if (isCollapsed(sec.title)) return   // folded: only the title shows
             sec.items.forEach((it, ii) => rows.push({ kind: "item", si: si, ii: ii, item: it, color: sec.color }))
             if (!sec.items.length) rows.push({ kind: "empty", si: si })
-            // Removable drives appear at the end of Locations (not saved; they come and go).
+            // Devices appear at the end of Locations (not saved; they come and go).
             if (sec.title === "Locations" || (si === places.length - 1 && !places.some(x => x.title === "Locations")))
                 volumes.forEach(v => rows.push({ kind: "volume", si: si, item: v, color: sec.color }))
         })
@@ -794,7 +847,17 @@ Window {
     Connections {
         target: Fm
         function onTagsChanged() { win.tagRev++; if (win.searchTag) win.runSearch() }
-        function onVolumeMounted(udi, path) { win.openFolder(path, false) }
+        function onVolumeMounted(udi, path) {
+            const then = win.mountThen
+            win.mountThen = ""
+            if (then === "tab") win.newTab(path, true)
+            else if (then !== "stay") win.openFolder(path, false)
+        }
+        function onVolumeEjected(udi, label, how) {
+            win.showNotice(how === "remove" ? "Safe to remove “" + label + "”" : how === "disc" ? "“" + label + "” ejected" : "“" + label + "” unmounted")
+        }
+        function onVolumeUnmounted(udi, label) { win.showNotice("“" + label + "” unmounted") }
+        function onVolumeError(message) { win.showNotice(message) }
         function onFolderSizeReady(p, bytes, files, folders) {
             const s = Object.assign({}, win.folderSizes)
             s[p] = bytes < 0 ? "--" : Fm.humanSize(bytes)
@@ -1013,12 +1076,16 @@ Window {
                 required property var modelData
                 required property int index
                 readonly property bool head: modelData.kind === "head"
-                readonly property bool vol: modelData.kind === "volume"
+                readonly property bool vol: modelData.kind === "volume"   // a device: a volume or a phone (item.kind)
+                // a device that isn't mounted (a click mounts it): dimmed, like Finder
+                readonly property bool dimmed: vol && !modelData.item.url && !modelData.item.mounted
+                readonly property bool ejectable: vol && !!modelData.item.mounted
                 readonly property bool item: modelData.kind === "item" || vol
                 readonly property bool tagRow: modelData.kind === "tag"
                 readonly property bool tagHead: head && !!modelData.tags
                 readonly property bool current: tagRow ? win.searchTag.toLowerCase() === modelData.tag.name.toLowerCase()
                                                 : item && (modelData.item.action === "trash" ? win.inTrash
+                                                           : modelData.item.url ? modelData.item.url === win.dir
                                                            : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
                 readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
                 // Header rows carry the gap above them, so baselines match the mockup.
@@ -1050,7 +1117,8 @@ Window {
                     objectName: "placeStdIcon"
                     visible: row.item && !row.glyph
                     x: 21 * win.u; y: 6.5 * win.tu; width: 17 * win.tu; height: width
-                    source: visible ? (row.vol ? "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
+                    source: visible ? (row.vol ? row.modelData.item.icon || "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
+                    opacity: row.dimmed ? .6 : 1
                     fallback: "folder-symbolic"
                     isMask: true; color: row.modelData.color || "white"
                     roundToIconSize: false
@@ -1079,7 +1147,7 @@ Window {
                     anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
                     text: row.head ? row.modelData.title : row.item ? win.placeLabel(row.modelData.item)
                           : row.tagRow ? row.modelData.tag.name : (row.modelData.hint || "Drop folders here")
-                    color: "white"; opacity: row.head ? .45 : row.item || row.tagRow ? 1 : .3
+                    color: "white"; opacity: row.head ? .45 : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
                     font.family: win.fontFamily
                     font.pixelSize: (row.head ? 11 : row.item || row.tagRow ? 13.5 : 12) * win.tu
                     font.weight: row.head ? Font.DemiBold : Font.Normal
@@ -1137,24 +1205,29 @@ Window {
                     // For a tag this only hides it from the sidebar (Delete Tag is in its menu).
                     TapHandler { onTapped: row.tagRow ? win.setTagShown(row.modelData.tag.name, false) : win.placeRemove(row.modelData.si, row.modelData.ii) }
                 }
-                Text {   // ⏏ on mounted drives
-                    visible: row.vol && row.modelData.item.mounted
+                Text {   // ⏏ on mounted devices: Safely Remove (a disc: Eject; internal: Unmount)
+                    objectName: "ejectButton"
+                    visible: row.ejectable
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
                     anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu
                     text: "⏏"; color: "white"; opacity: ejectHover.hovered ? .95 : .55
                     font.pixelSize: 13 * win.tu
                     HoverHandler { id: ejectHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: Fm.ejectVolume(row.modelData.item.udi) }
+                    TapHandler { onTapped: win.ejectDevice(row.modelData.item) }
                 }
                 HoverHandler { id: hov }
+                ToolTip.visible: row.vol && hov.hovered
+                ToolTip.delay: 700
+                ToolTip.text: row.vol ? row.modelData.item.tip || row.modelData.item.label : ""
                 MouseArea {
-                    anchors.fill: parent; anchors.rightMargin: row.head || (row.vol && row.modelData.item.mounted) || removeButton.visible ? 36 * win.u : 0
+                    anchors.fill: parent; anchors.rightMargin: row.head || row.ejectable || removeButton.visible ? 36 * win.u : 0
                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                     onClicked: m => {
                         keys.forceActiveFocus()
                         if (m.button === Qt.MiddleButton) {   // a place in a background tab
                             const it = row.modelData.item
-                            if (it && (it.path || it.action === "trash")) win.newTab(it.action === "trash" ? Fm.trashDir : win.expand(it.path), false)
+                            if (row.vol) { if (it.url || it.mounted) win.newTab(it.url || it.path, false) }
+                            else if (it && (it.path || it.action === "trash")) win.newTab(it.action === "trash" ? Fm.trashDir : win.expand(it.path), false)
                             return
                         }
                         if (row.tagRow) {
@@ -2206,6 +2279,33 @@ Window {
         TapHandler { onDoubleTapped: win.bottomExtra = 0 }
     }
 
+    // ---- device notice ("Safe to remove “X”", errors): a glass pill above the status bar ----
+    Rectangle {
+        objectName: "deviceNotice"
+        visible: opacity > 0
+        opacity: win.deviceNotice ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        z: 20
+        x: Math.max(240 * u - win.contentShift, (parent.width + 240 * u - win.contentShift - width) / 2)
+        y: parent.height - win.bottomH - height - 14 * u
+        width: Math.min(noticeMetrics.advanceWidth + 34 * u, parent.width - 260 * u + win.contentShift); height: noticeText.implicitHeight + 14 * u
+        TextMetrics { id: noticeMetrics; font: noticeText.font; text: win.deviceNotice }
+        radius: Math.min(height / 2, 14 * u)
+        color: Qt.rgba(28 / 255, 30 / 255, 38 / 255, .82); border.color: Qt.rgba(1, 1, 1, .18)
+        Rectangle {   // the Liquid Glass edge: brightest at the top
+            anchors.fill: parent; radius: parent.radius; color: "transparent"
+            border.width: 1; border.color: Qt.rgba(1, 1, 1, .12)
+            gradient: Gradient { GradientStop { position: 0; color: Qt.rgba(1, 1, 1, .08) } GradientStop { position: .5; color: "transparent" } }
+        }
+        Text {
+            id: noticeText
+            anchors.centerIn: parent; width: parent.width - 32 * win.u
+            text: win.deviceNotice; color: "white"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+            font.family: win.fontFamily; font.pixelSize: 12.5 * win.tu
+        }
+        TapHandler { onTapped: win.deviceNotice = "" }
+        Timer { id: noticeHide; interval: 5000; onTriggered: win.deviceNotice = "" }
+    }
     // ---- status bar ------------------------------------------------------------
     Rectangle {
         visible: !win.tabBarShown   // with tabs, the strip draws the page edge
@@ -2688,12 +2788,30 @@ Window {
         P.MenuSeparator {}
         P.MenuItem { text: "Remove from Sidebar"; onTriggered: win.placeRemove(placeMenu.si, placeMenu.ii) }
     }
-    P.Menu {
+    P.Menu {   // a device in Locations
         id: volumeMenu
+        objectName: "volumeMenu"
         property var vol: null
-        P.MenuItem { text: "Open"; onTriggered: win.activatePlace(volumeMenu.vol) }
-        P.MenuItem { text: "Eject “" + (volumeMenu.vol ? volumeMenu.vol.label : "") + "”"; enabled: !!(volumeMenu.vol && volumeMenu.vol.mounted); onTriggered: Fm.ejectVolume(volumeMenu.vol.udi) }
-        P.MenuItem { text: "Get Info"; enabled: !!(volumeMenu.vol && volumeMenu.vol.mounted); onTriggered: infoComponent.createObject(null, { path: volumeMenu.vol.path, tu: win.tu, fontFamily: win.fontFamily, assetFor: win.asset }) }
+        readonly property var v: vol || ({})
+        readonly property string name: "“" + (v.label || "") + "”"
+        P.MenuItem { objectName: "volOpen"; text: "Open"; onTriggered: win.openDevice(volumeMenu.v, false) }
+        P.MenuItem { objectName: "volNewTab"; text: "Open in New Tab"; onTriggered: win.openDevice(volumeMenu.v, true) }
+        P.MenuSeparator { visible: !volumeMenu.v.url }
+        P.MenuItem {   // just this partition
+            objectName: "volMount"
+            visible: !volumeMenu.v.url && !volumeMenu.v.optical
+            text: (volumeMenu.v.mounted ? "Unmount " : "Mount ") + volumeMenu.name
+            onTriggered: { if (volumeMenu.v.mounted) win.unmountDevice(volumeMenu.v); else { win.mountThen = "stay"; Fm.mountVolume(volumeMenu.v.udi) } }
+        }
+        P.MenuItem {   // the whole drive: unmount all its partitions, then eject the disc / power it off
+            objectName: "volEject"
+            visible: !volumeMenu.v.url && !volumeMenu.v.internal
+            enabled: !!volumeMenu.v.mounted
+            text: (volumeMenu.v.optical ? "Eject " : "Safely Remove ") + volumeMenu.name
+            onTriggered: win.ejectDevice(volumeMenu.v)
+        }
+        P.MenuSeparator {}
+        P.MenuItem { objectName: "volInfo"; text: "Get Info"; onTriggered: win.deviceInfo(volumeMenu.v) }
     }
     P.MessageDialog {
         id: emptyDialog

@@ -1,7 +1,8 @@
 # fm (irixfm): build with plain g++ + pkg-config. No cmake needed.
 #   make            build ./build/irixfm
 #   make run        run from the source tree
-#   make test       scroll, path bar, sidebar and Finder-feature tests on an off-screen window
+#   make test       all tests, off-screen (scroll … browser, single instance, D-Bus); run under flock, see CLAUDE.md
+#   make tools      build/shot (screenshot harness) and build/leak (leak test); not part of make test
 #   make install    install into ~/.local (PREFIX=... to change), with the D-Bus service file for
 #                   org.freedesktop.FileManager1 ("Show in folder" in other apps opens fm)
 #   make uninstall
@@ -10,7 +11,7 @@ CXX      ?= g++
 BUILD    := build
 MOC      := $(shell pkg-config --variable=libexecdir Qt6Core 2>/dev/null || echo /usr/lib/qt6)/moc
 
-PKGS     := Qt6Network Qt6DBus Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
+PKGS     := Qt6DBus Qt6Network Qt6Widgets Qt6Quick Qt6Qml Qt6QuickControls2 Qt6Concurrent Qt6Test KF6WindowSystem KF6CoreAddons KF6Archive
 KF6INC   := /usr/include/KF6
 # -Wno-deprecated-declarations: KIO 6.6+ headers warn about their own deprecated CacheControl enum.
 CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-config --cflags $(PKGS)) \
@@ -75,8 +76,20 @@ $(BUILD)/browser_test: tests/browser_test.cpp $(LIBSRC) src/fm.h
 $(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
 
+$(BUILD)/devices_test: tests/devices_test.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/devices_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+
+# Dev tools (tools/*.cpp, usage at the top of each file and in CLAUDE.md); not in TESTS.
+$(BUILD)/shot: tools/shot.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/shot.cpp $(LIBSRC) -o $@ $(LDLIBS)
+
+$(BUILD)/leak: tools/leak.cpp $(LIBSRC) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/leak.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+
+tools: $(BUILD)/shot $(BUILD)/leak
+
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/devices_test $(BUILD)/terminal_test $(BUILD)/browser_test
 test: $(TESTS) $(BUILD)/irixfm
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; \
@@ -111,4 +124,4 @@ uninstall:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all icons run test install uninstall clean
+.PHONY: all icons run test tools install uninstall clean
