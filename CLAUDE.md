@@ -21,6 +21,10 @@ tools/              bench.sh, shot.cpp, leak.cpp, make_icons.py, make_mockup.py
 docs/               DEVELOPMENT.md (read first), FINDER-FEATURES.md, TAGS.md, bench-baseline.txt
 ```
 
+Branches build on each other: main → finder-path → finder-features → finder-phase2 → finder-tags →
+irix-tabs → perf (`perf-*` are merged expert branches). The main checkout `~/CODE/irixfm` is on
+`perf`, and that's what is installed; `git log` messages explain why each change was made.
+
 QML is loaded from disk at run time (`~/.local/share/irixfm/qml` when installed, the repo with
 `IRIXFM_ASSETS=$PWD`), so a QML-only change needs no rebuild, only `make install` and a restart.
 
@@ -40,7 +44,27 @@ make tools                                   # build/shot and build/leak (not pa
   (`make build/<name>_test` first).
 - `IRIXFM_TEST_NETWORK=1` makes `browser_test` also load real sites (three tabs on example.com).
 - `tests/single_instance_test.sh build/irixfm` checks the one-process behaviour (part of `make test`).
-- New test file: add a `$(BUILD)/x_test` rule and put it in `TESTS` in the `Makefile`.
+- New test file: add a `$(BUILD)/x_test` rule and put it in `TESTS` in the `Makefile`. Tests are
+  plain `main()` programs printing `PASS …` / `FAIL …` lines (see `check()` in any test); they find
+  QML items by `objectName` and call QML functions with `QMetaObject::invokeMethod`. Which test
+  covers what: `terminal_test` (terminal tabs), `browser_test` (web tabs), `split_test` (split view,
+  list columns), `tab_test`, `sidebar_test`, `tag_test`, `finder_test` / `phase2_test` (Finder
+  commands), `path_test`, `scroll_test`, `dock_test`, `preview_test`.
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `IRIXFM_ASSETS=<dir>` | load `qml/` and `icons/` from there (the repo: `$PWD`) instead of `~/.local/share/irixfm` |
+| `IRIXFM_SNAPSHOT=<png>` | save the window 2.5 s after start and quit |
+| `IRIXFM_BENCH=1\|split` | print start-up and scroll timings and quit (`tools/bench.sh`) |
+| `IRIXFM_TERM_BENCH=<dir>` | `terminal_test` runs the terminal benchmark instead of the tests |
+| `IRIXFM_SINGLE=1` | single-instance behaviour even off-screen (it's off for off-screen, bench, snapshot runs) |
+| `IRIXFM_SHELL=<path>` | shell for terminal tabs instead of the login shell (tests use bash) |
+| `IRIXFM_NO_DIALOGS=1` | KIO job errors print instead of opening dialogs (tests) |
+| `IRIXFM_TEST_NETWORK=1` | `browser_test` also loads real sites |
+| `QT_FORCE_STDERR_LOGGING=1` | Qt/QML messages on stderr instead of the journal |
+| `QT_LOGGING_RULES="irixfm.terminal.debug=true"` | log terminal drags and pinches |
 
 ## Restarting the user's fm safely
 
