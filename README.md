@@ -46,7 +46,7 @@ one at install time.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/irixglass-desktop.git
+git clone https://github.com/christianmeier/irixglass-desktop.git
 cd irixglass-desktop
 scripts/install.sh packages     # lists the pacman packages to install with sudo
 sudo pacman -S --needed kvantum teams-for-linux neovim lazygit tree-sitter-cli 7zip
