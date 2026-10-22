@@ -117,6 +117,7 @@ private:
     QPointer<QQuickWindow> m_watchedWindow;
     bool m_dragOver = false;                   // a drag is over this terminal (taken at the window)
     QString m_program, m_cwd, m_title;
+    QString m_shell;   // the login shell started in this tab (how to quote paths for it)
     QStringList m_arguments;
     QFont m_font, m_boldFont, m_italicFont;
     QRawFont m_raw[3];                         // regular, bold, italic: text is drawn as glyph runs
