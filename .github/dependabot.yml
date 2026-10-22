@@ -1,0 +1,14 @@
+# Keeps the SHA-pinned GitHub Actions in .github/workflows/ up to date (one grouped PR a week).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7   # let a new release settle before pinning it
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
