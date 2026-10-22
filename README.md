@@ -142,8 +142,17 @@ xdg-mime default irixfm.desktop inode/directory          # folders open in fm; t
 xdg-mime default org.kde.dolphin.desktop inode/directory # back to Dolphin
 ```
 
-"Show in folder" in other apps still goes to Dolphin (fm doesn't implement the
-`org.freedesktop.FileManager1` D-Bus interface yet).
+**Show in folder**: "Show in folder" / "Open containing folder" in Firefox, Chromium, VS Code and KDE
+apps opens fm: a new window on the folder with the items selected (items from several folders: a
+tab each), and their "Properties" opens Get Info. fm serves the freedesktop
+`org.freedesktop.FileManager1` D-Bus interface, and `make install` puts a D-Bus service file in
+`~/.local/share/dbus-1/services`, which comes before Dolphin's in `/usr/share`, so the bus starts fm
+when it isn't running. If Dolphin already runs and owns the name, fm doesn't take it away (it waits
+and gets it when Dolphin quits). `make uninstall` gives it back to Dolphin. Check who has it:
+
+```
+busctl --user status org.freedesktop.FileManager1 | grep -E '^(PID|Comm)='
+```
 
 ## Keys
 
@@ -187,11 +196,12 @@ How it works, design rules and gotchas: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.m
 
 ```
 src/terminal.*  C++: the terminal for tabs (libvterm on a KPty, painted in QML)
+src/filemanager1.h  C++: the org.freedesktop.FileManager1 D-Bus interface (Show in folder)
 src/            C++: window blur, input mask and shadow (KWindowEffects, KWindowShadow), KIO file actions
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, tag dots, notebook tabs, web tab (BrowserView), sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test, single_instance_test.sh, dbus_test.sh (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png)
 ```
 
@@ -203,4 +213,8 @@ checking the look without touching the screen.
 - No licence file yet: pick one before publishing.
 - Plasma/KWin only: the blur and shadow use KDE protocols. Elsewhere the window is plain translucent.
 - No column view, no network browsing (Network opens Dolphin at `remote:/`).
+- Show in folder only shows local files: `sftp://`, `smb://` and other remote URIs are refused, so
+  the calling app reports an error (Dolphin isn't started for them).
+- A window opened by another app comes to the front only if that app passes its activation token
+  (Firefox, Chromium and KDE apps do); otherwise KWin's focus-stealing prevention decides.
 - Desks Overview triggers KWin's Overview effect.

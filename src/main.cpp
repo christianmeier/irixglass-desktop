@@ -1,4 +1,11 @@
 #include "fm.h"
+#include "filemanager1.h"
+
+#include <KStartupInfo>
+#include <KWindowSystem>
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <memory>
 
 #include <QApplication>
 #include <KSignalHandler>
@@ -60,7 +67,13 @@ int main(int argc, char *argv[])
         const QFileInfo info(start);
         return info.isDir() ? info.absoluteFilePath() : info.exists() ? info.absolutePath() : QDir::homePath();
     };
-    const QString start = folderOf(app.arguments().value(1, QDir::homePath()));
+    // --dbus-activated: started by the D-Bus daemon for org.freedesktop.FileManager1 (the service
+    // file, see the Makefile). No window of its own: the call that started it opens one.
+    QStringList args = app.arguments().mid(1);
+    const bool dbusActivated = args.removeAll(QStringLiteral("--dbus-activated")) > 0;
+    const bool folderGiven = !args.isEmpty();
+    const QString start = folderOf(args.value(0, QDir::homePath()));
+    const bool debugLog = qEnvironmentVariableIsSet("IRIXFM_SINGLE") || qEnvironmentVariableIsSet("IRIXFM_DBUS");
 
     // One fm process: launching fm again (dock, xdg-open, a terminal) hands the folder to the running
     // one, which opens a window, instead of starting a second process (~200 MB more, and a second web
@@ -72,38 +85,47 @@ int main(int argc, char *argv[])
             || QGuiApplication::platformName() == QLatin1String("offscreen"));
     const QString serverName = QStringLiteral("irixfm-%1-%2").arg(getuid())
         .arg(QString::fromLatin1(QCryptographicHash::hash(QCoreApplication::applicationFilePath().toUtf8(), QCryptographicHash::Md5).toHex().left(8)));
+    bool otherFm = false;   // D-Bus activated while an fm (an older build) runs without the D-Bus name
     if (!alone) {
         QLocalSocket other;
         other.connectToServer(serverName);
         if (other.waitForConnected(300)) {
-            other.write((app.arguments().size() < 2 ? QString() : start).toUtf8() + '\n');
-            other.waitForBytesWritten(300);
-            other.disconnectFromServer();
-            return 0;
+            if (dbusActivated) {
+                otherFm = true;
+                std::fprintf(stderr, "irixfm: started for org.freedesktop.FileManager1 while another fm runs without it\n");
+            } else {
+                other.write((folderGiven ? start : QString()).toUtf8() + '\n');
+                other.waitForBytesWritten(300);
+                other.disconnectFromServer();
+                return 0;
+            }
         }
     }
 
-    // Without a folder argument (dock, menu) the last session's tabs come back.
-    Fm fm(start, assets, nullptr, app.arguments().size() < 2);
+    // The first window's Fm is made with it (loadMain), right away or, D-Bus activated, on the first call.
+    std::unique_ptr<Fm> mainFm;
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty(QStringLiteral("Fm"), &fm);
 
     // More windows: each has its own Fm (start folder, its window effects) in a child context.
-    QQmlComponent windowComponent(&engine, QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
+    // The component is made with the second window: Main.qml needs the IrixFm types, which the
+    // first Fm registers.
+    std::unique_ptr<QQmlComponent> windowComponent;
     QList<QPointer<QObject>> extraWindows;
-    std::function<void(const QString &)> openWindow = [&](const QString &dir) {
+    std::function<QObject *(const QString &)> openWindow = [&](const QString &dir) -> QObject * {
         auto *wfm = new Fm(dir.isEmpty() ? QDir::homePath() : dir, assets, &app, false);
+        if (!windowComponent)
+            windowComponent = std::make_unique<QQmlComponent>(&engine, QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
         auto *ctx = new QQmlContext(engine.rootContext(), wfm);
         ctx->setContextProperty(QStringLiteral("Fm"), wfm);
-        QObject *w = windowComponent.create(ctx);
+        QObject *w = windowComponent->create(ctx);
         if (!w) {
-            qWarning() << windowComponent.errorString();
+            qWarning() << windowComponent->errorString();
             delete wfm;
-            return;
+            return nullptr;
         }
         extraWindows << w;
         QObject::connect(wfm, &Fm::newWindowRequested, &app, openWindow);
-        if (qEnvironmentVariableIsSet("IRIXFM_SINGLE"))
+        if (debugLog)
             std::fprintf(stderr, "irixfm: window opened on %s\n", qPrintable(wfm->property("startDir").toString()));
         // a closed window goes away with its Fm (the first one lives as long as fm does)
         if (auto *qw = qobject_cast<QQuickWindow *>(w))
@@ -113,30 +135,195 @@ int main(int argc, char *argv[])
                     wfm->deleteLater();
                 }
             });
+        return w;
     };
-    QObject::connect(&fm, &Fm::newWindowRequested, &app, openWindow);
+    // Without a folder argument (dock, menu) the last session's tabs come back.
+    auto loadMain = [&](const QString &dir, bool restore) -> QObject * {
+        mainFm = std::make_unique<Fm>(dir, assets, nullptr, restore);
+        engine.rootContext()->setContextProperty(QStringLiteral("Fm"), mainFm.get());
+        QObject::connect(mainFm.get(), &Fm::newWindowRequested, &app, openWindow);
+        engine.load(QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
+        if (engine.rootObjects().isEmpty())
+            return nullptr;
+        if (debugLog && dbusActivated)
+            std::fprintf(stderr, "irixfm: window opened on %s\n", qPrintable(dir));
+        return engine.rootObjects().constFirst();
+    };
+    auto newWindow = [&](const QString &dir) { return mainFm ? openWindow(dir) : loadMain(dir, false); };
+
     QLocalServer server;
-    if (!alone) {
+    if (!alone && !otherFm) {
         QLocalServer::removeServer(serverName);   // a stale socket from a crashed fm
         server.listen(serverName);
         QObject::connect(&server, &QLocalServer::newConnection, &app, [&] {
             while (QLocalSocket *c = server.nextPendingConnection()) {
-                QObject::connect(c, &QLocalSocket::readyRead, c, [c, &openWindow, folderOf] {
+                QObject::connect(c, &QLocalSocket::readyRead, c, [c, &newWindow, folderOf] {
                     if (!c->canReadLine())
                         return;
                     const QString dir = QString::fromUtf8(c->readLine()).trimmed();
-                    openWindow(dir.isEmpty() ? QDir::homePath() : folderOf(dir));
+                    newWindow(dir.isEmpty() ? QDir::homePath() : folderOf(dir));
                     c->disconnectFromServer();
                 });
                 QObject::connect(c, &QLocalSocket::disconnected, c, &QObject::deleteLater);
             }
         });
     }
+
+    // org.freedesktop.FileManager1: "Show in folder" in other apps opens fm (see filemanager1.h).
+    // Each call opens a new window, like Finder and Dolphin: the call comes from another app, and a
+    // window of its own is what can be raised for it without taking over a tab the user is working
+    // in. More folders in one call become tabs of that window. Off-screen, bench and snapshot runs
+    // stay off the bus (IRIXFM_DBUS=1: a test opts in, on its own private bus).
+    FileManager1 fileManager1;
+    auto raise = [](QWindow *w, const QString &startupId) {
+        if (!w)
+            return;
+        // The caller's activation token (Wayland) or startup id (X11) lets KWin focus the window.
+        auto activate = [w = QPointer<QWindow>(w), startupId] {
+            if (!w)
+                return;
+            if (!startupId.isEmpty() && KWindowSystem::isPlatformWayland())
+                KWindowSystem::setCurrentXdgActivationToken(startupId);
+            else if (!startupId.isEmpty() && KWindowSystem::isPlatformX11())
+                KStartupInfo::setNewStartupId(w, startupId.toUtf8());
+            w->raise();
+            KWindowSystem::activateWindow(w);
+        };
+        // A new window has no surface to activate until it has been shown and drawn once.
+        auto once = [activate, done = std::make_shared<bool>(false)] { if (!*done) { *done = true; activate(); } };
+        if (auto *qw = qobject_cast<QQuickWindow *>(w))
+            QObject::connect(qw, &QQuickWindow::frameSwapped, qw, once, Qt::SingleShotConnection);
+        QTimer::singleShot(500, w, once);   // off-screen, or no frame yet
+    };
+    // URIs (or plain paths, which some apps send) -> existing local paths, in order, once each.
+    auto localPaths = [](const QStringList &uris) {
+        QStringList out;
+        for (const QString &u : uris) {
+            const QUrl url = u.startsWith(QLatin1Char('/')) ? QUrl::fromLocalFile(u) : QUrl(u);
+            const QString p = url.isLocalFile() ? QDir::cleanPath(url.toLocalFile()) : QString();
+            if (p.isEmpty() || !QFileInfo::exists(p))
+                std::fprintf(stderr, "irixfm: FileManager1: can't show %s (not a local file that exists)\n", qPrintable(u));
+            else if (!out.contains(p))
+                out << p;
+        }
+        return out;
+    };
+    // groups: [{dir, items}], one per folder; the first folder gets the window, the others tabs.
+    auto reveal = [&](const QVariantList &groups, const QString &startupId) -> QObject * {
+        QObject *w = newWindow(groups.constFirst().toMap().value(QStringLiteral("dir")).toString());
+        if (!w)
+            return nullptr;
+        w->setProperty("logReveal", debugLog);
+        QMetaObject::invokeMethod(w, "revealItems", Q_ARG(QVariant, QVariant(groups)));
+        raise(qobject_cast<QWindow *>(w), startupId);
+        return w;
+    };
+    fileManager1.showFolders = [&](const QStringList &uris, const QString &startupId) {
+        QVariantList groups;
+        QStringList dirs;
+        for (const QString &p : localPaths(uris)) {
+            const QString dir = folderOf(p);
+            if (!dirs.contains(dir)) {
+                dirs << dir;
+                groups << QVariantMap{{QStringLiteral("dir"), dir}, {QStringLiteral("items"), QStringList()}};
+            }
+        }
+        return !groups.isEmpty() && reveal(groups, startupId);
+    };
+    fileManager1.showItems = [&](const QStringList &uris, const QString &startupId) {
+        QStringList dirs;
+        QList<QStringList> items;
+        for (const QString &p : localPaths(uris)) {
+            const QString dir = p == QLatin1String("/") ? p : QFileInfo(p).absolutePath();
+            if (!dirs.contains(dir)) {
+                dirs << dir;
+                items << QStringList();
+            }
+            if (p != dir)
+                items[dirs.indexOf(dir)] << p;
+        }
+        QVariantList groups;
+        for (int i = 0; i < dirs.size(); ++i)
+            groups << QVariantMap{{QStringLiteral("dir"), dirs[i]}, {QStringLiteral("items"), items[i]}};
+        if (debugLog)
+            for (const QStringList &s : std::as_const(items))
+                if (!s.isEmpty())
+                    std::fprintf(stderr, "irixfm: FileManager1: showing %s\n", qPrintable(s.join(QLatin1Char(' '))));
+        return !groups.isEmpty() && reveal(groups, startupId);
+    };
+    // Get Info windows, made by any open fm window. Started for it alone (D-Bus activated), fm
+    // also opens the first item's folder with the items selected: Get Info windows need a window.
+    fileManager1.showItemProperties = [&](const QStringList &uris, const QString &startupId) {
+        const QStringList paths = localPaths(uris);
+        if (paths.isEmpty())
+            return false;
+        QObject *host = nullptr;
+        if (mainFm)
+            host = engine.rootObjects().value(0);
+        for (const QPointer<QObject> &w : std::as_const(extraWindows))
+            if (!host && w)
+                host = w;
+        if (!host) {
+            const QString first = paths.constFirst();
+            const QString dir = first == QLatin1String("/") ? first : QFileInfo(first).absolutePath();
+            QStringList items;   // the items in that folder
+            for (const QString &p : paths)
+                if (p != dir && QFileInfo(p).absolutePath() == dir)
+                    items << p;
+            host = reveal({QVariantMap{{QStringLiteral("dir"), dir}, {QStringLiteral("items"), items}}}, QString());
+        }
+        if (!host)
+            return false;
+        QVariant made;
+        QMetaObject::invokeMethod(host, "showInfoFor", Q_RETURN_ARG(QVariant, made), Q_ARG(QVariant, QVariant(paths)));
+        QWindow *last = nullptr;
+        for (const QVariant &v : made.toList())
+            if (auto *iw = qobject_cast<QWindow *>(v.value<QObject *>())) {
+                last = iw;
+                if (debugLog)
+                    std::fprintf(stderr, "irixfm: info window for %s\n", qPrintable(iw->property("path").toString()));
+            }
+        raise(last, startupId);
+        return last != nullptr;
+    };
     QElapsedTimer clock;
     clock.start();
-    engine.load(QUrl::fromLocalFile(assets + QStringLiteral("/qml/Main.qml")));
-    if (engine.rootObjects().isEmpty())
+    if (!dbusActivated && !loadMain(start, !folderGiven))
         return 1;
+
+    // The name is taken once the first window is up (D-Bus activated: before any window, the call
+    // that started fm comes in once it has the name).
+    // Not IRIXFM_SINGLE: the single-instance test runs on the user's own session bus.
+    const bool onTheBus = qEnvironmentVariableIsSet("IRIXFM_DBUS")
+        || !(qEnvironmentVariableIsSet("IRIXFM_BENCH") || qEnvironmentVariableIsSet("IRIXFM_SNAPSHOT")
+             || QGuiApplication::platformName() == QLatin1String("offscreen"));
+    if (onTheBus) {
+        QDBusConnection bus = QDBusConnection::sessionBus();
+        const QString name = QStringLiteral("org.freedesktop.FileManager1");
+        if (!bus.isConnected()) {
+            std::fprintf(stderr, "irixfm: no D-Bus session bus, so no %s\n", qPrintable(name));
+        } else {
+            bus.registerObject(QStringLiteral("/org/freedesktop/FileManager1"), &fileManager1, QDBusConnection::ExportScriptableSlots);
+            // Don't fight over the name: if Dolphin (or another fm) has it, wait in line for it
+            // (it comes to fm when that one quits) instead of taking it away.
+            const auto reply = bus.interface()->registerService(name, QDBusConnectionInterface::QueueService, QDBusConnectionInterface::DontAllowReplacement);
+            if (reply.value() == QDBusConnectionInterface::ServiceRegistered) {
+                if (debugLog)
+                    std::fprintf(stderr, "irixfm: owns %s\n", qPrintable(name));
+            } else {
+                const QString owner = bus.interface()->serviceOwner(name).value();
+                std::fprintf(stderr, "irixfm: %s belongs to %s (pid %u); fm waits in line for it\n", qPrintable(name),
+                             qPrintable(owner), bus.interface()->servicePid(owner).value());
+                if (dbusActivated)
+                    return 0;   // started only for the name, which someone else serves
+            }
+        }
+    }
+    if (dbusActivated) {
+        // The call that activated fm is waiting for the name; if it never comes, don't stay around.
+        QTimer::singleShot(30000, &app, [&] { if (!mainFm) QCoreApplication::quit(); });
+    }
+
     // IRIXFM_BENCH=1: print how long start-up takes (QML loaded, first frame, the folder's items in
     // the view), then scroll the view to the end and back frame by frame, and quit. For measuring
     // optimisations: run it a few times, off-screen (QT_QPA_PLATFORM=offscreen) for steady numbers.

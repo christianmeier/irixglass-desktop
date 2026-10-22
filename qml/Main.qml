@@ -601,6 +601,23 @@ Window {
     }
     ListModel { id: resultsModel; objectName: "resultsModel" }
 
+    // "Show in folder" from other apps (org.freedesktop.FileManager1, see main.cpp): this window was
+    // opened on groups[0].dir; its items get selected and scrolled to, and every further folder
+    // becomes a tab here, its items selected when it's switched to (scrollY -1: scroll to them).
+    // Hidden files are only selected while hidden files are shown (the setting stays as it is).
+    property bool logReveal: false              // tests: print what got selected (stderr)
+    function revealItems(groups) {
+        const shown = items => (items || []).filter(p => showHidden || !p.substring(p.lastIndexOf("/") + 1).startsWith("."))
+        for (let i = 1; i < groups.length; ++i)
+            tabs = tabs.concat([{ dir: groups[i].dir, back: [], fwd: [], sel: shown(groups[i].items), anchor: -1, search: "", scrollY: -1 }])
+        if (groups.length > 1) { tabBarShown = true; persistTabs() }
+        const first = shown(groups[0].items)
+        if (first.length) selectWhenReady(first)
+    }
+    // Get Info windows for `paths` (ShowItemProperties); returned so main.cpp can raise them.
+    function showInfoFor(paths) {
+        return paths.map(p => infoComponent.createObject(null, { path: p, tu: tu, fontFamily: fontFamily, assetFor: asset }))
+    }
     function selectWhenReady(paths) { pendingSelect = paths; selectPending() }
     // Selects the pending paths as soon as they're all in the folder model.
     function selectPending() {
@@ -611,6 +628,7 @@ Window {
         for (const p of pendingSelect) s[p] = true
         pendingSelect = []
         selection = s
+        if (logReveal) console.info("irixfm: selected " + Object.keys(s).join(" "))
         anchorIndex = idx[0]
         if (pendingScrollY >= 0) { applyPendingScroll(); return }   // a restored tab: its own scroll position
         view().currentIndex = idx[0]
