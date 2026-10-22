@@ -1,5 +1,5 @@
 # Generates the "IrixGlass" Aurorae window decoration: every window gets
-# the look of fm (~/CODE/irixfm), the IRIX file manager with the Tahoe glass.
+# the look of fm (fm/), the IRIX file manager with the Tahoe glass.
 #
 # Values are taken from fm's QML (qml/Main.qml, EdgeRing.qml, TrafficLights.qml):
 #   corner radius   26 * 0.85 = 22 px (circular, like fm's PathRectangle)
@@ -320,7 +320,7 @@ PaddingRight={PAD_R}
 METADATA = """{
     "KPackageStructure": "aurorae",
     "KPlugin": {
-        "Authors": [{"Name": "macos-desktop-setup"}],
+        "Authors": [{"Name": "irixglass-desktop"}],
         "Category": "Plasma 6 Window Decorations",
         "ServiceTypes": ["aurorae"],
         "EnabledByDefault": true,

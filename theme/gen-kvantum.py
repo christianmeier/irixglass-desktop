@@ -1,5 +1,5 @@
 # Generates the "IrixGlass" Kvantum widget style, so Qt windows look like fm
-# (~/CODE/irixfm: qml/Main.qml, Pill.qml, EdgeRing.qml, GlassScrollBar.qml):
+# (fm/: qml/Main.qml, Pill.qml, EdgeRing.qml, GlassScrollBar.qml):
 #   window/base   fm bodyTint rgba(20, 22, 29, .62) over KWin blur
 #   buttons       fm pills: fully rounded, tint rgba(58, 61, 72, .40), edge ring brightest at the top
 #   hover/pressed white .08 / .16, toggled white .18 (fm's selected view segment)

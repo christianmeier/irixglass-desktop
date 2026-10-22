@@ -1,5 +1,5 @@
 # Generates the "IrixGlass-Dark" GTK 3 / GTK 4 theme: WhiteSur-Dark recoloured
-# with fm's palette (~/CODE/irixfm, qml/Main.qml), so GTK windows match fm and
+# with fm's palette (fm/, qml/Main.qml), so GTK windows match fm and
 # the Qt side (Kvantum IrixGlass, colour scheme IrixGlass):
 #   window / header  rgb(30, 32, 41)  fm's glass tint rgba(20,22,29,.62) as it reads
 #                    over the blurred wallpaper (GTK can't ask KWin for blur, so opaque)

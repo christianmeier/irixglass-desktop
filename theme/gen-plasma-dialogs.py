@@ -20,7 +20,7 @@ patch-tasks.py own those):
   widgets/scrollbar.svgz          recoloured: fm's overlay thumb, no track
   colors                          the theme's colours = IrixGlass.colors
 
-Values come from fm (~/CODE/irixfm, qml/Main.qml, EdgeRing.qml, Pill.qml):
+Values come from fm (fm/, qml/Main.qml, EdgeRing.qml, Pill.qml):
   edge ring   white .65 at the top -> .10 -> .55 at the bottom (EdgeRing)
   panels      18 px corners; pills fully rounded, rgb(58,61,72); accent #0a84ff
   selection   white .16, radius 8; hover white .07-.08

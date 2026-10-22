@@ -5,7 +5,7 @@ description: Change, fix or reapply the macOS-style KDE Plasma 6 desktop on this
 
 # macOS desktop setup
 
-Repository: `~/CODE/macos-desktop-setup`. Read `docs/SESSION-NOTES.md` before the first change in a session.
+Repository: this repo (irixglass-desktop); fm is in `fm/`. Read `docs/SESSION-NOTES.md` before the first change in a session.
 
 ## Where things live
 
@@ -24,7 +24,7 @@ Repository: `~/CODE/macos-desktop-setup`. Read `docs/SESSION-NOTES.md` before th
 | Global theme fixes | `configs/look-and-feel/*/defaults` | `~/.local/share/plasma/look-and-feel/com.github.vinceliuice.*/contents/defaults` | `scripts/install.sh whitesur` |
 | Wallpaper | `WALLPAPER_URL` in `scripts/install.sh` | `~/.local/share/wallpapers/macos/` | `scripts/install.sh wallpaper` |
 | AppImageUpdate, Craft apps | `AIU_VERSION`, `CRAFT_APPS` in `scripts/install.sh`; `scripts/install-craft-app.sh` | `~/Applications/…`, menu entries | `scripts/install.sh appimageupdate craft` |
-| fm file manager | separate repo `~/CODE/irixfm` | `~/.local/bin/irixfm`, default for folders | `scripts/install.sh irixfm` (or `make -C ~/CODE/irixfm install`) |
+| fm file manager | `fm/` in this repo | `~/.local/bin/irixfm`, default for folders | `scripts/install.sh irixfm` (or `make -C ~/CODE/irixfm install`) |
 | Fingerprint login | `configs/pam/plasmalogin` | `/etc/pam.d/plasmalogin` | user runs the sudo copy (README "Manual steps") |
 | Other configs | `configs/…` | see `scripts/install.sh` | the matching step |
 
@@ -66,7 +66,7 @@ Copy any lasting change into `scripts/panels.js` too.
 
 ## fm (the file manager)
 
-fm replaces Dolphin (dock Finder slot + default for folders). It has its own repo, `~/CODE/irixfm`, with a `CLAUDE.md` and the **`irixfm` skill** (`~/CODE/irixfm/.claude/skills/irixfm/SKILL.md`): read those for any change to fm (views, sidebar, tabs, split view, terminal and web tabs). Rules that touch this desktop:
+fm replaces Dolphin (dock Finder slot + default for folders). It lives in `fm/`, with a `CLAUDE.md` and the **`irixfm` skill** (`~/CODE/irixfm/.claude/skills/irixfm/SKILL.md`): read those for any change to fm (views, sidebar, tabs, split view, terminal and web tabs). Rules that touch this desktop:
 
 - Install: `scripts/install.sh irixfm` (checks the build packages, `make install`, sets fm as default for folders).
 - **Restart fm with `pkill -TERM -x irixfm`, check `pgrep -ax irixfm` is empty, then `systemd-run --user --collect ~/.local/bin/irixfm`**, never straight from Claude's shell: that passes Claude's environment (`SHELL=zsh`) to fm, its terminals and any tmux server they start.

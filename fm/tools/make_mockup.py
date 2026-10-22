@@ -227,7 +227,7 @@ def mockup_a():
     s += lights(x + 34, y + 36)
     sx = x + 32
     s += text(sx - 6, y + 82, "Favorites", 11, "#fff", 600, op=.45)
-    for i, (lab, c) in enumerate([("christianmeier", "#0a84ff"), ("Desktop", "#0a84ff"), ("Documents", "#0a84ff"),
+    for i, (lab, c) in enumerate([("user", "#0a84ff"), ("Desktop", "#0a84ff"), ("Documents", "#0a84ff"),
                                   ("Downloads", "#0a84ff"), ("Applications", "#0a84ff")]):
         s += sidebar_item(sx, y + 110 + i * 30, lab, c, sel=(i == 0))
     s += text(sx - 6, y + 290, "Indigo Magic", 11, "#fff", 600, op=.45)
@@ -246,7 +246,7 @@ def mockup_a():
     s += f'<rect x="{px+6}" y="{ty+5}" width="34" height="26" rx="9" fill="#000" fill-opacity=".35"/>'
     s += f'<g transform="translate({px+9},{ty+4}) scale(.28)">{folder()}</g>'
     sep = '<tspan fill-opacity=".4">  ›  </tspan>'
-    path = sep.join(f'<tspan fill-opacity=".7">{seg}</tspan>' for seg in ["/", "home", "christianmeier"])
+    path = sep.join(f'<tspan fill-opacity=".7">{seg}</tspan>' for seg in ["/", "home", "user"])
     s += (f'<text xml:space="preserve" x="{px + 54}" y="{ty + 23}" font-family="{FONT}" font-size="13.5" fill="#fff">'
           f'{path}{sep}<tspan font-weight="600">Projects</tspan></text>')
     s += text(px + 584, ty + 23, "⌄", 14, anchor="end", op=.6)
@@ -278,7 +278,7 @@ def mockup_b():
     s += shadow(x, y, w, h, r) + glass(x, y, w, h, r, "#10131a", .28)
     s += lights(x + 26, y + 26)
     s += (f'<text xml:space="preserve" x="{x + w / 2}" y="{y + 31}" font-family="{FONT}" font-size="14" fill="#fff" text-anchor="middle">'
-          '<tspan font-weight="600">christianmeier</tspan><tspan fill-opacity=".5">  — fm</tspan></text>')
+          '<tspan font-weight="600">user</tspan><tspan fill-opacity=".5">  — fm</tspan></text>')
     # directory bar: drop pocket, clickable path, history
     by = y + 56
     s += glass(x + 20, by, 54, 54, 16, "#000", .25)
@@ -286,7 +286,7 @@ def mockup_b():
     s += f'<g transform="translate({x+25},{by+4}) scale(.44)">{folder()}</g>'
     s += glass(x + 86, by, w - 210, 54, 27, "#ffffff", .08)
     cx = x + 112
-    for i, seg in enumerate(["/", "home", "christianmeier"]):
+    for i, seg in enumerate(["/", "home", "user"]):
         last = i == 2
         tw = len(seg) * 9.2 + 26
         s += f'<rect x="{cx}" y="{by+11}" width="{tw}" height="32" rx="16" fill="#fff" fill-opacity="{.22 if last else .08}"/>'

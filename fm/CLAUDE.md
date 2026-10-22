@@ -6,7 +6,7 @@ desktop. Licence: GPL-3.0-or-later (`LICENSE`). **Read `docs/DEVELOPMENT.md` bef
 performance notes and gotchas. The project skill `.claude/skills/irixfm/SKILL.md` has the
 workflow in short.
 
-The desktop around it (dock, top bar, themes) is `~/CODE/macos-desktop-setup` (its own `CLAUDE.md`
+The desktop around it (dock, top bar, themes) is the rest of this repo, one level up (its own `CLAUDE.md`
 and `docs/SESSION-NOTES.md`).
 
 ## Where things are
@@ -24,7 +24,7 @@ docs/               DEVELOPMENT.md (read first), FINDER-FEATURES.md, TAGS.md, be
 ```
 
 Branches build on each other: main → finder-path → finder-features → finder-phase2 → finder-tags →
-irix-tabs → perf (`perf-*` are merged expert branches). The main checkout `~/CODE/irixfm` is on
+irix-tabs → perf (`perf-*` are merged expert branches). fm was developed in its own repo, on
 `perf`, and that's what is installed; `git log` messages explain why each change was made.
 
 QML is loaded from disk at run time (`~/.local/share/irixfm/qml` when installed, the repo with
@@ -123,7 +123,7 @@ Always look at the image (Read the PNG) before reporting a visual change.
 ## Working in a team of agents
 
 - One git worktree per agent: `git worktree add -b <branch> ../irixfm-wt-<name> perf` (from the
-  branch being worked on). Never work in another agent's worktree or in `~/CODE/irixfm` itself
+  branch being worked on). Never work in another agent's worktree or in the main checkout itself
   unless you are the coordinator.
 - **Never `git stash`**: the stash is shared by all worktrees, and it once mixed up two agents' work.
 - Run `make test` under `flock ~/.cache/irixfm-test.lock`.
@@ -141,7 +141,7 @@ Always look at the image (Read the PNG) before reporting a visual change.
   brightest at the top) and the Nord colours.
 - Terminal font stays **Noto Sans Mono 12** (fm's terminal tabs copy the Alacritty setup).
 - "dokument everything" means: fm's `README.md`, `docs/DEVELOPMENT.md` and this file; in
-  `~/CODE/macos-desktop-setup` `docs/SESSION-NOTES.md`, `README.md`, the skill and `scripts/install.sh`.
+  the repo root: `docs/SESSION-NOTES.md`, `README.md`, the skill and `scripts/install.sh`.
 - **No sudo** (it needs a password): give the user a `! sudo …` line to run instead.
 
 ## Gotchas (details in docs/DEVELOPMENT.md)

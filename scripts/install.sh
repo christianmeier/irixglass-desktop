@@ -12,14 +12,14 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="$REPO/configs"
-WORK="${XDG_CACHE_HOME:-$HOME/.cache}/macos-desktop-setup"
+WORK="${XDG_CACHE_HOME:-$HOME/.cache}/irixglass-desktop"
 BACKUP="$HOME/.config/appearance-backup-$(date +%Y%m%d-%H%M%S)"
 FF_PROFILE_GLOB="$HOME/.config/mozilla/firefox/*.default-release"
 ATB_VERSION="v0.10.0"
 ZAPZAP_VERSION="7.5.1"
 AIU_VERSION="2.0.0-alpha-1-20251018"
 WALLPAPER_URL="https://media.512pixels.net/downloads/macos-wallpapers-6k/27-Golden-Gate-Dark.png"
-IRIXFM_REPO="$HOME/CODE/irixfm"
+IRIXFM_REPO="$REPO/fm"   # fm is part of this repo
 # storytold "Craft" apps: repo tag asset install-dir (see scripts/install-craft-app.sh)
 CRAFT_APPS=(
     "photocraft v0.12.0 photocraft-0.12.0-linux-x86_64.AppImage PhotoCraft"
@@ -338,7 +338,7 @@ step_craft() {
 
 step_irixfm() {
     log "fm (irixfm): IRIX file manager with the Tahoe look, as the default file manager"
-    [[ -d "$IRIXFM_REPO" ]] || { warn "$IRIXFM_REPO missing (separate repo)"; return; }
+    [[ -d "$IRIXFM_REPO" ]] || { warn "$IRIXFM_REPO missing (fm/ in this repo)"; return; }
     # Build needs (fm's README): Qt 6 (qt6-base has Qt6Network; WebEngine for web tabs), KF6 (KIO,
     # Kirigami, Solid, KArchive, SyntaxHighlighting, Pty) and libvterm for the terminal tabs.
     for p in base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm plasma-integration; do

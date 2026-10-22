@@ -1,5 +1,9 @@
 # Session notes, 2026-10-20
 
+> **Layout since 2026-10-22:** this repo (irixglass-desktop) joins what used to be two folders.
+> `~/CODE/macos-desktop-setup` is now the repo root, and `~/CODE/irixfm` is `fm/`, with its git
+> history kept (git subtree). Older entries below use the old paths.
+
 These notes are the history of the setup session: what was changed, why, and what still needs attention.
 
 ## System

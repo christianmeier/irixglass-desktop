@@ -1,4 +1,4 @@
-/* IrixGlass for Firefox: fm's look (~/CODE/irixfm) on top of the WhiteSur theme.
+/* IrixGlass for Firefox: fm's look (fm/) on top of the WhiteSur theme.
  * Installed as chrome/customChrome.css, which WhiteSur's userChrome.css imports last.
  * Firefox draws its own title bar (tabs in titlebar), so KWin's IrixGlass decoration
  * doesn't reach it; this file repeats the look in CSS.

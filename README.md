@@ -1,24 +1,59 @@
-# macOS-style desktop for CachyOS (KDE Plasma 6)
+# IrixGlass desktop
 
-This folder holds everything needed to recreate or continue the desktop setup built on 2026-10-20. It covers:
+A macOS Tahoe ("Liquid Glass") look for **KDE Plasma 6** on Wayland, built around **fm**, an
+IRIX Indigo Magic–style file manager with the same glass skin. fm sets the look for everything
+else: window title bars, Qt and GTK widgets, Plasma pop-ups, Firefox and Teams all copy its glass,
+colours and red/yellow/green buttons, rendered here as grey circles. Made and tested on CachyOS (Arch).
 
-- **Desktop look:** a macOS Tahoe (Liquid Glass) look for KDE Plasma 6 on Wayland. Every window is styled like fm ("IrixGlass": title bar, frame, widgets and colours).
-- **Terminal:** a Nord-themed tmux, Alacritty and LazyVim setup.
-- **Apps:** Teams, WhatsApp and Firefox theming, AppImageUpdate and the storytold "Craft" apps.
-- **fm:** an IRIX-style file manager with the Tahoe glass look, which replaces Dolphin. It has IRIX notebook tabs, a split view (each side with its own tabs, view and icon size), Finder tags and list columns, Quick Look, terminal / Neovim tabs with the Alacritty look, and web tabs; all windows run in one process. It lives in its own repo, `~/CODE/irixfm` (branch `perf` installed).
+![fm with the Dolphin-style sidebar](docs/screenshots/fm-dolphin.png)
 
-## Quick start
+## Screenshots
+
+| | |
+|---|---|
+| ![fm, Finder-style sidebar](docs/screenshots/fm-finder.png) | ![fm, split view with list columns](docs/screenshots/fm-split.png) |
+| fm with the Finder-style sidebar (View ▸ Sidebar Style) | Split view (F3), list view with columns |
+| ![KWrite with the IrixGlass title bar](docs/screenshots/kwrite.png) | ![GTK 4 app](docs/screenshots/gtk.png) |
+| A KDE app: IrixGlass title bar, frame and Kvantum widgets | A GTK 4 app with the IrixGlass-Dark GTK theme |
+
+![Qt widgets in the IrixGlass Kvantum style](docs/screenshots/qt-widgets.png)
+
+Menu bar and dock:
+
+![menu bar](docs/screenshots/menubar.png)
+
+![dock](docs/screenshots/dock.png)
+
+The pictures use a generated gradient, not Apple's wallpaper; the `wallpaper` step downloads that
+one at install time.
+
+## What's in it
+
+- **fm** (`fm/`): the file manager, which replaces Dolphin. It has IRIX notebook tabs, a split view, Finder
+  tags and columns, Quick Look, terminal and Neovim tabs, web tabs, KIO network folders, a resizable
+  sidebar in Dolphin or Finder style, and the SGI thumbwheel. See [fm/README.md](fm/README.md).
+- **IrixGlass**: fm's look for everything else.
+  - KWin title bars and frame (Aurorae, `theme/gen-decoration.py`)
+  - Qt widgets (Kvantum, `theme/gen-kvantum.py`)
+  - GTK 3/4 (`theme/gen-gtk.py`)
+  - Plasma pop-ups, tooltips and OSDs (`theme/gen-plasma-dialogs.py`)
+  - colour scheme (`configs/color-schemes/IrixGlass.colors`)
+  - Firefox and Teams CSS (`configs/`)
+- **Desktop**: macOS-style top menu bar and floating dock (`scripts/panels.js`, `theme/gen-panel-background.py`),
+  the WhiteSur icons and cursors, SF Pro / SF Mono, Spotlight-style KRunner and a KWin window menu.
+- **Terminal**: Alacritty, tmux and LazyVim in Nord.
+
+## Install
 
 ```bash
-cd ~/CODE/macos-desktop-setup
+git clone https://github.com/<you>/irixglass-desktop.git
+cd irixglass-desktop
 scripts/install.sh packages     # lists the pacman packages to install with sudo
 sudo pacman -S --needed kvantum teams-for-linux neovim lazygit tree-sitter-cli 7zip
-scripts/install.sh all          # reapply everything (no sudo used)
+scripts/install.sh all          # everything below, in order (no sudo used)
 ```
 
-Then log out and back in.
-
-Each step can also be run on its own: `scripts/install.sh <step> [<step> ...]`.
+Then log out and back in. Each step can also be run on its own: `scripts/install.sh <step> [<step> ...]`.
 
 | Step | What it does |
 |---|---|
@@ -37,9 +72,10 @@ Each step can also be run on its own: `scripts/install.sh <step> [<step> ...]`.
 | `wallpaper` | Downloads the macOS 27 "Golden Gate Dark" wallpaper to `~/.local/share/wallpapers/macos/` and sets it |
 | `appimageupdate` | Installs AppImageUpdate (GUI and `appimageupdatetool`) into `~/Applications/AppImageUpdate`, a menu entry, and `~/.local/bin` on fish's PATH |
 | `craft` | Installs the 14 storytold Craft apps (PhotoCraft, WordCraft, …) as checksum-verified AppImages with menu entries (`scripts/install-craft-app.sh`), and keeps Firefox and Haruna as the default PDF and MP3 apps |
-| `irixfm` | Checks the build packages (`libvterm`, `kpty`, `syntax-highlighting`, `qt6-webengine` and the rest of fm's README list), builds and installs fm from `~/CODE/irixfm` (`make install`) and makes it the default file manager, which the dock follows. A running fm keeps the old build until it's restarted: `pkill -TERM -x irixfm`, then `systemd-run --user --collect ~/.local/bin/irixfm` |
+| `irixfm` | Checks the build packages (`libvterm`, `kpty`, `syntax-highlighting`, `qt6-webengine` and the rest of fm's README list), builds and installs fm from `fm/` (`make install`) and makes it the default file manager, which the dock follows. A running fm keeps the old build until it's restarted: `pkill -TERM -x irixfm`, then `systemd-run --user --collect ~/.local/bin/irixfm` |
 
 Before overwriting a file, the script copies it to `~/.config/appearance-backup-<timestamp>/`.
+**`panels` replaces all your panels**, so run it on purpose.
 
 ## Manual steps (need your password)
 
@@ -56,24 +92,26 @@ sudo already accepts the fingerprint (set up by CachyOS), and so does the lock s
 ## Layout
 
 ```
-configs/         copies of every user config file that was changed (pam/plasmalogin: fingerprint login)
-kwin-scripts/    macos-window-menu KWin script
-theme/           generator + patch scripts for the Plasma theme, and generated output
+fm/              the file manager (own README, CLAUDE.md, tests: make -C fm test)
+theme/           generators: dock/menu bar, title bars, Kvantum, GTK, Plasma pop-ups
+configs/         config files the installer copies (Firefox, Teams, Alacritty, tmux, Kvantum, …)
 scripts/         install.sh, panels.js, install-craft-app.sh
-docs/            SESSION-NOTES.md: what was done, why, gotchas, open items
-docs/mockups/    IRIX fm × Tahoe mockups (make_mockups.py); layout A is what fm builds
-.claude/skills/  Claude Code skill for continuing this work
-CLAUDE.md        context for a new Claude Code session
+kwin-scripts/    macos-window-menu KWin script
+docs/            SESSION-NOTES.md (history, gotchas), screenshots/, mockups/ (the design fm came from)
+.claude/skills/  Claude Code skills (macos-desktop here, irixfm in fm/)
 ```
 
-Related repo: `~/CODE/irixfm` (fm, the file manager). Its README covers features and keys, `docs/DEVELOPMENT.md` the design, and its `CLAUDE.md` + `irixfm` skill how to work on it with Claude Code.
-
-## Restarting the work with Claude Code
+## Working on it with Claude Code
 
 ```bash
-cd ~/CODE/macos-desktop-setup && claude
+cd irixglass-desktop && claude      # the desktop theme: reads CLAUDE.md, macos-desktop skill
+cd irixglass-desktop/fm && claude   # fm: reads fm/CLAUDE.md, irixfm skill
 ```
 
-Claude reads `CLAUDE.md` automatically, and the `macos-desktop` skill in `.claude/skills/` loads when it's relevant. Before your first request, have Claude read `docs/SESSION-NOTES.md`, which has the full history.
+`docs/SESSION-NOTES.md` has the full history of how this was built, and why.
 
-For work on fm, start Claude in its repo instead (`cd ~/CODE/irixfm && claude`): it reads fm's `CLAUDE.md`, and the `irixfm` skill loads there.
+## Credits and licence
+
+GPL-3.0-or-later (see `LICENSE`). The installer downloads, and this repo doesn't include:
+- [WhiteSur](https://github.com/vinceliuice) KDE, GTK, icon and cursor themes by Vince Liuice (GPL-3.0); IrixGlass is generated from them
+- Apple's SF Pro / SF Mono fonts and the macOS wallpaper, from Apple, under Apple's terms

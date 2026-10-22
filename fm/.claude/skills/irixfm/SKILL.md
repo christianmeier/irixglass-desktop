@@ -1,11 +1,11 @@
 ---
 name: irixfm
-description: Change, fix, test, optimise, build, install or run fm, the IRIX-style file manager with the macOS Tahoe look (repo ~/CODE/irixfm, binary irixfm). Use when the user mentions fm, "irixfm", "the irix filebrowser", the file manager or its parts - icon/list views, list columns, sidebar, tabs, split view, terminal tabs, web tabs, Quick Look, tags, the thumbwheel, transparency - or asks to measure, profile or restart it.
+description: Change, fix, test, optimise, build, install or run fm, the IRIX-style file manager with the macOS Tahoe look (folder fm/ of the irixglass-desktop repo, binary irixfm). Use when the user mentions fm, "irixfm", "the irix filebrowser", the file manager or its parts - icon/list views, list columns, sidebar, tabs, split view, terminal tabs, web tabs, Quick Look, tags, the thumbwheel, transparency - or asks to measure, profile or restart it.
 ---
 
 # fm (irixfm)
 
-Repository: `~/CODE/irixfm` (or an agent's worktree `~/CODE/irixfm-wt-<name>`). `CLAUDE.md` there has
+Folder: `fm/` of this repo (or `fm/` in an agent's worktree). `CLAUDE.md` there has
 every command; `docs/DEVELOPMENT.md` has the design, performance notes and gotchas.
 
 ## Workflow
@@ -23,7 +23,7 @@ every command; `docs/DEVELOPMENT.md` has the design, performance notes and gotch
    `pkill -TERM -x irixfm`, `pgrep -ax irixfm` (all lines, must be empty),
    `systemd-run --user --collect ~/.local/bin/irixfm`. Never `irixfm &` from Claude's shell.
 8. **Document**: README (features, keys), DEVELOPMENT.md (how and why, gotchas), CLAUDE.md (commands);
-   on "dokument everything" also `~/CODE/macos-desktop-setup` (SESSION-NOTES, README, skill, install.sh).
+   on "dokument everything" also the repo root (SESSION-NOTES, README, skill, install.sh).
 
 ## Commands
 
@@ -49,4 +49,4 @@ full suite + bench + leak test, installs and restarts fm safely. Details: `CLAUD
 - `CLAUDE.md`: commands, safe restart, team rules, the user's preferences, top gotchas.
 - `docs/DEVELOPMENT.md`: architecture per area, Performance (views / start-up / terminal), Gotchas.
 - `git log`: why each change was made (commit messages explain the reason).
-- `~/CODE/macos-desktop-setup/docs/SESSION-NOTES.md`: history, how fm is wired into the desktop.
+- `docs/SESSION-NOTES.md` at the repo root: history, how fm is wired into the desktop.

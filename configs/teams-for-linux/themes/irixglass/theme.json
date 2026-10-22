@@ -3,6 +3,6 @@
   "name": "IrixGlass (fm)",
   "author": "IrixGlass desktop",
   "version": "1.0.0",
-  "description": "fm's IrixGlass palette (~/CODE/irixfm): navy glass, #0a84ff accent, round corners. Use with Teams dark mode.",
+  "description": "fm's IrixGlass palette (fm/): navy glass, #0a84ff accent, round corners. Use with Teams dark mode.",
   "css": "theme.css"
 }
