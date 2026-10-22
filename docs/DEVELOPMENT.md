@@ -130,6 +130,17 @@ section titles; Finder = the original card (10-unit inset, own tint + EdgeRing, 
 tint), section-coloured icons, small bold titles. `sidebar_test` covers resizing (drag, minimum,
 double-click reset) and switching styles.
 
+**Titles.** `sectionTitle(t)` shows the host name (`Fm.hostName`, `QSysInfo::machineHostName()`) for the
+section titled "Indigo Magic"; only the display changes, the saved title stays the key for folding
+and renaming. `placeLabel()` shows "Icon Catalog" (older saved sidebars) as "Applications". Dolphin
+style: titles 13.5 tu, regular weight, white .55; rows 34 tu tall with the highlight 30 tu (`row.dy`
+shifts icon and text 2 tu down); 8 tu gap above a title (Finder style keeps 30 tu, 11 tu bold titles).
+
+**Traffic lights** (`TrafficLights.qml`): Shape circles (CurveRenderer) with the decoration SVG's
+0.5 px dark outline; an inner Rectangle border read as a thick grey rim. Grey (white .22) all the time
+like the desktop's IrixGlass lights; glyphs on hover only while the window is active. Their position
+(first centre 30, 31; 26 apart) is the reference the desktop's decoration, GTK and Firefox follow.
+
 ### Finder commands
 
 See [FINDER-FEATURES.md](FINDER-FEATURES.md) for the full plan. Implementation notes:

@@ -36,6 +36,11 @@ manager icon; the IRIX icons are only inside the window.
   with the window on the same glass, a thin divider, white icons, plain section titles, like Dolphin's
   Places panel) and **Finder** (the floating glass card with section-coloured icons). Drag the divider
   at the sidebar's right edge to make it wider or narrower (double-click resets it); both are saved.
+- The machine section of the sidebar is named after the computer (its host name; "Indigo Magic" in
+  older saved sidebars), and its first entry, Applications, shows `/usr/share/applications`. In the
+  Dolphin style section titles look like Dolphin's: grey, plain, the same size as the entries.
+- The window buttons (close / minimise / zoom) are grey circles, like on the rest of the desktop
+  (IrixGlass); hovering them in the active window shows × − +.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.

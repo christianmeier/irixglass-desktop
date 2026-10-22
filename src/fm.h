@@ -22,6 +22,7 @@ class Fm : public QObject
     Q_PROPERTY(bool restoreSession MEMBER m_restoreSession CONSTANT)
     Q_PROPERTY(QString home READ home CONSTANT)
     Q_PROPERTY(QString userName READ userName CONSTANT)
+    Q_PROPERTY(QString hostName READ hostName CONSTANT)   // the sidebar's machine section is named after it
     Q_PROPERTY(QString assetDir MEMBER m_assetDir CONSTANT)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
@@ -36,6 +37,7 @@ public:
 
     QString home() const;
     QString userName() const;
+    QString hostName() const;
     bool canUndo() const;
     QString undoText() const;
     QString trashDir() const;

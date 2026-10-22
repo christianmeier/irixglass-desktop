@@ -7,6 +7,9 @@ Row {
     // 13.3 px circles, 26 px apart centre to centre.
     property real diameter: 40 / 3
     property var window
+    // Grey all the time (the user's choice), like the IrixGlass decoration, GTK and Firefox lights;
+    // the active window shows the glyphs on hover so the three can be told apart.
+    readonly property bool inactive: !!window && !window.active
     spacing: 38 / 3
     HoverHandler { id: hover }
     Repeater {
@@ -22,7 +25,7 @@ Row {
                 anchors.fill: parent
                 preferredRendererType: Shape.CurveRenderer
                 ShapePath {
-                    fillColor: modelData.c
+                    fillColor: Qt.rgba(1, 1, 1, .22)
                     strokeColor: Qt.rgba(0, 0, 0, .25); strokeWidth: .5
                     PathAngleArc {
                         centerX: lights.diameter / 2; centerY: lights.diameter / 2
@@ -34,9 +37,9 @@ Row {
             Text {
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: -.5
-                visible: hover.hovered
+                visible: hover.hovered && !lights.inactive
                 text: modelData.g
-                color: Qt.rgba(0, 0, 0, .6)
+                color: Qt.rgba(0, 0, 0, .7)
                 font.pixelSize: lights.diameter * .8; font.bold: true
             }
             TapHandler {
