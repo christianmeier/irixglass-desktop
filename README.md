@@ -32,6 +32,10 @@ manager icon; the IRIX icons are only inside the window.
   on hover, rename by double-clicking, and right-click for move up/down, move to another section,
   remove and Reset Sidebar. Click a section title (Favorites, Indigo Magic, Locations, Tags) to fold
   it away or open it again; folded sections are remembered. It scrolls when the window is short.
+- Sidebar look and width: **View ▸ Sidebar Style** switches between **Dolphin** (the default: flush
+  with the window on the same glass, a thin divider, white icons, plain section titles, like Dolphin's
+  Places panel) and **Finder** (the floating glass card with section-coloured icons). Drag the divider
+  at the sidebar's right edge to make it wider or narrower (double-click resets it); both are saved.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.

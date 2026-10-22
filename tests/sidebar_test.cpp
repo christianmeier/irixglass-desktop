@@ -258,6 +258,51 @@ int main(int argc, char *argv[])
         call(win, "removeSection", {0});
         check(!titles().contains(QStringLiteral("Clients")), QStringLiteral("a section can be removed"), titles().join(", "));
 
+        // --- the sidebar's width: drag its divider (Dolphin-style); content follows, limits hold
+        {
+            auto *handle = win->findChild<QQuickItem *>(QStringLiteral("sidebarResize"));
+            auto *side = win->findChild<QQuickItem *>(QStringLiteral("places"));
+            check(handle && side, QStringLiteral("the sidebar has a resize handle"));
+            if (handle && side) {
+                const qreal u = win->property("u").toReal();
+                const qreal w0 = side->width();
+                const QPointF p = handle->mapToScene(QPointF(handle->width() / 2, 40));
+                auto *qw = qobject_cast<QQuickWindow *>(win);
+                QTest::mousePress(qw, Qt::LeftButton, {}, p.toPoint());
+                for (int i = 1; i <= 10; ++i) QTest::mouseMove(qw, (p + QPointF(8 * i, 0)).toPoint());
+                QTest::mouseRelease(qw, Qt::LeftButton, {}, (p + QPointF(80, 0)).toPoint());
+                QTest::qWait(100);
+                check(qAbs(side->width() - (w0 + 80)) < 2 * u, QStringLiteral("dragging the divider widens the sidebar"),
+                      QStringLiteral("%1 -> %2").arg(w0).arg(side->width()));
+                check(qAbs(win->property("sideEdge").toReal() - side->width() - 10 * u) < 0.5,
+                      QStringLiteral("the files start right of the wider sidebar"));
+                QTest::mousePress(qw, Qt::LeftButton, {}, handle->mapToScene(QPointF(handle->width() / 2, 40)).toPoint());
+                QTest::mouseMove(qw, (handle->mapToScene(QPointF(handle->width() / 2, 40)) + QPointF(-4000, 0)).toPoint());
+                QTest::mouseRelease(qw, Qt::LeftButton, {}, (handle->mapToScene(QPointF(handle->width() / 2, 40)) + QPointF(-4000, 0)).toPoint());
+                QTest::qWait(50);
+                check(win->property("sidebarUnits").toReal() == win->property("minSidebarUnits").toReal(),
+                      QStringLiteral("the sidebar can't be dragged narrower than its minimum"), win->property("sidebarUnits").toString());
+                QTest::mouseDClick(qw, Qt::LeftButton, {}, handle->mapToScene(QPointF(handle->width() / 2, 40)).toPoint());
+                QTest::qWait(50);
+                check(win->property("sidebarUnits").toReal() == 230, QStringLiteral("double-clicking the divider resets the width"),
+                      win->property("sidebarUnits").toString());
+            }
+        }
+
+        // --- View > Sidebar Style: Dolphin (flush, divider, white icons) or Finder (floating card, coloured icons)
+        {
+            auto *side = win->findChild<QQuickItem *>(QStringLiteral("places"));
+            auto *divider = win->findChild<QQuickItem *>(QStringLiteral("sidebarDivider"));
+            check(win->property("dolphinSidebar").toBool() && side && side->parentItem()->x() == 0 && divider && divider->isVisible(),
+                  QStringLiteral("default sidebar style is Dolphin: flush with the window, with a divider"));
+            const qreal edge = win->property("sideEdge").toReal();
+            win->setProperty("sidebarStyle", QStringLiteral("finder"));
+            QTest::qWait(50);
+            check(side && side->parentItem()->x() > 0 && !divider->isVisible() && win->property("sideEdge").toReal() == edge,
+                  QStringLiteral("Finder style: a floating card, no divider, the files stay where they were"));
+            win->setProperty("sidebarStyle", QStringLiteral("dolphin"));
+        }
+
         // --- saved, and reset
         check(!win->property("placesJson").toString().isEmpty(), QStringLiteral("changes are kept in the settings"));
         call(win, "resetPlaces", {});
