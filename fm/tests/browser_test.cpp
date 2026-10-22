@@ -63,6 +63,14 @@ int main(int argc, char *argv[])
           "<a id=dl href='data.bin' download>download</a></body></html>");
     write(base + QStringLiteral("/data.bin"), QByteArray(4096, 'x'));
     write(base + QStringLiteral("/victim.txt"), "do not touch");
+    // a local page must not read other local files: a downloaded .html could read ~/.ssh and send
+    // it away (window.open → the tab follows it). Qt then also blocks its pictures and styles on disk.
+    write(base + QStringLiteral("/leak.html"),
+          "<html><head><title>start</title></head><body><script>"
+          "function done(r){document.title='R:'+r}"
+          "window.onload=function(){var r='blocked';try{var x=new XMLHttpRequest();x.open('GET','victim.txt',false);x.send();"
+          "if(x.responseText)r='read '+x.responseText}catch(e){}done(r)}"
+          "</script></body></html>");
     // downloads go to XDG_DOWNLOAD_DIR: point it into the test folder, not the real ~/Downloads
     QDir().mkpath(base + QStringLiteral("/dl"));
     {
@@ -261,6 +269,18 @@ int main(int argc, char *argv[])
                 QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
                 QTest::qWait(150);
             }
+        }
+        // a local page can't read other local files (XMLHttpRequest on file://)
+        {
+            win->setProperty("selection", QVariantMap{{base + QStringLiteral("/leak.html"), true}});
+            QTest::keyClick(window, Qt::Key_F7);
+            QTest::qWait(200);
+            QQuickItem *w = active();
+            waitFor([&] { return w && w->property("title").toString().startsWith(QStringLiteral("R:")); });
+            const QString t = w ? w->property("title").toString() : QString();
+            check(t == QStringLiteral("R:blocked"), QStringLiteral("a local page can't read other local files"), t);
+            QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+            QTest::qWait(150);
         }
         // the split side
         QMetaObject::invokeMethod(win, "toggleSplit");
