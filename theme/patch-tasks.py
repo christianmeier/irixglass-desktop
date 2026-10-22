@@ -27,9 +27,11 @@ def hide(match):
 
 def main():
     src, dst = sys.argv[1], sys.argv[2]
-    svg = open(src).read()
+    with open(src) as f:
+        svg = f.read()
     svg, count = re.subn(r'<(?:rect|path)\b[^>]*\bid="' + BACKGROUNDS + r'"[^>]*>', hide, svg)
-    open(dst, 'w').write(svg)
+    with open(dst, 'w') as f:
+        f.write(svg)
     print(f'hidden backgrounds: {count}')
 
 

@@ -18,6 +18,7 @@
 #
 # Usage: gen-gtk.py <WhiteSur-Dark dir> <output dir>
 #   e.g. gen-gtk.py ~/.themes/WhiteSur-Dark ~/.themes/IrixGlass-Dark
+import itertools
 import os
 import re
 import shutil
@@ -25,6 +26,7 @@ import subprocess
 import sys
 
 import gi
+
 gi.require_version('Gio', '2.0')
 from gi.repository import Gio  # noqa: E402
 
@@ -81,7 +83,7 @@ BOX = 16                # WhiteSur's title button box (logical px)
 
 
 def grey(level):
-    for (a, ca), (b, cb) in zip(GREY_ANCHORS, GREY_ANCHORS[1:]):
+    for (a, ca), (b, cb) in itertools.pairwise(GREY_ANCHORS):
         if a <= level <= b:
             t = 0 if b == a else (level - a) / (b - a)
             return tuple(round(x + (y - x) * t) for x, y in zip(ca, cb))
@@ -272,7 +274,7 @@ def light_svg(color, kind, opacity=1, g=False, darken=0):
 def title_buttons(dst):
     """fm's traffic lights in place of WhiteSur's title button PNGs (1x and @2)."""
     os.makedirs(dst, exist_ok=True)
-    for name, (color, kind) in LIGHTS.items():
+    for name, (_color, kind) in LIGHTS.items():
         states = {
             # grey all the time (the user's choice); glyphs on hover in the active window
             '': light_svg('#ffffff', kind, opacity=.22),

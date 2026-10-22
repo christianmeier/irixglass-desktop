@@ -7,7 +7,7 @@ log=$(mktemp); a=$(mktemp -d); b=$(mktemp -d)
 IRIXFM_SINGLE=1 IRIXFM_ASSETS=$PWD QT_QPA_PLATFORM=offscreen $fm "$a" 2>"$log" & first=$!
 sleep 2
 start=$(date +%s%N)
-IRIXFM_SINGLE=1 IRIXFM_ASSETS=$PWD QT_QPA_PLATFORM=offscreen timeout 10 $fm "$b" 2>/dev/null; rc=$?
+IRIXFM_SINGLE=1 IRIXFM_ASSETS=$PWD QT_QPA_PLATFORM=offscreen timeout 10 "$fm" "$b" 2>/dev/null; rc=$?
 ms=$(( ($(date +%s%N) - start) / 1000000 ))
 check $rc "a second launch exits at once ($ms ms)"
 sleep 1

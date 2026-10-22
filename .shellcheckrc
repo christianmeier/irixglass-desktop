@@ -1,0 +1,7 @@
+# shellcheck config (https://www.shellcheck.net/wiki/Directive). CI: .github/workflows/lint.yml
+shell=bash
+# Follow `source`d files relative to the script.
+source-path=SCRIPTDIR
+# fm's shell tests check a test's result with `[ … ]; check $? "…"`: there $? is meant to be the
+# test's status, which is what SC2319 warns about.
+disable=SC2319

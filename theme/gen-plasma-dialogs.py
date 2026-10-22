@@ -157,7 +157,6 @@ def frame(sh, prefix, R, fill, ring=None, ring_color='#ffffff', layers=RING_LAYE
     p = prefix
     x0, y0 = 0.0, sh.y
     widths = [n * PX for n, _ in layers] if ring else []
-    total = sum(widths)
 
     def corner(eid, tx, ty, sx, sy, grads):
         g = f'<g id="{eid}" transform="translate({f4(tx)},{f4(ty)}) scale({sx},{sy})">'
@@ -396,9 +395,8 @@ def write(theme, rel, svg):
         shutil.copy2(path, path + '.orig')
     data = svg.encode()
     if rel.endswith('.svgz'):
-        with open(path, 'wb') as f:
-            with gzip.GzipFile(fileobj=f, mode='wb', compresslevel=9, mtime=0, filename='') as z:
-                z.write(data)
+        with open(path, 'wb') as f, gzip.GzipFile(fileobj=f, mode='wb', compresslevel=9, mtime=0, filename='') as z:
+            z.write(data)
     else:
         with open(path, 'wb') as f:
             f.write(data)
