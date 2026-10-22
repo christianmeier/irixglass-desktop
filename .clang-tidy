@@ -1,0 +1,19 @@
+# clang-tidy for fm's C++ (fm/src, fm/tests, fm/tools). CI: .github/workflows/lint.yml
+# A small set: real bugs, not style. Excluded checks, and why:
+#   easily-swappable-parameters, narrowing-conversions, implicit-widening-of-multiplication-result:
+#     hundreds of hits on Qt geometry code (int/qreal), not bugs
+#   signed-bitwise: libvterm's VTermModifier flags are a plain enum, combined with |
+#   throwing-static-initialization: file-scope `const QString k… = QStringLiteral(…)`, the Qt idiom
+#   clang-analyzer-optin.*: opt-in checks (performance padding, Qt-unaware cplusplus.UninitializedObject)
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-signed-bitwise,
+  -bugprone-throwing-static-initialization,
+  clang-analyzer-*,
+  -clang-analyzer-optin.*
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/fm/(src|tests|tools)/.*'
