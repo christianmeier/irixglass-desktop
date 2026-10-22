@@ -290,6 +290,27 @@ int main(int argc, char *argv[])
                 t->setFontSize(12);
                 t->forceActiveFocus();
             }
+            // box drawing fills the cell: a column of "│" is one unbroken line (tmux's pane borders
+            // came out dashed from the font's glyph)
+            {
+                t->sendText(QStringLiteral("clear; for i in $(seq 1 10); do printf '\\u2502\\n'; done\r"));
+                QTest::qWait(600);
+                const QImage img = window->grabWindow();
+                const qreal dpr = img.devicePixelRatio();
+                // the first column's "│": cell 0, from row 1 (row 0 holds the command) for 8 rows
+                const QPointF cell = t->mapToScene(QPointF(4 + 0.5 * t->width() / t->columns() * 0, 3));
+                int bestX = -1, bestRun = 0;
+                const int x0 = int(t->mapToScene(QPointF(4, 0)).x() * dpr), y0 = int((cell.y() + 2.2 * t->height() / t->rows()) * dpr);
+                const int y1 = int((cell.y() + 8.8 * t->height() / t->rows()) * dpr);
+                for (int x = x0; x < x0 + int(12 * dpr); ++x) {
+                    int run = 0;
+                    for (int y = y0; y < y1; ++y)
+                        run += qGray(img.pixel(x, y)) > 180 ? 1 : 0;
+                    if (run > bestRun) { bestRun = run; bestX = x; }
+                }
+                check(bestX >= 0 && bestRun == y1 - y0, QStringLiteral("a column of \"│\" is one unbroken line"),
+                      QString::number(bestRun) + " of " + QString::number(y1 - y0) + " px lit at x " + QString::number(bestX));
+            }
             // stress: random resizes (window and text size) while long lines wrap — libvterm's reflow
             // used to abort the whole program here
             {

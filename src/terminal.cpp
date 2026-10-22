@@ -10,6 +10,7 @@
 #include <QMimeData>
 #include <QRegularExpression>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTimer>
 #include <QVariantAnimation>
 
@@ -503,6 +504,101 @@ quint32 TerminalView::glyphFor(int style, char32_t c) const
     return glyph;
 }
 
+// Box drawing and block elements (U+2500–U+259F) are drawn, not taken from the font: the font's
+// glyphs don't fill the cell (line spacing is taller than "│"), so tmux's and nvim's vertical
+// borders came out dashed. Drawn like Alacritty: pixel-aligned bars through the cell's middle,
+// edge to edge, so neighbouring cells join. Returns false for characters left to the font.
+static bool drawBoxChar(QPainter *p, const QRect &r, char32_t c, const QColor &color)
+{
+    const int light = std::max(1, qRound(r.height() / 16.0)), heavy = light * 2 + 1;
+    // block elements
+    if (c >= 0x2580 && c <= 0x2595) {
+        QRect b;
+        const int w = r.width(), h = r.height();
+        if (c == 0x2580) b = QRect(r.left(), r.top(), w, h / 2);                                   // ▀
+        else if (c >= 0x2581 && c <= 0x2588) { const int eh = h * int(c - 0x2580) / 8; b = QRect(r.left(), r.bottom() + 1 - eh, w, eh); }   // ▁…█
+        else if (c >= 0x2589 && c <= 0x258F) { const int ew = w * int(0x2590 - c) / 8; b = QRect(r.left(), r.top(), ew, h); }   // ▉…▏
+        else if (c == 0x2590) b = QRect(r.left() + w / 2, r.top(), w - w / 2, h);                   // ▐
+        else if (c >= 0x2591 && c <= 0x2593) {                                                     // ░▒▓
+            QColor shade = color;
+            shade.setAlphaF(color.alphaF() * (c - 0x2590) / 4.0);
+            p->fillRect(r, shade);
+            return true;
+        } else if (c == 0x2594) b = QRect(r.left(), r.top(), w, std::max(1, h / 8));                // ▔
+        else if (c == 0x2595) b = QRect(r.right() + 1 - std::max(1, w / 8), r.top(), std::max(1, w / 8), h);   // ▕
+        else return false;
+        p->fillRect(b, color);
+        return true;
+    }
+    // lines: weight up, right, down, left (0 none, 1 light, 2 heavy, 3 double)
+    struct Box { char32_t c; quint8 u, rt, d, l; };
+    static const Box boxes[] = {
+        {0x2500, 0, 1, 0, 1}, {0x2501, 0, 2, 0, 2}, {0x2502, 1, 0, 1, 0}, {0x2503, 2, 0, 2, 0},
+        {0x250C, 0, 1, 1, 0}, {0x250F, 0, 2, 2, 0}, {0x2510, 0, 0, 1, 1}, {0x2513, 0, 0, 2, 2},
+        {0x2514, 1, 1, 0, 0}, {0x2517, 2, 2, 0, 0}, {0x2518, 1, 0, 0, 1}, {0x251B, 2, 0, 0, 2},
+        {0x251C, 1, 1, 1, 0}, {0x2523, 2, 2, 2, 0}, {0x2524, 1, 0, 1, 1}, {0x252B, 2, 0, 2, 2},
+        {0x252C, 0, 1, 1, 1}, {0x2533, 0, 2, 2, 2}, {0x2534, 1, 1, 0, 1}, {0x253B, 2, 2, 0, 2},
+        {0x253C, 1, 1, 1, 1}, {0x254B, 2, 2, 2, 2},
+        {0x2550, 0, 3, 0, 3}, {0x2551, 3, 0, 3, 0}, {0x2554, 0, 3, 3, 0}, {0x2557, 0, 0, 3, 3},
+        {0x255A, 3, 3, 0, 0}, {0x255D, 3, 0, 0, 3}, {0x2560, 3, 3, 3, 0}, {0x2563, 3, 0, 3, 3},
+        {0x2566, 0, 3, 3, 3}, {0x2569, 3, 3, 0, 3}, {0x256C, 3, 3, 3, 3},
+        {0x2574, 0, 0, 0, 1}, {0x2575, 1, 0, 0, 0}, {0x2576, 0, 1, 0, 0}, {0x2577, 0, 0, 1, 0},
+        {0x2578, 0, 0, 0, 2}, {0x2579, 2, 0, 0, 0}, {0x257A, 0, 2, 0, 0}, {0x257B, 0, 0, 2, 0}};
+    const int cx = r.left() + r.width() / 2, cy = r.top() + r.height() / 2;
+    // rounded corners ╭╮╯╰: a quarter circle from the middle of one edge to the middle of the other
+    if (c >= 0x256D && c <= 0x2570) {
+        const bool right = c == 0x256D || c == 0x2570, down = c == 0x256D || c == 0x256E;
+        const QPointF centre(right ? r.right() + 1 : r.left(), down ? r.bottom() + 1 : r.top());
+        const qreal rx = std::abs(centre.x() - (cx + .5 * (light % 2))), ry = std::abs(centre.y() - (cy + .5 * (light % 2)));
+        QPainterPath arc;
+        const qreal start = c == 0x256D ? 90 : c == 0x256E ? 0 : c == 0x256F ? 270 : 180;
+        arc.arcMoveTo(QRectF(centre.x() - rx, centre.y() - ry, 2 * rx, 2 * ry), start);
+        arc.arcTo(QRectF(centre.x() - rx, centre.y() - ry, 2 * rx, 2 * ry), start, 90);
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing, true);
+        p->setClipRect(r);
+        p->strokePath(arc, QPen(color, light, Qt::SolidLine, Qt::FlatCap));
+        p->restore();
+        return true;
+    }
+    const Box *b = nullptr;
+    for (const Box &x : boxes)
+        if (x.c == c)
+            b = &x;
+    if (!b)
+        return false;
+    auto thick = [&](int weight) { return weight == 2 ? heavy : light; };
+    // horizontal parts (left / right of the middle), then vertical (above / below)
+    auto hbar = [&](int x1, int x2, int weight) {
+        if (weight == 3) {
+            p->fillRect(QRect(x1, cy - light - light / 2 - 1, x2 - x1, light), color);
+            p->fillRect(QRect(x1, cy + light / 2 + 1, x2 - x1, light), color);
+        } else {
+            const int t = thick(weight);
+            p->fillRect(QRect(x1, cy - t / 2, x2 - x1, t), color);
+        }
+    };
+    auto vbar = [&](int y1, int y2, int weight) {
+        if (weight == 3) {
+            p->fillRect(QRect(cx - light - light / 2 - 1, y1, light, y2 - y1), color);
+            p->fillRect(QRect(cx + light / 2 + 1, y1, light, y2 - y1), color);
+        } else {
+            const int t = thick(weight);
+            p->fillRect(QRect(cx - t / 2, y1, t, y2 - y1), color);
+        }
+    };
+    // each arm reaches past the middle to the far edge of the crossing line, so corners close
+    // without sticking out
+    const int crossV = std::max(b->u, b->d), crossH = std::max(b->l, b->rt);
+    const int reachH = crossV == 3 ? light + light / 2 + 1 : crossV ? thick(crossV) / 2 : 0;
+    const int reachV = crossH == 3 ? light + light / 2 + 1 : crossH ? thick(crossH) / 2 : 0;
+    if (b->l) hbar(r.left(), cx + reachH, b->l);
+    if (b->rt) hbar(cx - reachH, r.right() + 1, b->rt);
+    if (b->u) vbar(r.top(), cy + reachV, b->u);
+    if (b->d) vbar(cy - reachV, r.bottom() + 1, b->d);
+    return true;
+}
+
 void TerminalView::paint(QPainter *p)
 {
     // Nord background, slightly see-through like the user's Alacritty (opacity 0.8).
@@ -580,7 +676,11 @@ void TerminalView::paint(QPainter *p)
             }
             const qreal left = x0 + col * m_cellW;
             const int style = cell.attrs.bold ? 1 : cell.attrs.italic ? 2 : 0;
-            if (text) {
+            if (text && cell.chars[0] >= 0x2500 && cell.chars[0] <= 0x2595 && !cell.chars[1]) {
+                // box drawing / blocks: drawn after the runs, filling the whole cell
+                const int l = qRound(left), rgt = qRound(x0 + (col + std::max(1, int(cell.width))) * m_cellW);
+                extras.push_back(Extra{QRectF(l, top, rgt - l, bottom - top), fg, -2, QString::fromUcs4(reinterpret_cast<const char32_t *>(&cell.chars[0]), 1)});
+            } else if (text) {
                 const quint32 glyph = cell.width == 1 && !cell.chars[1] ? glyphFor(style, char32_t(cell.chars[0])) : 0;
                 if (glyph) {
                     if (!run || run->fg != fg || run->style != style) {
@@ -617,7 +717,13 @@ void TerminalView::paint(QPainter *p)
         p->drawGlyphRun(QPointF(), glyphRun);
     }
     for (const Extra &e : extras) {
-        if (e.style < 0) {
+        if (e.style == -2) {
+            if (!drawBoxChar(p, e.rect.toRect(), e.text.toUcs4().value(0), QColor::fromRgba(e.fg))) {
+                p->setFont(fonts[0]);   // not one we draw: the font's glyph
+                p->setPen(QColor::fromRgba(e.fg));
+                p->drawText(QPointF(e.rect.left(), e.rect.top() + m_ascent), e.text);
+            }
+        } else if (e.style < 0) {
             p->fillRect(e.rect, QColor::fromRgba(e.fg));
         } else {
             p->setFont(fonts[e.style]);
