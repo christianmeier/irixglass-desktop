@@ -19,7 +19,7 @@ CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-
 LDLIBS   += $(shell pkg-config --libs $(PKGS)) \
             -lKF6KIOCore -lKF6KIOGui -lKF6KIOWidgets -lKF6ConfigCore -lKF6Service -lKF6Solid -lKF6SyntaxHighlighting -lKF6Pty -lvterm
 
-LIBSRC := src/fm.cpp src/terminal.cpp $(BUILD)/moc_fm.cpp $(BUILD)/moc_terminal.cpp
+LIBSRC := src/fm.cpp src/terminal.cpp src/kiomodel.cpp $(BUILD)/moc_fm.cpp $(BUILD)/moc_terminal.cpp $(BUILD)/moc_kiomodel.cpp
 SRC := src/main.cpp $(LIBSRC)
 
 all: $(BUILD)/irixfm
@@ -30,7 +30,10 @@ $(BUILD)/moc_fm.cpp: src/fm.h | $(BUILD)
 $(BUILD)/moc_terminal.cpp: src/terminal.h | $(BUILD)
 	$(MOC) $< -o $@
 
-$(BUILD)/irixfm: $(SRC) src/fm.h src/terminal.h
+$(BUILD)/moc_kiomodel.cpp: src/kiomodel.h | $(BUILD)
+	$(MOC) $< -o $@
+
+$(BUILD)/irixfm: $(SRC) src/fm.h src/terminal.h src/kiomodel.h
 	$(CXX) $(CXXFLAGS) -Isrc $(SRC) -o $@ $(LDLIBS)
 
 $(BUILD):
@@ -69,6 +72,9 @@ $(BUILD)/preview_test: tests/preview_test.cpp $(LIBSRC) src/fm.h src/terminal.h
 $(BUILD)/browser_test: tests/browser_test.cpp $(LIBSRC) src/fm.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/browser_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
 
+$(BUILD)/network_test: tests/network_test.cpp $(LIBSRC) src/fm.h src/terminal.h src/kiomodel.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/network_test.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+
 $(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.h
 	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
 
@@ -82,7 +88,7 @@ $(BUILD)/leak: tools/leak.cpp $(LIBSRC) src/fm.h src/terminal.h
 tools: $(BUILD)/shot $(BUILD)/leak
 
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
-TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test
+TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/terminal_test $(BUILD)/browser_test $(BUILD)/network_test
 test: $(TESTS) $(BUILD)/irixfm
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; \
