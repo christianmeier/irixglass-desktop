@@ -7,15 +7,16 @@ D=$HOME/Applications/$name; mkdir -p "$D"
 B=https://github.com/storytold/$repo/releases/download/$tag
 cd "$D"
 [ -f "$asset" ] || curl -fsSL -o "$asset" "$B/$asset"
-sums=$(curl -fsSL "$B/SHA256SUMS.txt" 2>/dev/null || true)
-# shellcheck disable=SC2015  # echo never fails here, so C runs only when the checksum fails
-if [ -n "$sums" ]; then echo "$sums" | grep " \*\?$asset\$" | sed 's/\*//' | sha256sum -c - >/dev/null && echo "$name: checksum OK" || { echo "$name: CHECKSUM FAIL"; exit 1; }
-else echo "$name: no SHA256SUMS"; fi
+# Fail closed: no checksum list, no line for the asset or a wrong sum stops the install (and
+# removes the download, so the next run fetches it again instead of trusting a bad file).
+sums=$(curl -fsSL "$B/SHA256SUMS.txt") || { echo "$name: no SHA256SUMS.txt, not installing"; exit 1; }
+sum=$(printf '%s\n' "$sums" | awk -v a="$asset" '{f=$2; sub(/^\*/, "", f)} f == a {print $1; exit}')
+if [ -n "$sum" ] && printf '%s  %s\n' "$sum" "$asset" | sha256sum -c --status -; then echo "$name: checksum OK"
+else echo "$name: CHECKSUM FAIL"; rm -f "$asset"; exit 1; fi
 chmod +x "$asset"
 X=$(mktemp -d); cd "$X"
 "$D/$asset" --appimage-extract '*.desktop' >/dev/null 2>&1 || true
 "$D/$asset" --appimage-extract 'usr/share/icons/*' >/dev/null 2>&1 || true
-# shellcheck disable=SC2012  # ls fails loudly (set -e) when the AppImage has no .desktop; a glob would not
 desk=$(ls squashfs-root/*.desktop | head -1)
 id=$(basename "$desk")
 cp -r squashfs-root/usr/share/icons/hicolor/. "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true

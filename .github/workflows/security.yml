@@ -1,0 +1,136 @@
+# Security checks: CodeQL (C/C++, Python, Actions), secret scanning over the full history
+# (gitleaks), workflow hardening audit (zizmor) and dependency review on pull requests.
+#
+# Callable from other workflows (release.yml): the caller has to grant at least
+#   permissions: { contents: read, security-events: write }
+# because a called workflow can't raise the caller's token permissions.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"   # Mondays 04:23 UTC: new CodeQL queries and gitleaks rules
+  workflow_call:
+
+# Every job asks for what it needs; nothing by default.
+permissions: {}
+
+concurrency:
+  # Own prefix: when called from another workflow, github.workflow is the caller's name, and
+  # sharing its group would make the two cancel or wait for each other.
+  group: security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  codeql-cpp:
+    name: CodeQL (c-cpp)
+    runs-on: ubuntu-latest
+    # fm builds against Arch's Qt 6 / KDE Frameworks 6, which Ubuntu runners don't ship.
+    # Pinned by digest (archlinux:latest on 2026-10-22); pacman -Syu below brings it up to date.
+    container: archlinux:latest@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
+    permissions:
+      contents: read
+      security-events: write   # upload results to code scanning
+    timeout-minutes: 60
+    steps:
+      - name: Install fm's build dependencies
+        # From fm/Makefile (pkg-config PKGS, KF6 include dirs, -l flags) and install.sh step_irixfm.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git base-devel pkgconf \
+            qt6-base qt6-declarative \
+            kwindowsystem kcoreaddons karchive kio kconfig kservice kjobwidgets solid \
+            syntax-highlighting kpty libvterm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-extended
+      - name: Build fm
+        run: make -C fm -j"$(nproc)" build/irixfm
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:c-cpp
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload results to code scanning
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
+
+  gitleaks:
+    name: Secrets (gitleaks, full history)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The release binary, checksum pinned (gitleaks-action needs a licence key for organisations).
+      - name: Install gitleaks
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$tarball"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan every commit
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose --log-opts="--all" --exit-code 1 .
+
+  zizmor:
+    name: Workflow audit (zizmor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Findings fail the job (no SARIF upload, so no security-events permission needed).
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          advanced-security: false
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
