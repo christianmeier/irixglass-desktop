@@ -1,0 +1,199 @@
+# Lint: shell, Python, QML, C++, workflows and config files. Every tool is pinned; findings show
+# up as annotations on the diff. Configs: .shellcheckrc, ruff.toml, fm/.qmllint.ini, .clang-tidy,
+# .yamllint. Run the same checks locally: see the commands in each step.
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.workflow is the caller's name under workflow_call, so the prefix keeps this group
+  # apart from the caller's own.
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SHELLCHECK_VERSION: v0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  RUFF_VERSION: 0.17.1
+  YAMLLINT_VERSION: 1.38.0
+
+jobs:
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install shellcheck ${{ env.SHELLCHECK_VERSION }}
+        run: |
+          base=https://github.com/koalaman/shellcheck/releases/download
+          curl -fsSL -o /tmp/sc.tar.xz "$base/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  /tmp/sc.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/sc.tar.xz -C /tmp
+          sudo install -m755 "/tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+      - name: shellcheck scripts/*.sh fm/tools/*.sh fm/tests/*.sh
+        run: |
+          # gcc format, turned into annotations (note -> notice)
+          shellcheck -f gcc scripts/*.sh fm/tools/*.sh fm/tests/*.sh > /tmp/sc.txt && rc=0 || rc=$?
+          cat /tmp/sc.txt
+          sed -E 's/^([^:]+):([0-9]+):([0-9]+): (error|warning|note): (.*)$/::\4 file=\1,line=\2,col=\3::\5/; s/^::note /::notice /' /tmp/sc.txt
+          exit "$rc"
+
+  python:
+    name: ruff
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ruff ${{ env.RUFF_VERSION }}
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet "ruff==${RUFF_VERSION}"
+      - name: ruff check (theme/, docs/mockups/, fm/tools/)
+        run: /tmp/venv/bin/ruff check --output-format=github .
+
+  workflows:
+    name: actionlint + yamllint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint ${{ env.ACTIONLINT_VERSION }}, shellcheck, yamllint ${{ env.YAMLLINT_VERSION }}
+        run: |
+          base=https://github.com/rhysd/actionlint/releases/download
+          curl -fsSL -o /tmp/al.tgz "$base/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/al.tgz" | sha256sum -c -
+          mkdir /tmp/al && tar -xzf /tmp/al.tgz -C /tmp/al
+          sudo install -m755 /tmp/al/actionlint /usr/local/bin/actionlint
+          # actionlint checks the run: scripts with shellcheck when it's on PATH
+          base=https://github.com/koalaman/shellcheck/releases/download
+          curl -fsSL -o /tmp/sc.tar.xz "$base/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  /tmp/sc.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/sc.tar.xz -C /tmp
+          sudo install -m755 "/tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet "yamllint==${YAMLLINT_VERSION}"
+      - name: actionlint
+        run: |
+          actionlint -color && exit 0
+          # the same, as annotations (a Go template, not shell)
+          # shellcheck disable=SC2016
+          actionlint -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}\n{{end}}' || true
+          exit 1
+      - name: yamllint .github/
+        run: /tmp/venv/bin/yamllint --strict -f github .github/
+
+  configs:
+    name: JSON, TOML, desktop files, JS syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: JSON
+        run: |
+          rc=0
+          while IFS= read -r -d '' f; do
+            python3 -I -m json.tool "$f" > /dev/null || { echo "::error file=$f::invalid JSON"; rc=1; }
+          done < <(git ls-files -z '*.json')
+          exit "$rc"
+      - name: TOML
+        run: |
+          git ls-files -z '*.toml' | xargs -0 python3 -I -c '
+          import sys, tomllib
+          rc = 0
+          for f in sys.argv[1:]:
+              try:
+                  tomllib.load(open(f, "rb"))
+              except tomllib.TOMLDecodeError as e:
+                  print(f"::error file={f}::{e}"); rc = 1
+          sys.exit(rc)'
+      - name: desktop-file-validate
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq desktop-file-utils > /dev/null
+          rc=0
+          while IFS= read -r -d '' f; do
+            # dock-trash.desktop is a template: install.sh fills in @HOME@
+            sed 's|@HOME@|/home/user|g' "$f" > "/tmp/$(basename "$f")"
+            desktop-file-validate "/tmp/$(basename "$f")" || { echo "::error file=$f::desktop-file-validate failed"; rc=1; }
+          done < <(git ls-files -z '*.desktop')
+          exit "$rc"
+      - name: JS syntax (KWin script, Plasma panel script, Firefox prefs)
+        run: |
+          node --version
+          git ls-files -z '*.js' | xargs -0 -n1 node --check
+
+  qml:
+    name: qmllint (fm/qml)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # fm's QML and C++ need Qt 6 / KF6 as fm uses them (Qt 6.12): Arch has them current.
+    container: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
+    steps:
+      - name: Install qmllint and the QML modules fm imports
+        run: pacman -Syu --noconfirm --needed git python qt6-declarative qt6-multimedia qt6-webengine kirigami > /dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: qmllint fm/qml/*.qml (settings in fm/.qmllint.ini)
+        run: |
+          /usr/lib/qt6/bin/qmllint --version
+          /usr/lib/qt6/bin/qmllint fm/qml/*.qml && rc=0 || rc=$?
+          # the same, as annotations
+          /usr/lib/qt6/bin/qmllint --json /tmp/qml.json fm/qml/*.qml > /dev/null 2>&1 || true
+          python3 -I -c '
+          import json, sys
+          for f in json.load(open(sys.argv[1]))["files"]:
+              for w in f["warnings"]:
+                  kind = {"critical": "error", "warning": "warning"}.get(w["type"])
+                  if kind:
+                      name, line, col, msg, cat = f["filename"], w.get("line", 1), w.get("column", 1), w["message"], w.get("id", "")
+                      print(f"::{kind} file={name},line={line},col={col}::{msg} [{cat}]")
+          ' /tmp/qml.json
+          exit "$rc"
+
+  cpp:
+    name: clang-tidy (fm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # as for qml: fm's Qt 6 / KF6 headers
+    container: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
+    steps:
+      - name: Install clang and fm's build dependencies
+        run: >
+          pacman -Syu --noconfirm --needed git make pkgconf clang
+          qt6-base qt6-declarative kio kwindowsystem kcoreaddons karchive kconfig kservice
+          kjobwidgets solid syntax-highlighting kpty libvterm > /dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: clang-tidy fm/src fm/tests fm/tools (checks in .clang-tidy)
+        run: |
+          clang-tidy --version
+          # the compiler flags exactly as fm's Makefile has them ($($*) is make's, not the shell's)
+          # shellcheck disable=SC2016
+          flags=$(make -s -C fm --no-print-directory --eval 'print-%: ; @echo $($*)' print-CXXFLAGS)
+          cd fm
+          # shellcheck disable=SC2086 # $flags is a list of flags
+          find src tests tools -name '*.cpp' -print0 | sort -z \
+            | xargs -0 -P"$(nproc)" -I{} clang-tidy --quiet {} -- $flags -Isrc '-DIRIXFM_SOURCE_DIR="."' > /tmp/tidy.txt 2>&1 && rc=0 || rc=$?
+          grep -v -E '^[0-9]+ warnings? (and [0-9]+ errors? )?generated\.$' /tmp/tidy.txt || true
+          sed -nE 's#^/[^ ]*/fm/([^:]+):([0-9]+):([0-9]+): (error|warning): (.*)$#::error file=fm/\1,line=\2,col=\3::\5#p' /tmp/tidy.txt
+          exit "$rc"

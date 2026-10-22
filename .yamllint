@@ -1,0 +1,10 @@
+# yamllint (https://yamllint.readthedocs.io/): the workflows. CI: .github/workflows/lint.yml
+extends: default
+rules:
+  document-start: disable
+  line-length:
+    max: 160
+  truthy:
+    check-keys: false        # `on:` in workflows
+  comments:
+    min-spaces-from-content: 1
