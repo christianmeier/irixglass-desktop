@@ -144,6 +144,9 @@ Window {
     readonly property var tagDefs: tagsJson ? JSON.parse(tagsJson) : defaultTags()
     readonly property string searchTag: { const m = search.text.match(/^tag:\s*(.+)$/i); return m ? m[1].trim() : "" }
     readonly property bool inTrash: dir === Fm.trashDir || dir.startsWith(Fm.trashDir + "/")
+    // `dir` is a local path, or a KIO URL (smb://host/share, sftp://user@host/…, remote:/, mtp:/…)
+    // listed by kioFolder instead of the FolderListModel (see "Network browsing" in DEVELOPMENT.md).
+    readonly property bool remote: Kio.isUrl(dir)
     // Layout: the sidebar slides away (sideShift) and the preview pane takes room on the right.
     readonly property int springDelay: 900      // ms hovering with a drag before a folder opens
     readonly property real hiddenShift: 98 * u   // how far the toolbar/content move left without the sidebar
@@ -290,11 +293,14 @@ Window {
         recent = [path].concat(recent.filter(p => p !== path)).slice(0, 12)
         recentJson = JSON.stringify(recent)
         view().positionViewAtBeginning()
-        if (termActive && terminals[activeTermId]) terminals[activeTermId].changeDirectory(path)   // the shell follows
+        if (termActive && terminals[activeTermId] && !Kio.isUrl(path)) terminals[activeTermId].changeDirectory(path)   // the shell follows
     }
     function goBack() { if (browserActive) { activeTerminal.goBack(); return } if (backStack.length) { fwdStack = [dir].concat(fwdStack); const p = backStack[backStack.length - 1]; backStack = backStack.slice(0, -1); go(p, true) } }
     function goForward() { if (browserActive) { activeTerminal.goForward(); return } if (fwdStack.length) { backStack = backStack.concat([dir]); const p = fwdStack[0]; fwdStack = fwdStack.slice(1); go(p, true) } }
-    function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
+    function goUp() {
+        if (remote) { const p = Kio.parentUrl(dir); if (p) go(p); return }
+        if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/")
+    }
     // Opening a folder inside a tab stays in that tab; sidebar places get a tab of their own
     // (openFolder). Ctrl+double-click / middle-click open a folder in a new tab.
     function activate(path, isDir) { isDir ? go(path) : Fm.open(path) }
@@ -392,7 +398,7 @@ Window {
             t.showFileRequested.connect(path => { openTabFor(path.substring(0, path.lastIndexOf("/")), ""); pendingSelect = [path] })
         } else {
             t = termComponent.createObject(layer, { program: kind === "nvim" ? "nvim" : "", arguments: args,
-                                                   workingDirectory: cwd, termId: id, fontPointSize: termFontSize })
+                                                   workingDirectory: Kio.isUrl(cwd) ? Fm.home : cwd, termId: id, fontPointSize: termFontSize })
             t.fontChanged.connect(() => termFontSize = t.fontPointSize)   // pinch / Ctrl+± size, kept for new terminals
         }
         const all = Object.assign({}, terminals); all[id] = t; terminals = all
@@ -440,6 +446,7 @@ Window {
         if (t.dir === Fm.trashDir || t.dir.startsWith(Fm.trashDir + "/")) return "Trash"
         if (t.dir === Fm.home) return Fm.userName
         if (t.dir === "/") return "cachyOS"
+        if (Kio.isUrl(t.dir)) return Kio.title(t.dir, Kio.rev)
         return t.dir.split("/").pop()
     }
     function termTitle(t) {
@@ -499,7 +506,7 @@ Window {
     }
     function applyPendingScroll() {
         if (pendingScrollY < 0 || pendingSelect.length || waitForLoad) return
-        if (folder.status !== FolderListModel.Ready) return
+        if (dirModel.status !== FolderListModel.Ready) return   // KioModel uses the same Ready
         const v = view(), y = pendingScrollY
         pendingScrollY = -1
         Qt.callLater(() => { v.contentY = Math.max(v.originY, Math.min(y, v.originY + v.contentHeight - v.height)) })
@@ -571,7 +578,7 @@ Window {
     function editPath(initial) {
         const typed = typeof initial === "string"
         editingPath = true
-        pathInput.text = typed ? initial : (dir === "/" ? "/" : dir + "/")
+        pathInput.text = typed ? initial : (dir.endsWith("/") ? dir : dir + "/")
         pathInput.forceActiveFocus()
         if (!typed) pathInput.selectAll()
         else pathInput.cursorPosition = pathInput.text.length
@@ -588,14 +595,15 @@ Window {
         return true
     }
     // The views show the folder, or the search / tag results (same roles: fileName, filePath, …).
-    readonly property int itemCount: searchActive ? resultsModel.count : folder.count
+    readonly property var dirModel: remote ? kioFolder : folder   // the folder's model: local or KIO
+    readonly property int itemCount: searchActive ? resultsModel.count : dirModel.count
     function itemAt(i, role) {
-        if (!searchActive) return folder.get(i, role)
+        if (!searchActive) return dirModel.get(i, role)
         const r = resultsModel.get(i)
         return r ? r[role] : undefined
     }
     function indexOfPath(p) {
-        if (!searchActive) return folder.indexOf("file://" + p)
+        if (!searchActive) return remote ? kioFolder.indexOf(p) : folder.indexOf("file://" + p)
         for (let i = 0; i < resultsModel.count; ++i) if (resultsModel.get(i).filePath === p) return i
         return -1
     }
@@ -663,7 +671,7 @@ Window {
     }
     function expand(p) { return p === "~" ? Fm.home : p.startsWith("~/") ? Fm.home + p.substring(1) : p }
     function shorten(p) { return p === Fm.home ? "~" : p.startsWith(Fm.home + "/") ? "~" + p.substring(Fm.home.length) : p }
-    function placeLabel(item) { return item.label || (item.path === "~" ? Fm.userName : item.path.split("/").pop() || "/") }
+    function placeLabel(item) { return item.label || (item.path === "~" ? Fm.userName : Kio.isUrl(item.path) ? Kio.title(item.path) : item.path.split("/").pop() || "/") }
     function setPlaces(p) { placesJson = JSON.stringify(p); settings.sync() }   // saved right away
     function copyPlaces() { return JSON.parse(JSON.stringify(places)) }
     // Adds folder `path` to section `si` at position `at` (default: end). Returns false for duplicates.
@@ -681,6 +689,7 @@ Window {
         const byAction = { trash: "user-trash", network: "network-workgroup", overview: "view-dual", find: "system-search" }
         if (item.action) return (byAction[item.action] || "folder") + "-symbolic"
         if (item.path === "~") return "user-home-symbolic"
+        if (Kio.isUrl(item.path || "")) return "network-server-symbolic"   // a server or share added from the Network
         if (item.path === "/") return "drive-harddisk-symbolic"
         if (item.path === "/usr/share/applications") return "view-grid-symbolic"
         const byName = { desktop: "user-desktop", documents: "folder-documents", downloads: "folder-download",
@@ -733,7 +742,8 @@ Window {
     }
     function activatePlace(item) {
         if (splitActive) {   // the split side: its own tab (or folder)
-            const p = item.udi !== undefined ? (item.mounted ? item.path : "") : item.action === "trash" ? Fm.trashDir : item.path ? expand(item.path) : ""
+            const p = item.udi !== undefined ? (item.mounted ? item.path : "") : item.action === "trash" ? Fm.trashDir
+                      : item.action === "network" ? "remote:/" : item.path ? expand(item.path) : ""
             if (p) { folderTabs ? splitPane.openTabFor(p) : splitPane.go(p); return }
             if (item.udi !== undefined) { Fm.mountVolume(item.udi); return }
         }
@@ -742,7 +752,7 @@ Window {
         if (item.path) openFolder(expand(item.path), false)
         else if (item.action === "overview") Fm.overview()
         else if (item.action === "find") search.forceActiveFocus()
-        else if (item.action === "network") Fm.openInDolphin("remote:/")
+        else if (item.action === "network") openFolder("remote:/", false)   // KIO's Network (smb, sftp, devices …) in fm
     }
     function dropOnPlaces(urls, si, at) {
         let pos = at
@@ -850,7 +860,15 @@ Window {
     }
     function resetTags() { tagsJson = ""; settings.sync() }
     function showTagged(name) { if (folderTabs) openTabFor(dir, "tag:" + name); else search.text = "tag:" + name }
-    function urlsToPaths(urls) { return urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, ""))) }
+    function urlsToPaths(urls) { return urls.map(u => { const s = u.toString(); return s.startsWith("file://") ? decodeURIComponent(s.substring(7)) : s }) }
+    // Delete for a mix of local items (to the Trash) and KIO items (deleted for good, after asking:
+    // servers and phones have no Trash).
+    property var pendingDelete: []
+    function trashPaths(ps) {
+        const local = ps.filter(p => !Kio.isUrl(p)), far = ps.filter(p => Kio.isUrl(p))
+        if (local.length) Fm.trash(local)
+        if (far.length) { pendingDelete = far; remoteDeleteDialog.open() }
+    }
 
     // ---- Finder commands -----------------------------------------------------------
     function sortBy(field) {
@@ -894,7 +912,7 @@ Window {
 
     function trashSelected() {
         if (inTrash) { deleteDialog.open(); return }    // in the Trash, Delete means "Delete Immediately"
-        Fm.trash(paths()); selection = ({})
+        trashPaths(paths()); selection = ({})
     }
     function putBack() { Fm.restoreFromTrash(paths()); selection = ({}) }
     function emptyTrashNow() { Fm.emptyTrash(); selection = ({}) }
@@ -917,7 +935,7 @@ Window {
 
     FolderListModel {
         id: folder
-        folder: "file://" + win.dir
+        folder: win.remote ? "" : "file://" + win.dir
         showDirsFirst: true
         showHidden: win.showHidden
         showDotAndDotDot: false
@@ -925,12 +943,28 @@ Window {
         sortCaseSensitive: false
         sortField: win.sortField
         sortReversed: win.sortReversed
-        onFolderChanged: Fm.prefetchKinds(win.dir)   // the icons' kinds, worked out in the background
+        onFolderChanged: if (!win.remote) Fm.prefetchKinds(win.dir)   // the icons' kinds, worked out in the background
         onCountChanged: { win.selectPending(); win.applyPendingScroll() }
         onStatusChanged: {
             if (status === FolderListModel.Loading) win.waitForLoad = false   // the new folder is on its way
             win.selectPending(); win.applyPendingScroll()
         }
+    }
+    // Folders behind KIO URLs, listed asynchronously (status Loading / Ready / Error + errorString).
+    KioModel {
+        id: kioFolder
+        objectName: "kioFolder"
+        url: win.remote ? win.dir : ""
+        showHidden: win.showHidden
+        sortField: win.sortField
+        sortReversed: win.sortReversed
+        onCountChanged: { win.selectPending(); win.applyPendingScroll() }
+        onStatusChanged: {
+            if (status === KioModel.Loading) win.waitForLoad = false
+            win.selectPending(); win.applyPendingScroll()
+        }
+        // e.g. sftp://host → sftp://host/home/user, mtp:udi=… → mtp:/<phone>: the path bar follows
+        onRedirected: (from, to) => { if (win.dir === from) win.dir = to }
     }
 
     // ---- glass ---------------------------------------------------------------
@@ -1001,6 +1035,7 @@ Window {
                 readonly property bool tagHead: head && !!modelData.tags
                 readonly property bool current: tagRow ? win.searchTag.toLowerCase() === modelData.tag.name.toLowerCase()
                                                 : item && (modelData.item.action === "trash" ? win.inTrash
+                                                           : modelData.item.action === "network" ? win.dir === "remote:/"
                                                            : !!modelData.item.path && win.expand(modelData.item.path) === win.dir)
                 readonly property string key: modelData.si + "/" + (modelData.ii === undefined ? "" : modelData.ii)
                 // Header rows carry the gap above them, so baselines match the mockup.
@@ -1175,7 +1210,7 @@ Window {
                         if (row.modelData.si < 0) return
                         const it = row.modelData.item
                         if (row.vol && it.mounted) { Fm.drop(d.urls, it.path, false); d.accept(Qt.CopyAction) }
-                        else if (it && it.action === "trash") { Fm.trash(d.urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, "")))); d.accept(Qt.MoveAction) }
+                        else if (it && it.action === "trash") { win.trashPaths(win.urlsToPaths(d.urls)); d.accept(Qt.MoveAction) }
                         else if (!row.vol) { win.dropOnPlaces(d.urls, row.modelData.si, row.item ? row.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
                     }
                 }
@@ -1264,6 +1299,7 @@ Window {
                 height: parent.height
                 Repeater {
                     model: {
+                        if (win.remote) return Kio.crumbs(win.dir, Kio.rev)   // host / share / … with device names
                         if (win.inTrash) {
                             const out = [{ label: "Trash", path: Fm.trashDir }]
                             let acc = Fm.trashDir
@@ -1497,7 +1533,7 @@ Window {
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { if (sp.anchorIndex >= 0) sp.activateRow(sp.anchorIndex) }
                 else if (event.key === Qt.Key_Backspace && !(event.modifiers & Qt.ControlModifier)) sp.goUp()
                 else if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) sp.goUp()
-                else if (event.key === Qt.Key_Delete || (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier)) { Fm.trash(sp.paths()); sp.selection = ({}) }
+                else if (event.key === Qt.Key_Delete || (event.key === Qt.Key_Backspace && event.modifiers & Qt.ControlModifier)) { win.trashPaths(sp.paths()); sp.selection = ({}) }
                 else if (event.key === Qt.Key_Escape) { if (win.quickLook) win.quickLook = ""; else sp.selection = ({}) }
                 else done = false
                 if (done) { event.accepted = true; return }
@@ -1555,7 +1591,7 @@ Window {
         // The folder or the search results. Qt (6.12) keeps the pool of reusable delegates when a
         // view's model changes, and a delegate reused for the other model reads the wrong roles
         // (blank names), so the pool is emptied (reuseItems off) before switching.
-        readonly property var shownModel: win.searchActive ? resultsModel : folder
+        readonly property var shownModel: win.searchActive ? resultsModel : win.dirModel
         Component.onCompleted: model = shownModel
         onShownModelChanged: { reuseItems = false; model = shownModel; reuseItems = true }
         interactive: false
@@ -1684,7 +1720,7 @@ Window {
                 }
                 Loader {   // previews mode: the real picture on a white mount
                     id: preview
-                    active: win.viewMode === 2 && cell.kind === "image"
+                    active: win.viewMode === 2 && cell.kind === "image" && !win.remote   // no thumbnails over KIO
                     visible: active && item.ready
                     x: 30 * cell.k; y: 18 * cell.k; width: 62 * cell.k; height: 62 * cell.k
                     sourceComponent: Rectangle {
@@ -1791,7 +1827,7 @@ Window {
         height: parent.height - win.bottomH - y
         clip: true
         reuseItems: true   // as in the icon view, and the same care when switching to the results
-        readonly property var shownModel: win.searchActive ? resultsModel : folder
+        readonly property var shownModel: win.searchActive ? resultsModel : win.dirModel
         Component.onCompleted: model = shownModel
         onShownModelChanged: { reuseItems = false; model = shownModel; reuseItems = true }
         boundsBehavior: Flickable.StopAtBounds
@@ -1987,6 +2023,20 @@ Window {
             }
         }
     }
+    // A KIO folder that's still connecting, or couldn't be listed (host unreachable, login refused …).
+    Text {
+        objectName: "remoteMessage"
+        visible: win.remote && !win.searchActive && !win.termActive && kioFolder.count === 0
+                 && (kioFolder.status === KioModel.Loading || kioFolder.status === KioModel.Error)
+        x: 240 * u - win.contentShift + 40 * u
+        width: parent.width - x - win.previewW - win.splitW - 40 * u
+        y: parent.height / 2 - height / 2
+        horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+        text: kioFolder.status === KioModel.Error ? "Can't open “" + Kio.title(win.dir, Kio.rev) + "”\n\n" + kioFolder.errorString
+                                                  : "Connecting to “" + Kio.title(win.dir, Kio.rev) + "”…"
+        color: "white"; opacity: kioFolder.status === KioModel.Error ? .75 : .4
+        font.family: win.fontFamily; font.pixelSize: 15 * win.tu
+    }
     Text {
         visible: win.searchActive && !win.searching && resultsModel.count === 0
         x: 240 * u - win.contentShift + (parent.width - 240 * u + win.contentShift - win.previewW) / 2 - width / 2
@@ -2024,7 +2074,7 @@ Window {
         termTitleFor: win.termTitle
         onTerminalRequested: (kind, args) => splitPane.addTerminalTab(kind, win.createTerminal(kind, splitPane.dir, kind === "web" ? win.webStart(args) : args, splitPane.termLayer))
         onTerminalClosed: id => win.destroyTerminal(id)
-        onTerminalCdRequested: (id, path) => { if (win.terminals[id]) win.terminals[id].changeDirectory(path) }
+        onTerminalCdRequested: (id, path) => { if (win.terminals[id] && !Kio.isUrl(path)) win.terminals[id].changeDirectory(path) }
         Connections { target: win; function onTermTitleRevChanged() { splitPane.titleRev++ } }
         onSelectionChanged: if (win.quickLook && win.splitActive && paths().length) win.quickLook = focusedPath()
         onDirChanged: if (dir !== win.splitDir) win.splitDir = dir
@@ -2135,7 +2185,7 @@ Window {
         onFilesDropped: (i, urls, move) => {
             const target = i === win.tabIndex ? win.dir : (win.tabs[i] ? win.tabs[i].dir : "")
             if (!target) return
-            if (target === Fm.trashDir || target.startsWith(Fm.trashDir + "/")) Fm.trash(win.urlsToPaths(urls))
+            if (target === Fm.trashDir || target.startsWith(Fm.trashDir + "/")) win.trashPaths(win.urlsToPaths(urls))
             else Fm.drop(urls, target, move)
         }
     }
@@ -2203,7 +2253,8 @@ Window {
               ? (win.searching ? "Searching… " : "") + win.searchResults.length + (win.searchResults.length === 1 ? " result" : " results")
                 + (win.searchTruncated ? " (first " + win.searchResults.length + ")" : "")
               : (n ? n + " of " + win.itemCount + " selected" : win.itemCount + (win.itemCount === 1 ? " item" : " items"))
-                + (win.inTrash ? " in Trash" : " · " + (folder.count >= 0 ? Fm.freeSpace(win.dir) : ""))
+                + (win.inTrash ? " in Trash" : win.remote ? (kioFolder.status === KioModel.Loading ? " · Loading…" : "")
+                                                  : " · " + (folder.count >= 0 ? Fm.freeSpace(win.dir) : ""))
         color: "white"; opacity: .55
         font.family: win.fontFamily; font.pixelSize: 12 * tu
     }
@@ -2491,7 +2542,7 @@ Window {
             }
         }
         P.MenuSeparator {}
-        P.MenuItem { text: "Move to Trash"; visible: !win.inTrash; onTriggered: win.trashSelected() }
+        P.MenuItem { text: win.remote ? "Delete…" : "Move to Trash"; visible: !win.inTrash; onTriggered: win.trashSelected() }
     }
     P.Menu {
         id: bgMenu
@@ -2584,7 +2635,7 @@ Window {
         P.MenuItem { text: "Open in New Tab"; enabled: splitPane.paths().some(p => Fm.kind(p) === "folder"); onTriggered: win.openInNewTab(splitPane.paths(), true) }
         P.MenuSeparator {}
         P.MenuItem { text: "Show This Folder on the Other Side"; onTriggered: win.go(splitPane.dir) }
-        P.MenuItem { text: "Move to Trash"; enabled: splitPane.paths().length > 0; onTriggered: { Fm.trash(splitPane.paths()); splitPane.selection = ({}) } }
+        P.MenuItem { text: "Move to Trash"; enabled: splitPane.paths().length > 0; onTriggered: { win.trashPaths(splitPane.paths()); splitPane.selection = ({}) } }
         P.MenuSeparator {}
         P.MenuItem { text: "Close Split View\tF3"; onTriggered: win.toggleSplit() }
     }
@@ -2692,6 +2743,18 @@ Window {
         informativeText: "You can't undo this action."
         buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
         onOkClicked: win.deleteNow()
+    }
+    P.MessageDialog {   // KIO items (servers, phones) have no Trash
+        id: remoteDeleteDialog
+        objectName: "remoteDeleteDialog"
+        title: "Delete"
+        text: "Are you sure you want to delete " + (win.pendingDelete.length === 1 ? "“" + Kio.title(win.pendingDelete[0]) + "”"
+                                                                                     : win.pendingDelete.length + " items") + "?"
+        informativeText: "They are on " + (win.pendingDelete.length ? Kio.crumbs(win.pendingDelete[0])[0].label : "another computer")
+                         + ", which has no Trash. You can't undo this action."
+        buttons: P.MessageDialog.Cancel | P.MessageDialog.Ok
+        onOkClicked: { Fm.deletePermanently(win.pendingDelete); win.pendingDelete = [] }
+        onRejected: win.pendingDelete = []
     }
     P.Menu {
         id: historyMenu
@@ -2846,7 +2909,7 @@ Window {
             P.MenuItem { text: "Applications\tCtrl+Shift+A"; onTriggered: win.go(Fm.home + "/Applications") }
             P.MenuItem { text: "Icon Catalog"; onTriggered: win.go("/usr/share/applications") }
             P.MenuItem { text: "Computer\tCtrl+Shift+C"; onTriggered: win.go("/") }
-            P.MenuItem { text: "Network\tCtrl+Shift+K"; onTriggered: Fm.openInDolphin("remote:/") }
+            P.MenuItem { text: "Network\tCtrl+Shift+K"; onTriggered: win.go("remote:/") }
             P.MenuItem { text: "Trash"; onTriggered: win.go(Fm.trashDir) }
         }
         P.Menu {
@@ -2947,7 +3010,7 @@ Window {
     Shortcut { sequence: "Ctrl+Alt+L"; onActivated: win.go(Fm.home + "/Downloads") }
     Shortcut { sequence: "Ctrl+Shift+A"; onActivated: win.go(Fm.home + "/Applications") }
     Shortcut { sequence: "Ctrl+Shift+C"; onActivated: win.go("/") }
-    Shortcut { sequence: "Ctrl+Shift+K"; onActivated: Fm.openInDolphin("remote:/") }
+    Shortcut { sequence: "Ctrl+Shift+K"; onActivated: win.go("remote:/") }
     Shortcut { sequence: "Ctrl+Alt+S"; onActivated: win.sidebarShown = !win.sidebarShown }
     Shortcut { sequence: "Ctrl+Shift+P"; onActivated: win.previewShown = !win.previewShown }
     Shortcut { sequence: "Ctrl+Shift+Del"; onActivated: emptyDialog.open() }

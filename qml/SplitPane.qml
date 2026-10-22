@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Shapes
 import Qt.labs.folderlistmodel
 import org.kde.kirigami as K
+import IrixFm
 
 // The second side of the split view (F3): a list of its own folder, with a path bar, back / up,
 // selection and drag and drop. Dragging between the sides moves (Ctrl copies); F5 / F6 copy /
@@ -76,7 +77,7 @@ Item {
         titleRev
         const d = i === tabIndex ? dir : t.dir
         if (t.term && termTitleFor) return { title: termTitleFor(t), dir: d }
-        return { title: d === "/" ? "/" : (d.split("/").pop() || d), dir: d }
+        return { title: d === "/" ? "/" : Kio.isUrl(d) ? Kio.title(d, Kio.rev) : (d.split("/").pop() || d), dir: d }
     })
     function saveTab() {
         if (tabIndex < 0 || tabIndex >= tabs.length) return
@@ -143,7 +144,10 @@ Item {
         tabs = t
     }
 
-    readonly property alias count: model.count
+    // a KIO URL (smb://, sftp://, remote:/, mtp:/ …) is listed by kioModel, a local folder by `model`
+    readonly property bool remote: Kio.isUrl(dir)
+    readonly property var dirModel: remote ? kioModel : model
+    readonly property int count: dirModel.count
     function paths() { return Object.keys(selection) }
     function go(path) {
         if (path && path !== dir) {
@@ -153,13 +157,16 @@ Item {
     }
     onDirChanged: Qt.callLater(saveTab)
     function goBack() { if (back.length) { const p = back[back.length - 1]; back = back.slice(0, -1); dir = p; selection = ({}); anchorIndex = -1 } }
-    function goUp() { if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/") }
+    function goUp() {
+        if (remote) { const p = Kio.parentUrl(dir); if (p) go(p); return }
+        if (dir !== "/") go(dir.substring(0, dir.lastIndexOf("/")) || "/")
+    }
     function select(i, mods) {
-        const path = model.get(i, "filePath")
+        const path = dirModel.get(i, "filePath")
         let s = Object.assign({}, selection)
         if (mods & Qt.ShiftModifier && anchorIndex >= 0) {
             s = ({})
-            for (let k = Math.min(anchorIndex, i); k <= Math.max(anchorIndex, i); ++k) s[model.get(k, "filePath")] = true
+            for (let k = Math.min(anchorIndex, i); k <= Math.max(anchorIndex, i); ++k) s[dirModel.get(k, "filePath")] = true
         } else if (mods & Qt.ControlModifier) {
             if (s[path]) delete s[path]; else s[path] = true
             anchorIndex = i
@@ -168,26 +175,26 @@ Item {
     }
     // keyboard (the window routes keys here while this side is active)
     function focusedPath() {
-        const p = anchorIndex >= 0 ? model.get(anchorIndex, "filePath") : ""
+        const p = anchorIndex >= 0 ? dirModel.get(anchorIndex, "filePath") : ""
         return p && selection[p] ? p : (paths()[0] || "")
     }
     readonly property int columns: viewMode === 1 ? 1 : Math.max(1, Math.floor(grid.width / grid.cellWidth))
     function moveCursor(delta) {
-        if (!model.count) return
-        const i = Math.max(0, Math.min(model.count - 1, (anchorIndex < 0 ? -delta : anchorIndex) + delta))
+        if (!dirModel.count) return
+        const i = Math.max(0, Math.min(dirModel.count - 1, (anchorIndex < 0 ? -delta : anchorIndex) + delta))
         select(i, 0)
         rows.positionViewAtIndex(i, ListView.Contain)
         grid.positionViewAtIndex(i, GridView.Contain)
     }
-    function selectAll() { const s = ({}); for (let i = 0; i < model.count; ++i) s[model.get(i, "filePath")] = true; selection = s }
+    function selectAll() { const s = ({}); for (let i = 0; i < dirModel.count; ++i) s[dirModel.get(i, "filePath")] = true; selection = s }
     function activateRow(i) {
-        const path = model.get(i, "filePath")
-        if (model.get(i, "fileIsDir")) go(path); else pane.openFile(path)
+        const path = dirModel.get(i, "filePath")
+        if (dirModel.get(i, "fileIsDir")) go(path); else pane.openFile(path)
     }
 
     FolderListModel {
         id: model
-        folder: pane.dir ? "file://" + pane.dir : ""
+        folder: pane.dir && !pane.remote ? "file://" + pane.dir : ""
         showDirsFirst: true
         showHidden: pane.showHidden
         showDotAndDotDot: false
@@ -195,7 +202,16 @@ Item {
         sortCaseSensitive: false
         sortField: pane.sortField
         sortReversed: pane.sortReversed
-        onFolderChanged: if (pane.dir) Fm.prefetchKinds(pane.dir)   // as on the main side
+        onFolderChanged: if (pane.dir && !pane.remote) Fm.prefetchKinds(pane.dir)   // as on the main side
+    }
+    KioModel {
+        id: kioModel
+        objectName: "splitKioModel"
+        url: pane.remote ? pane.dir : ""
+        showHidden: pane.showHidden
+        sortField: pane.sortField
+        sortReversed: pane.sortReversed
+        onRedirected: (from, to) => { if (pane.dir === from) pane.dir = to }
     }
 
     // a glass panel of its own, lit when active
@@ -260,8 +276,11 @@ Item {
         x: 6 * pane.u; y: columns.y + columns.height
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
-        model: model
         reuseItems: true   // as on the main side: scrolled-out rows are refilled, not made again
+        // local or KIO folder: switch with the pool drained, as on the main side (reuseItems gotcha)
+        readonly property var shownModel: pane.dirModel
+        Component.onCompleted: rows.model = shownModel
+        onShownModelChanged: { reuseItems = false; rows.model = shownModel; reuseItems = true }
         interactive: false
         ScrollBar.vertical: GlassScrollBar { u: pane.u }
         WheelHandler {
@@ -361,8 +380,10 @@ Item {
         x: 6 * pane.u; y: columns.y + 6 * pane.u
         width: pane.width - 12 * pane.u; height: pane.height - y - 6 * pane.u
         clip: true
-        model: model
         reuseItems: true
+        readonly property var shownModel: pane.dirModel
+        Component.onCompleted: grid.model = shownModel
+        onShownModelChanged: { reuseItems = false; grid.model = shownModel; reuseItems = true }
         interactive: false
         cellWidth: pane.cellSize; cellHeight: pane.cellSize
         ScrollBar.vertical: GlassScrollBar { u: pane.u }
@@ -429,7 +450,7 @@ Item {
                 }
                 Loader {   // previews: the real picture
                     id: thumb
-                    active: pane.viewMode === 2 && c.kind === "image"
+                    active: pane.viewMode === 2 && c.kind === "image" && !pane.remote   // no thumbnails over KIO
                     visible: active && item.ready
                     x: 30 * c.kk; y: 18 * c.kk; width: 62 * c.kk; height: 62 * c.kk
                     sourceComponent: Rectangle {
@@ -501,6 +522,18 @@ Item {
         }
     }
 
+    Text {   // a KIO folder still connecting, or one that couldn't be listed
+        objectName: "splitRemoteMessage"
+        visible: pane.remote && !pane.termActive && kioModel.count === 0
+                 && (kioModel.status === KioModel.Loading || kioModel.status === KioModel.Error)
+        x: 20 * pane.u; width: pane.width - 40 * pane.u
+        y: pane.height / 2 - height / 2
+        horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+        text: kioModel.status === KioModel.Error ? "Can't open “" + Kio.title(pane.dir, Kio.rev) + "”\n\n" + kioModel.errorString
+                                                 : "Connecting to “" + Kio.title(pane.dir, Kio.rev) + "”…"
+        color: "white"; opacity: kioModel.status === KioModel.Error ? .75 : .4
+        font.family: pane.fontFamily; font.pixelSize: 14 * pane.tu
+    }
     Item {   // terminal tabs of this side are shown here
         id: termLayer
         objectName: "splitTermLayer"

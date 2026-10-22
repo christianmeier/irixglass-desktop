@@ -20,12 +20,13 @@ Item {
 
     readonly property var info: path ? Fm.info(path) : ({})
     readonly property string kind: !path ? "" : info.isDir ? "folder"
+                                   : info.remote ? "other"   // KIO items aren't downloaded for Quick Look
                                    : info.mime.startsWith("image/") ? "image"
                                    : info.mime === "application/pdf" ? "pdf"
                                    : info.mime.startsWith("video/") ? "video"
                                    : info.mime.startsWith("audio/") ? "audio"
                                    : textBody.length ? "text" : "other"
-    readonly property string textBody: path && !info.isDir && !info.mime.startsWith("image/") && !info.mime.startsWith("video/")
+    readonly property string textBody: path && !info.isDir && !info.remote && !info.mime.startsWith("image/") && !info.mime.startsWith("video/")
                                        && !info.mime.startsWith("audio/") && info.mime !== "application/pdf"
                                        ? Fm.textPreview(path) : ""
     // Markdown rendered, code highlighted in Nord (Fm.richPreview); plain text otherwise.

@@ -15,9 +15,10 @@ Item {
 
     readonly property var info: path ? Fm.info(path) : ({})
     readonly property string mime: info.mime || ""
-    readonly property string kind: info.isDir ? "folder" : mime.startsWith("image/") ? "image" : mime === "application/pdf" ? "pdf"
+    // KIO items (info.remote) aren't downloaded for a preview: folder or icon only
+    readonly property string kind: info.isDir ? "folder" : info.remote ? "other" : mime.startsWith("image/") ? "image" : mime === "application/pdf" ? "pdf"
                                    : textBody.length ? "text" : "other"
-    readonly property string textBody: path && !info.isDir && !mime.startsWith("image/") && mime !== "application/pdf"
+    readonly property string textBody: path && !info.isDir && !info.remote && !mime.startsWith("image/") && mime !== "application/pdf"
                                        && !mime.startsWith("video/") && !mime.startsWith("audio/") ? Fm.textPreview(path, 4096) : ""
     onPathChanged: if (info.isDir && sizes[path] === undefined) Fm.folderSize(path)
 

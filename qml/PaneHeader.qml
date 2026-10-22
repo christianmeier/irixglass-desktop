@@ -1,4 +1,5 @@
 import QtQuick
+import IrixFm
 
 // The header of a split-view side: ‹ back, ↑ up and the clickable path. Both sides use it, so
 // they look the same.
@@ -40,7 +41,7 @@ Item {
         }
         Item {   // ↑ up
             width: 12 * header.u; height: parent.height
-            opacity: header.dir !== "/" ? .9 : .3
+            opacity: (Kio.isUrl(header.dir) ? Kio.parentUrl(header.dir) !== "" : header.dir !== "/") ? .9 : .3
             Bar { cx: 6 * header.u; cy: header.midY; len: 11.5 * header.u; angle: 90; thick: 1.7 * header.u }
             Bar { cx: 3.9 * header.u; cy: header.midY - 3.6 * header.u; len: 6.5 * header.u; angle: -50; thick: 1.7 * header.u }
             Bar { cx: 8.1 * header.u; cy: header.midY - 3.6 * header.u; len: 6.5 * header.u; angle: 50; thick: 1.7 * header.u }
@@ -53,6 +54,7 @@ Item {
                 x: Math.min(0, clip.width - width); height: parent.height
                 Repeater {
                     model: {
+                        if (Kio.isUrl(header.dir)) return Kio.crumbs(header.dir, Kio.rev)   // smb://host › share › …
                         const out = [{ label: "/", path: "/" }]
                         let acc = ""
                         for (const p of header.dir.split("/").filter(p => p.length)) { acc += "/" + p; out.push({ label: p, path: acc }) }
