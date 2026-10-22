@@ -2,7 +2,7 @@ import QtQuick
 
 // SGI thumbwheel: a ridged cylinder seen edge-on. Drag sideways or scroll to roll it.
 Item {
-    id: wheel
+    id: thumbwheel
     property real value: .35          // 0..1
     property real u: 1
     readonly property int ridges: 44
@@ -14,7 +14,7 @@ Item {
     Rectangle { anchors.fill: parent; radius: height / 2; color: Qt.rgba(11 / 255, 12 / 255, 16 / 255, .6) }
     Rectangle {
         id: drum
-        anchors.fill: parent; anchors.margins: 3 * wheel.u
+        anchors.fill: parent; anchors.margins: 3 * thumbwheel.u
         radius: height / 2
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -24,13 +24,13 @@ Item {
         }
         clip: true
         Repeater {
-            model: wheel.ridges
+            model: thumbwheel.ridges
             Rectangle {
                 required property int index
-                readonly property real a: -Math.PI / 2 + ((index * wheel.step + wheel.phase) % Math.PI + Math.PI) % Math.PI
-                x: drum.width / 2 + (drum.width / 2 - 4 * wheel.u) * Math.sin(a) - width / 2
-                y: 3 * wheel.u
-                width: 1.4 * wheel.u; height: drum.height - 6 * wheel.u
+                readonly property real a: -Math.PI / 2 + ((index * thumbwheel.step + thumbwheel.phase) % Math.PI + Math.PI) % Math.PI
+                x: drum.width / 2 + (drum.width / 2 - 4 * thumbwheel.u) * Math.sin(a) - width / 2
+                y: 3 * thumbwheel.u
+                width: 1.4 * thumbwheel.u; height: drum.height - 6 * thumbwheel.u
                 color: "#0d0e12"
                 opacity: .15 + .55 * Math.cos(a)
             }
@@ -40,8 +40,8 @@ Item {
     DragHandler {
         target: null
         yAxis.enabled: false
-        onActiveChanged: if (active) wheel.startValue = wheel.value
-        onTranslationChanged: wheel.value = Math.max(0, Math.min(1, wheel.startValue + translation.x / (wheel.width * 1.6)))
+        onActiveChanged: if (active) thumbwheel.startValue = thumbwheel.value
+        onTranslationChanged: thumbwheel.value = Math.max(0, Math.min(1, thumbwheel.startValue + translation.x / (thumbwheel.width * 1.6)))
     }
     // Touchpad swipes (either direction) and mouse wheels roll it. A WheelHandler only sees one
     // orientation, so there is one per axis. About 400 px of swipe covers the whole range.
@@ -49,12 +49,12 @@ Item {
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         orientation: Qt.Vertical
-        onWheel: event => wheel.roll(event, event.pixelDelta.y, event.angleDelta.y)
+        onWheel: event => thumbwheel.roll(event, event.pixelDelta.y, event.angleDelta.y)
     }
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         orientation: Qt.Horizontal
-        onWheel: event => wheel.roll(event, event.pixelDelta.x, event.angleDelta.x)
+        onWheel: event => thumbwheel.roll(event, event.pixelDelta.x, event.angleDelta.x)
     }
     HoverHandler { cursorShape: Qt.SizeHorCursor }
 }

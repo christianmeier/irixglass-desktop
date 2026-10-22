@@ -365,6 +365,11 @@ int main(int argc, char *argv[])
             if (*firstFrame < 0 || clock.elapsed() - *stableSince < 400)
                 return;
             poll->stop();
+            if (!view) {   // no grid/list to scroll (the QML changed): say so instead of crashing
+                std::fprintf(stderr, "bench: no view to scroll\n");
+                app.exit(1);
+                return;
+            }
             const qint64 ready = *stableSince;
             // scroll: to the end and back in 60 steps each, rendering every step
             // the GUI thread's CPU time too: steadier than wall time on a busy machine

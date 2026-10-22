@@ -39,7 +39,8 @@ Item {
     Connections {
         target: Fm
         function onFolderSizeReady(p, bytes, files, folders) {
-            if (p === ql.path) ql.folderSizeText = bytes < 0 ? "--" : Fm.humanSize(bytes) + " · " + (files + folders).toLocaleString() + " items"
+            // (files + folders) is a JS number; qmllint can't tell
+            if (p === ql.path) ql.folderSizeText = bytes < 0 ? "--" : Fm.humanSize(bytes) + " · " + (files + folders).toLocaleString() + " items"   // qmllint disable missing-property
         }
     }
 

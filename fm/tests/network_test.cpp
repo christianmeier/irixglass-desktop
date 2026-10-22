@@ -266,7 +266,8 @@ int main(int argc, char *argv[])
         auto *input = win->findChild<QQuickItem *>(QStringLiteral("pathInput"));
         check(input && input->property("text").toString() == tarDir + QStringLiteral("/"), QStringLiteral("path bar: editing starts with the URL"),
               input ? input->property("text").toString() : QString());
-        input->setProperty("text", cdir);
+        if (input)
+            input->setProperty("text", cdir);
         QTest::keyClick(window, Qt::Key_Return);
         QTest::qWait(200);
         check(dir() == cdir, QStringLiteral("path bar: typing a KIO URL goes there"), dir());
@@ -305,9 +306,9 @@ int main(int argc, char *argv[])
         check(msg && msg->isVisible() && msg->property("text").toString().startsWith(QStringLiteral("Connecting")),
               QStringLiteral("view: Connecting… while KIO works"), msg ? msg->property("text").toString() : QString());
         go(QStringLiteral("tar:") + base + QStringLiteral("/missing.tar/x"));   // fails at once (smb takes ~25 s)
-        waitFor([&] { return msg->property("text").toString().startsWith(QStringLiteral("Can't open")); }, 15000);
-        check(msg->isVisible() && msg->property("text").toString().startsWith(QStringLiteral("Can't open")),
-              QStringLiteral("view: an error message instead of an empty folder"), msg->property("text").toString());
+        waitFor([&] { return msg && msg->property("text").toString().startsWith(QStringLiteral("Can't open")); }, 15000);
+        check(msg && msg->isVisible() && msg->property("text").toString().startsWith(QStringLiteral("Can't open")),
+              QStringLiteral("view: an error message instead of an empty folder"), msg ? msg->property("text").toString() : QString());
         // Network in the sidebar opens remote:/ in fm
         const QVariantMap network{{QStringLiteral("label"), QStringLiteral("Network")}, {QStringLiteral("action"), QStringLiteral("network")}};
         QMetaObject::invokeMethod(win, "activatePlace", Q_ARG(QVariant, network));

@@ -6,7 +6,8 @@ import QtCore
 import Qt.labs.folderlistmodel
 import Qt.labs.platform as P
 import org.kde.kirigami as K
-import IrixFm
+// IrixFm is registered from C++ (no qmltypes), so qmllint can't import it
+import IrixFm   // qmllint disable import
 
 // fm: the IRIX Indigo Magic file manager, rebuilt with a macOS Tahoe glass skin.
 // Geometry follows the mockup (docs/mockup.png) in mockup pixels times `u`.
@@ -444,9 +445,9 @@ Window {
     function openAlacritty() { Fm.openTerminal(splitActive ? splitPane.dir : dir) }
     Component {
         id: termComponent
-        TerminalView {
+        TerminalView {   // qmllint disable import
             property int termId: 0
-            anchors.fill: parent
+            anchors.fill: parent   // qmllint disable unresolved-type
             visible: win.activeTermId === termId || splitPane.activeTermId === termId
             onActiveFocusChanged: if (activeFocus) win.activePane = parent === splitPane.termLayer ? 1 : 0
         }
@@ -467,7 +468,8 @@ Window {
         return t.dir.split("/").pop()
     }
     function termTitle(t) {
-        termTitleRev
+        // a dependency only: re-evaluate when it changes
+        termTitleRev   // qmllint disable confusing-expression-statement
         const term = terminals[t.termId]
         const base = t.term === "nvim" ? "nvim" : t.term === "web" ? "Web" : "Terminal"
         return term && term.title ? term.title : base + " — " + (t.dir.split("/").pop() || "/")
@@ -1048,7 +1050,7 @@ Window {
         }
     }
     // Folders behind KIO URLs, listed asynchronously (status Loading / Ready / Error + errorString).
-    KioModel {
+    KioModel {   // qmllint disable import
         id: kioFolder
         objectName: "kioFolder"
         url: win.remote ? win.dir : ""
@@ -1151,7 +1153,7 @@ Window {
                 onWheel: event => win.scroll(placesView, event)
             }
             delegate: Item {
-                id: row
+                id: sideRow
                 required property var modelData
                 required property int index
                 readonly property bool head: modelData.kind === "head"
@@ -1178,184 +1180,184 @@ Window {
                 height: gap + (head ? 28 : win.dolphinSidebar ? 34 : 30) * win.tu
 
                 Rectangle {
-                    visible: (row.item || row.tagRow) && (row.current || hov.hovered || drop.containsDrag)
+                    visible: (sideRow.item || sideRow.tagRow) && (sideRow.current || hov.hovered || sideDrop.containsDrag)
                     x: (win.dolphinSidebar ? 10 : 14) * win.u; y: (win.dolphinSidebar ? 2 : 4) * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: (win.dolphinSidebar ? 30 : 26) * win.tu; radius: (win.dolphinSidebar ? 6 : 8) * win.tu
-                    color: Qt.rgba(1, 1, 1, row.current || drop.containsDrag ? .16 : .07)
+                    color: Qt.rgba(1, 1, 1, sideRow.current || sideDrop.containsDrag ? .16 : .07)
                 }
                 Rectangle {   // drop target line for headers / empty sections
-                    visible: !row.item && !row.tagRow && !row.tagHead && row.modelData.si >= 0 && drop.containsDrag
-                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: row.height - 3 * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: 2 * win.tu; radius: 1
+                    visible: !sideRow.item && !sideRow.tagRow && !sideRow.tagHead && sideRow.modelData.si >= 0 && sideDrop.containsDrag
+                    x: (win.dolphinSidebar ? 10 : 14) * win.u; y: sideRow.height - 3 * win.tu; width: placesView.width - (win.dolphinSidebar ? 20 : 24) * win.u; height: 2 * win.tu; radius: 1
                     color: "#0a84ff"
                 }
                 Rectangle {   // a tag: a filled Nord colour dot
-                    visible: row.tagRow
-                    x: 23 * win.u; y: 8.5 * win.tu + row.dy; width: 13 * win.tu; height: width; radius: width / 2
-                    color: row.tagRow ? row.modelData.tag.color : "transparent"
+                    visible: sideRow.tagRow
+                    x: 23 * win.u; y: 8.5 * win.tu + sideRow.dy; width: 13 * win.tu; height: width; radius: width / 2
+                    color: sideRow.tagRow ? sideRow.modelData.tag.color : "transparent"
                     border.color: Qt.rgba(1, 1, 1, .35); border.width: 1
                 }
                 // The entry's icon: the section-coloured outline, or an emoji / app icon picked with Icon….
-                readonly property string glyph: row.item && !row.vol ? row.modelData.item.icon || "" : ""
+                readonly property string glyph: sideRow.item && !sideRow.vol ? sideRow.modelData.item.icon || "" : ""
                 K.Icon {   // the standard icon: the theme's symbolic one, in the section's colour (as in Finder)
                     objectName: "placeStdIcon"
-                    visible: row.item && !row.glyph
-                    x: 21 * win.u; y: 6.5 * win.tu + row.dy; width: 17 * win.tu; height: width
-                    source: visible ? (row.vol ? row.modelData.item.icon || "drive-removable-media-symbolic" : win.standardPlaceIcon(row.modelData.item)) : ""
-                    opacity: row.dimmed ? .6 : 1
+                    visible: sideRow.item && !sideRow.glyph
+                    x: 21 * win.u; y: 6.5 * win.tu + sideRow.dy; width: 17 * win.tu; height: width
+                    source: visible ? (sideRow.vol ? sideRow.modelData.item.icon || "drive-removable-media-symbolic" : win.standardPlaceIcon(sideRow.modelData.item)) : ""
+                    opacity: sideRow.dimmed ? .6 : 1
                     fallback: "folder-symbolic"
-                    isMask: true; color: win.dolphinSidebar ? "white" : row.modelData.color || "white"   // Dolphin: plain white; Finder: section colour
+                    isMask: true; color: win.dolphinSidebar ? "white" : sideRow.modelData.color || "white"   // Dolphin: plain white; Finder: section colour
                     roundToIconSize: false
                 }
                 Text {
                     objectName: "placeEmoji"
-                    visible: row.glyph.startsWith("emoji:")
-                    x: 20 * win.u; width: 19 * win.tu; y: 4 * win.tu + row.dy
+                    visible: sideRow.glyph.startsWith("emoji:")
+                    x: 20 * win.u; width: 19 * win.tu; y: 4 * win.tu + sideRow.dy
                     horizontalAlignment: Text.AlignHCenter
-                    text: visible ? row.glyph.slice(6) : ""
+                    text: visible ? sideRow.glyph.slice(6) : ""
                     font.family: "Noto Color Emoji"; font.pixelSize: 15 * win.tu
                 }
                 K.Icon {
                     objectName: "placeAppIcon"
-                    visible: !!row.glyph && !row.glyph.startsWith("emoji:")
-                    x: 21 * win.u; y: 6 * win.tu + row.dy; width: 18 * win.tu; height: width
-                    source: visible ? row.glyph : ""
+                    visible: !!sideRow.glyph && !sideRow.glyph.startsWith("emoji:")
+                    x: 21 * win.u; y: 6 * win.tu + sideRow.dy; width: 18 * win.tu; height: width
+                    source: visible ? sideRow.glyph : ""
                     roundToIconSize: false
                 }
                 Text {
-                    visible: !(row.item && win.renamingPlace === row.key) && !(row.tagRow && win.renamingTag === row.modelData.tag.name)
-                             && !(row.head && !row.tagHead && win.renamingSection === row.modelData.si)
-                    x: (row.head ? 16 : row.item || row.tagRow ? 48 : 22) * win.u
-                    width: placesView.width - (row.head ? 60 : 90) * win.u
+                    visible: !(sideRow.item && win.renamingPlace === sideRow.key) && !(sideRow.tagRow && win.renamingTag === sideRow.modelData.tag.name)
+                             && !(sideRow.head && !sideRow.tagHead && win.renamingSection === sideRow.modelData.si)
+                    x: (sideRow.head ? 16 : sideRow.item || sideRow.tagRow ? 48 : 22) * win.u
+                    width: placesView.width - (sideRow.head ? 60 : 90) * win.u
                     elide: Text.ElideRight
-                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu + row.dy
-                    text: row.head ? win.sectionTitle(row.modelData.title) : row.item ? win.placeLabel(row.modelData.item)
-                          : row.tagRow ? row.modelData.tag.name : (row.modelData.hint || "Drop folders here")
-                    color: "white"; opacity: row.head ? .55 : row.dimmed ? .6 : row.item || row.tagRow ? 1 : .3
+                    anchors.baseline: parent.top; anchors.baselineOffset: sideRow.gap + 21 * win.tu + sideRow.dy
+                    text: sideRow.head ? win.sectionTitle(sideRow.modelData.title) : sideRow.item ? win.placeLabel(sideRow.modelData.item)
+                          : sideRow.tagRow ? sideRow.modelData.tag.name : (sideRow.modelData.hint || "Drop folders here")
+                    color: "white"; opacity: sideRow.head ? .55 : sideRow.dimmed ? .6 : sideRow.item || sideRow.tagRow ? 1 : .3
                     font.family: win.fontFamily
-                    font.pixelSize: (row.head ? (win.dolphinSidebar ? 13.5 : 11) : row.item || row.tagRow ? 13.5 : 12) * win.tu   // Dolphin: titles at the entries' (system) size
-                    font.weight: row.head && !win.dolphinSidebar ? Font.DemiBold : Font.Normal   // Dolphin: grey, plain, entry size
+                    font.pixelSize: (sideRow.head ? (win.dolphinSidebar ? 13.5 : 11) : sideRow.item || sideRow.tagRow ? 13.5 : 12) * win.tu   // Dolphin: titles at the entries' (system) size
+                    font.weight: sideRow.head && !win.dolphinSidebar ? Font.DemiBold : Font.Normal   // Dolphin: grey, plain, entry size
                 }
                 Rename {
-                    active: row.item && !row.vol && win.renamingPlace === row.key
+                    active: sideRow.item && !sideRow.vol && win.renamingPlace === sideRow.key
                     x: 44 * win.u; width: placesView.width - 90 * win.u; y: 4 * win.tu
-                    name: row.item ? win.placeLabel(row.modelData.item) : ""
+                    name: sideRow.item ? win.placeLabel(sideRow.modelData.item) : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
-                    onCommitted: text => win.placeRename(row.modelData.si, row.modelData.ii, text)
+                    onCommitted: text => win.placeRename(sideRow.modelData.si, sideRow.modelData.ii, text)
                     onDone: { win.renamingPlace = ""; keys.forceActiveFocus() }
                 }
                 Rename {   // a section title (double-click, or Rename Section…)
-                    active: row.head && !row.tagHead && win.renamingSection === row.modelData.si
-                    x: 12 * win.u; width: 170 * win.u; y: row.gap + 4 * win.tu
-                    name: row.head ? win.sectionTitle(row.modelData.title) : ""
+                    active: sideRow.head && !sideRow.tagHead && win.renamingSection === sideRow.modelData.si
+                    x: 12 * win.u; width: 170 * win.u; y: sideRow.gap + 4 * win.tu
+                    name: sideRow.head ? win.sectionTitle(sideRow.modelData.title) : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
-                    onCommitted: text => win.renameSection(row.modelData.si, text)
+                    onCommitted: text => win.renameSection(sideRow.modelData.si, text)
                     onDone: { win.renamingSection = -1; keys.forceActiveFocus() }
                 }
                 Rename {
-                    active: row.tagRow && win.renamingTag === row.modelData.tag.name
+                    active: sideRow.tagRow && win.renamingTag === sideRow.modelData.tag.name
                     x: 44 * win.u; width: 160 * win.u; y: 4 * win.tu
-                    name: row.tagRow ? row.modelData.tag.name : ""
+                    name: sideRow.tagRow ? sideRow.modelData.tag.name : ""
                     u: win.tu; fontFamily: win.fontFamily; align: TextInput.AlignLeft
-                    onCommitted: text => win.renameTag(row.modelData.tag.name, text)
+                    onCommitted: text => win.renameTag(sideRow.modelData.tag.name, text)
                     onDone: { win.renamingTag = ""; keys.forceActiveFocus() }
                 }
                 Text {   // section chevron: ▾ open / › folded; click the title to fold or open it
                     objectName: "chevron"
-                    visible: row.head && (hov.hovered || !!row.modelData.collapsed)
+                    visible: sideRow.head && (hov.hovered || !!sideRow.modelData.collapsed)
                     anchors.right: parent.right; anchors.rightMargin: 40 * win.u
-                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
-                    text: row.modelData.collapsed ? "›" : "⌄"; color: "white"; opacity: .55
-                    font.family: win.fontFamily; font.pixelSize: (row.modelData.collapsed ? 15 : 13) * win.tu; font.weight: Font.DemiBold
+                    anchors.baseline: parent.top; anchors.baselineOffset: sideRow.gap + 21 * win.tu
+                    text: sideRow.modelData.collapsed ? "›" : "⌄"; color: "white"; opacity: .55
+                    font.family: win.fontFamily; font.pixelSize: (sideRow.modelData.collapsed ? 15 : 13) * win.tu; font.weight: Font.DemiBold
                 }
                 Text {   // "+" on a hovered header: add the current folder to this section
-                    visible: row.head && hov.hovered
+                    visible: sideRow.head && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
-                    anchors.baseline: parent.top; anchors.baselineOffset: row.gap + 21 * win.tu
+                    anchors.baseline: parent.top; anchors.baselineOffset: sideRow.gap + 21 * win.tu
                     text: "+"; color: "white"; opacity: plusHover.hovered ? .9 : .5
                     font.family: win.fontFamily; font.pixelSize: 15 * win.tu; font.weight: Font.DemiBold
                     HoverHandler { id: plusHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: row.tagHead ? win.newTag(false) : win.placeAdd(row.modelData.si, win.dir) }
+                    TapHandler { onTapped: sideRow.tagHead ? win.newTag(false) : win.placeAdd(sideRow.modelData.si, win.dir) }
                 }
                 Rectangle {   // ⊖ on a hovered entry: remove it from the sidebar
                     id: removeButton
                     objectName: "removeButton"
-                    visible: ((row.item && !row.vol && win.renamingPlace !== row.key) || (row.tagRow && win.renamingTag !== row.modelData.tag.name)) && hov.hovered
+                    visible: ((sideRow.item && !sideRow.vol && win.renamingPlace !== sideRow.key) || (sideRow.tagRow && win.renamingTag !== sideRow.modelData.tag.name)) && hov.hovered
                     anchors.right: parent.right; anchors.rightMargin: 20 * win.u
-                    y: 8.5 * win.tu + row.dy; width: 14 * win.tu; height: width; radius: width / 2
+                    y: 8.5 * win.tu + sideRow.dy; width: 14 * win.tu; height: width; radius: width / 2
                     color: removeHover.hovered ? "#ff453a" : Qt.rgba(1, 1, 1, .25)
                     Rectangle { anchors.centerIn: parent; width: parent.width * .5; height: 1.6 * win.u; color: "white" }
                     HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
                     // For a tag this only hides it from the sidebar (Delete Tag is in its menu).
-                    TapHandler { onTapped: row.tagRow ? win.setTagShown(row.modelData.tag.name, false) : win.placeRemove(row.modelData.si, row.modelData.ii) }
+                    TapHandler { onTapped: sideRow.tagRow ? win.setTagShown(sideRow.modelData.tag.name, false) : win.placeRemove(sideRow.modelData.si, sideRow.modelData.ii) }
                 }
                 Text {   // ⏏ on mounted devices: Safely Remove (a disc: Eject; internal: Unmount)
                     objectName: "ejectButton"
-                    visible: row.ejectable
+                    visible: sideRow.ejectable
                     anchors.right: parent.right; anchors.rightMargin: 18 * win.u
-                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu + row.dy
+                    anchors.baseline: parent.top; anchors.baselineOffset: 21 * win.tu + sideRow.dy
                     text: "⏏"; color: "white"; opacity: ejectHover.hovered ? .95 : .55
                     font.pixelSize: 13 * win.tu
                     HoverHandler { id: ejectHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: win.ejectDevice(row.modelData.item) }
+                    TapHandler { onTapped: win.ejectDevice(sideRow.modelData.item) }
                 }
                 HoverHandler { id: hov }
-                ToolTip.visible: row.vol && hov.hovered
+                ToolTip.visible: sideRow.vol && hov.hovered
                 ToolTip.delay: 700
-                ToolTip.text: row.vol ? row.modelData.item.tip || row.modelData.item.label : ""
+                ToolTip.text: sideRow.vol ? sideRow.modelData.item.tip || sideRow.modelData.item.label : ""
                 MouseArea {
-                    anchors.fill: parent; anchors.rightMargin: row.head || row.ejectable || removeButton.visible ? 36 * win.u : 0
+                    anchors.fill: parent; anchors.rightMargin: sideRow.head || sideRow.ejectable || removeButton.visible ? 36 * win.u : 0
                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                     onClicked: m => {
                         keys.forceActiveFocus()
                         if (m.button === Qt.MiddleButton) {   // a place in a background tab
-                            const it = row.modelData.item
-                            if (row.vol) { if (it.url || it.mounted) win.newTab(it.url || it.path, false) }
+                            const it = sideRow.modelData.item
+                            if (sideRow.vol) { if (it.url || it.mounted) win.newTab(it.url || it.path, false) }
                             else if (it && (it.path || it.action === "trash")) win.newTab(it.action === "trash" ? Fm.trashDir : win.expand(it.path), false)
                             return
                         }
-                        if (row.tagRow) {
-                            if (m.button === Qt.RightButton) { tagMenu.tag = row.modelData.tag; tagMenu.open() }
-                            else win.showTagged(row.modelData.tag.name)
+                        if (sideRow.tagRow) {
+                            if (m.button === Qt.RightButton) { tagMenu.tag = sideRow.modelData.tag; tagMenu.open() }
+                            else win.showTagged(sideRow.modelData.tag.name)
                             return
                         }
-                        if (row.head && m.button === Qt.LeftButton) { win.toggleSection(row.modelData.title); return }
-                        if (row.tagHead || row.modelData.si < 0) { if (m.button === Qt.RightButton) tagsHeadMenu.open(); return }
-                        placeMenu.si = row.modelData.si
-                        placeMenu.ii = row.item ? row.modelData.ii : -1
-                        if (m.button === Qt.RightButton && row.vol) { volumeMenu.vol = row.modelData.item; volumeMenu.open() }
-                        else if (m.button === Qt.RightButton && row.modelData.item && row.modelData.item.action === "trash") trashMenu.open()
-                        else if (m.button === Qt.RightButton) (row.item ? placeMenu : sectionMenu).open()
-                        else if (row.item) win.activatePlace(row.modelData.item)
+                        if (sideRow.head && m.button === Qt.LeftButton) { win.toggleSection(sideRow.modelData.title); return }
+                        if (sideRow.tagHead || sideRow.modelData.si < 0) { if (m.button === Qt.RightButton) tagsHeadMenu.open(); return }
+                        placeMenu.si = sideRow.modelData.si
+                        placeMenu.ii = sideRow.item ? sideRow.modelData.ii : -1
+                        if (m.button === Qt.RightButton && sideRow.vol) { volumeMenu.vol = sideRow.modelData.item; volumeMenu.open() }
+                        else if (m.button === Qt.RightButton && sideRow.modelData.item && sideRow.modelData.item.action === "trash") trashMenu.open()
+                        else if (m.button === Qt.RightButton) (sideRow.item ? placeMenu : sectionMenu).open()
+                        else if (sideRow.item) win.activatePlace(sideRow.modelData.item)
                     }
                     onDoubleClicked: m => {
                         if (m.button !== Qt.LeftButton) return
-                        if (row.tagRow) win.renamingTag = row.modelData.tag.name
+                        if (sideRow.tagRow) win.renamingTag = sideRow.modelData.tag.name
                         // the first click folded it: open it again and rename
-                        else if (row.head && !row.tagHead) { win.toggleSection(row.modelData.title); win.renamingSection = row.modelData.si }
-                        else if (row.item && !row.vol) win.renamingPlace = row.key
+                        else if (sideRow.head && !sideRow.tagHead) { win.toggleSection(sideRow.modelData.title); win.renamingSection = sideRow.modelData.si }
+                        else if (sideRow.item && !sideRow.vol) win.renamingPlace = sideRow.key
                     }
                 }
                 DropArea {
-                    id: drop
+                    id: sideDrop
                     anchors.fill: parent
                     keys: ["text/uri-list"]
                     // Dropping on an entry inserts after it; on a header, at the top of the section. Onto a
                     // drive copies there; onto Trash moves to the Trash. Hovering opens it (spring-loaded).
-                    onEntered: if (row.item && (row.modelData.item.path || row.modelData.item.action === "trash")) spring.restart()
+                    onEntered: if (sideRow.item && (sideRow.modelData.item.path || sideRow.modelData.item.action === "trash")) spring.restart()
                     onExited: spring.stop()
                     onDropped: d => {
                         spring.stop()
-                        if (row.tagRow) { Fm.addTag(win.urlsToPaths(d.urls), row.modelData.tag.name); d.accept(Qt.LinkAction); return }   // tag them
-                        if (row.modelData.si < 0) return
-                        const it = row.modelData.item
-                        if (row.vol && it.mounted) { Fm.drop(d.urls, it.path, false); d.accept(Qt.CopyAction) }
+                        if (sideRow.tagRow) { Fm.addTag(win.urlsToPaths(d.urls), sideRow.modelData.tag.name); d.accept(Qt.LinkAction); return }   // tag them
+                        if (sideRow.modelData.si < 0) return
+                        const it = sideRow.modelData.item
+                        if (sideRow.vol && it.mounted) { Fm.drop(d.urls, it.path, false); d.accept(Qt.CopyAction) }
                         else if (it && it.action === "trash") { win.trashPaths(win.urlsToPaths(d.urls)); d.accept(Qt.MoveAction) }
-                        else if (!row.vol) { win.dropOnPlaces(d.urls, row.modelData.si, row.item ? row.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
+                        else if (!sideRow.vol) { win.dropOnPlaces(d.urls, sideRow.modelData.si, sideRow.item ? sideRow.modelData.ii + 1 : 0); d.accept(Qt.LinkAction) }
                     }
                 }
                 Timer {
                     id: spring
                     interval: win.springDelay
-                    onTriggered: win.activatePlace(row.modelData.item)
+                    onTriggered: win.activatePlace(sideRow.modelData.item)
                 }
             }
         }
@@ -1810,7 +1812,7 @@ Window {
                     id: carpet
                     anchors.fill: parent
                     visible: !carpetTint.visible
-                    source: win.asset(cell.sel || drop.containsDrag ? "carpet-sel" : cell.kind === "exe" ? "carpet-strong" : "carpet")
+                    source: win.asset(cell.sel || cellDrop.containsDrag ? "carpet-sel" : cell.kind === "exe" ? "carpet-strong" : "carpet")
                     sourceSize: icon.src; smooth: true
                 }
                 // Tagged: the IRIX magic carpet takes the (first) tag's Nord colour. Same outline as
@@ -1822,7 +1824,7 @@ Window {
                     objectName: "carpetTint"
                     anchors.fill: parent
                     active: cell.tags.length > 0
-                    visible: active && !cell.sel && !drop.containsDrag
+                    visible: active && !cell.sel && !cellDrop.containsDrag
                     sourceComponent: Shape {
                         id: tintShape
                         preferredRendererType: Shape.CurveRenderer
@@ -1844,7 +1846,7 @@ Window {
                 }
                 Image {
                     anchors.fill: parent
-                    visible: cell.kind !== "app" && !preview.visible
+                    visible: cell.kind !== "app" && !cellPreview.visible
                     source: win.asset(cell.kind === "app" ? "doc" : cell.kind)
                     sourceSize: icon.src; smooth: true
                 }
@@ -1857,7 +1859,7 @@ Window {
                     }
                 }
                 Loader {   // previews mode: the real picture on a white mount
-                    id: preview
+                    id: cellPreview
                     active: win.viewMode === 2 && cell.kind === "image" && !win.remote   // no thumbnails over KIO
                     visible: active && item.ready
                     x: 30 * cell.k; y: 18 * cell.k; width: 62 * cell.k; height: 62 * cell.k
@@ -1939,7 +1941,7 @@ Window {
                 }
             }
             DropArea {
-                id: drop
+                id: cellDrop
                 enabled: cell.fileIsDir
                 anchors.fill: mouse
                 // Spring-loaded: hovering with a drag opens the folder.

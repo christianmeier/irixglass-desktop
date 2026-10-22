@@ -48,10 +48,10 @@ Item {
             TapHandler { onTapped: { header.activated(); header.upRequested() } }
         }
         Item {
-            id: clip
+            id: crumbClip
             width: header.width - 54 * header.u; height: parent.height; clip: true
             Row {
-                x: Math.min(0, clip.width - width); height: parent.height
+                x: Math.min(0, crumbClip.width - width); height: parent.height
                 Repeater {
                     model: {
                         if (Kio.isUrl(header.dir)) return Kio.crumbs(header.dir, Kio.rev)   // smb://host › share › …
@@ -64,7 +64,7 @@ Item {
                         id: crumb
                         required property var modelData
                         readonly property bool last: modelData.path === header.dir
-                        height: clip.height
+                        height: crumbClip.height
                         Text {
                             anchors.baseline: parent.top; anchors.baselineOffset: header.textBaseline
                             text: crumb.modelData.label; color: "white"; opacity: crumb.last ? 1 : .65
