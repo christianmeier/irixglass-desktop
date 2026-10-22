@@ -74,7 +74,8 @@ Item {
     property var closedTabs: []
     property var termTitleFor: null      // function(tab) -> title (from the window, which owns the terminals)
     readonly property var tabModel: tabs.map((t, i) => {
-        titleRev
+        // a dependency only: re-evaluate when it changes
+        titleRev   // qmllint disable confusing-expression-statement
         const d = i === tabIndex ? dir : t.dir
         if (t.term && termTitleFor) return { title: termTitleFor(t), dir: d }
         return { title: d === "/" ? "/" : Kio.isUrl(d) ? Kio.title(d, Kio.rev) : (d.split("/").pop() || d), dir: d }
@@ -204,7 +205,7 @@ Item {
         sortReversed: pane.sortReversed
         onFolderChanged: if (pane.dir && !pane.remote) Fm.prefetchKinds(pane.dir)   // as on the main side
     }
-    KioModel {
+    KioModel {   // qmllint disable import
         id: kioModel
         objectName: "splitKioModel"
         url: pane.remote ? pane.dir : ""

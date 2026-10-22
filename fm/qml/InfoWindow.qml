@@ -27,7 +27,8 @@ Window {
         target: Fm
         function onFolderSizeReady(p, bytes, files, folders) {
             if (p === infoWin.path && !infoWin.device)
-                infoWin.sizeText = bytes < 0 ? "--" : Fm.humanSize(bytes) + " on disk (" + (files + folders).toLocaleString() + " items)"
+                // (files + folders) is a JS number; qmllint can't tell
+                infoWin.sizeText = bytes < 0 ? "--" : Fm.humanSize(bytes) + " on disk (" + (files + folders).toLocaleString() + " items)"   // qmllint disable missing-property
         }
     }
     Shortcut { sequences: ["Ctrl+W", "Escape"]; onActivated: infoWin.close() }
@@ -67,7 +68,8 @@ Window {
                 }
             }
         }
-        Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(1, 1, 1, .1) }
+        // a 1 px rule: the explicit height in the layout is intended
+        Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(1, 1, 1, .1) }   // qmllint disable Quick.layout-positioning
 
         GridLayout {
             columns: 2; columnSpacing: 10 * infoWin.tu; rowSpacing: 5 * infoWin.tu

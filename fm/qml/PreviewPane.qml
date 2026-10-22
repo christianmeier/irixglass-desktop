@@ -40,7 +40,8 @@ Item {
             anchors.fill: parent
             active: pane.kind === "pdf"
             source: "PdfPage.qml"
-            onLoaded: item.path = Qt.binding(() => pane.path)
+            // item is PdfPage.qml (it has `path`); qmllint only sees a QObject
+            onLoaded: item.path = Qt.binding(() => pane.path)   // qmllint disable missing-property
         }
         Rectangle {   // the start of the text: Markdown rendered, code highlighted (Nord)
             visible: pane.kind === "text"
