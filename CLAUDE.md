@@ -15,6 +15,7 @@ and `docs/SESSION-NOTES.md`).
 src/main.cpp        start-up, single instance, IRIXFM_BENCH / IRIXFM_SNAPSHOT, shutdown watchdog
 src/fm.*            the `Fm` object for QML: window blur/shape, KIO file actions, kinds, tags, search, sizes
 src/terminal.*      terminal tabs: libvterm on a KPty, painted (TerminalView)
+src/kiomodel.*      KIO folders (smb://, sftp://, remote:/, mtp:/ …): KioModel + the `Kio` URL helpers for QML
 qml/Main.qml        the whole window (~3000 lines); other qml/*.qml are its parts
 tests/*_test.cpp    off-screen Qt tests, one binary each; tests/single_instance_test.sh
 tools/              bench.sh, shot.cpp, leak.cpp, make_icons.py, make_mockup.py
@@ -49,7 +50,7 @@ make tools                                   # build/shot and build/leak (not pa
   QML items by `objectName` and call QML functions with `QMetaObject::invokeMethod`. Which test
   covers what: `terminal_test` (terminal tabs), `browser_test` (web tabs), `split_test` (split view,
   list columns), `tab_test`, `sidebar_test`, `tag_test`, `finder_test` / `phase2_test` (Finder
-  commands), `path_test`, `scroll_test`, `dock_test`, `preview_test`.
+  commands), `network_test` (KIO URLs: model, crumbs, navigation), `path_test`, `scroll_test`, `dock_test`, `preview_test`.
 
 ## Environment variables
 

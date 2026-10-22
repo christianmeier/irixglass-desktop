@@ -35,6 +35,14 @@ manager icon; the IRIX icons are only inside the window.
 - Select by click, Ctrl/Shift-click or rubber band; drag files out to other apps, drop files in (Shift moves).
 - Open with the default app (KIO, same as Dolphin), run `.desktop` launchers, rename inline (F2),
   new folder, copy/paste, Move to Trash, open a terminal or Dolphin at the current folder.
+- Network and devices inside fm (KIO, like Dolphin): **Network** in the sidebar (Ctrl+Shift+K) opens
+  `remote:/` (Shared Folders (SMB), MTP and Apple devices, KDE Connect, Bluetooth), and the path bar
+  takes URLs: `smb://host/share`, `sftp://user@host/path`, `fish://`, `ftp://`, `webdav://`, `mtp:/`,
+  `afc:/`, even `tar:/path/archive.tar/`. Back/forward, tabs, both sides of the split view, open
+  (KIO hands the file to the app or downloads a copy), copy/paste and drag and drop between the disk
+  and the server, New Folder, Rename and Get Info work there; Delete asks first (servers have no
+  Trash). Passwords are asked by KDE's usual dialog (kpasswdserver). While connecting the view says
+  so; an unreachable host or a refused login shows KIO's message instead of an empty folder.
 - Finder commands: Quick Look (Space: pictures, PDFs, video/audio, text, folders), Get Info (Ctrl+I),
   Duplicate (Ctrl+D), Make Alias, Show Original (Ctrl+R), Move Item Here (Ctrl+Alt+V), Undo (Ctrl+Z),
   type to select, Sort By (click a list column or View ▸ Sort By). Plan and status of every Finder
@@ -133,7 +141,7 @@ No cmake needed: the Makefile uses `g++` and `pkg-config`.
 ```
 make              # build ./build/irixfm
 make run          # run from the source tree
-make test         # all tests, off-screen (297 checks: views, path bar, sidebar, Finder features, tags, tabs, split view, terminal and web tabs, single instance)
+make test         # all tests, off-screen (PASS_COUNT checks: views, path bar, sidebar, Finder features, tags, tabs, split view, terminal and web tabs, network browsing, single instance)
 make tools        # build/shot (screenshot harness) and build/leak (leak test), for development
 make install      # into ~/.local (bin, share/irixfm, menu entry "fm")
 make uninstall
@@ -201,7 +209,7 @@ src/            C++: window blur, input mask and shadow (KWindowEffects, KWindow
 qml/Main.qml    the whole window; geometry is the mockup's, in mockup pixels times `u` (0.85)
 qml/*.qml       Quick Look, Get Info window, preview pane, split pane + pane header, list columns, tag dots, notebook tabs, web tab (BrowserView) + shared web profile, sidebar icon picker, glass edge ring, toolbar pill, traffic lights, thumbwheel, inline rename, glass scroll bar
 icons/          generated SVG layers: carpets (normal, executable, selected), glyphs, Nord tag dots
-tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test, single_instance_test.sh (make test)
+tests/          scroll_test, path_test, sidebar_test, finder_test, phase2_test, tag_test, tab_test, split_test, dock_test, preview_test, terminal_test, browser_test, network_test, single_instance_test.sh (make test)
 tools/          make_icons.py (icons), make_mockup.py (docs/mockup.png), bench.sh (timings), shot.cpp (screenshots), leak.cpp (leak test)
 CLAUDE.md       how to work on fm: commands, safe restart, team rules (read first)
 ```
@@ -212,7 +220,10 @@ quits, which is handy for checking the look without touching the screen.
 ## Known limits
 
 - Plasma/KWin only: the blur and shadow use KDE protocols. Elsewhere the window is plain translucent.
-- No column view, no network browsing (Network opens Dolphin at `remote:/`).
+- No column view.
+- In network and device folders (KIO URLs): no thumbnails or previews (Quick Look and the preview
+  pane show the icon and details), no search, no folder sizes, no tags (xattrs), no Duplicate /
+  Make Alias / Compress, and terminal tabs don't follow there (they stay in a local folder).
 - Desks Overview triggers KWin's Overview effect.
 
 ## Licence
