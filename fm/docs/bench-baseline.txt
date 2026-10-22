@@ -1,0 +1,12 @@
+christianmeier view=0 items=12 qml-loaded=2111ms first-frame=2257ms items-ready=2123ms scroll-121-frames=32ms
+christianmeier view=0 items=12 qml-loaded=731ms first-frame=820ms items-ready=738ms scroll-121-frames=25ms
+christianmeier view=1 items=12 qml-loaded=680ms first-frame=763ms items-ready=687ms scroll-121-frames=26ms
+christianmeier view=1 items=12 qml-loaded=683ms first-frame=767ms items-ready=690ms scroll-121-frames=26ms
+bin view=0 items=3345 qml-loaded=660ms first-frame=742ms items-ready=767ms scroll-121-frames=8497ms
+bin view=0 items=3345 qml-loaded=681ms first-frame=756ms items-ready=773ms scroll-121-frames=7165ms
+bin view=1 items=3345 qml-loaded=684ms first-frame=775ms items-ready=794ms scroll-121-frames=4424ms
+bin view=1 items=3345 qml-loaded=708ms first-frame=789ms items-ready=813ms scroll-121-frames=4428ms
+lib view=0 items=4818 qml-loaded=701ms first-frame=785ms items-ready=850ms scroll-121-frames=5840ms
+lib view=0 items=4818 qml-loaded=800ms first-frame=880ms items-ready=891ms scroll-121-frames=6572ms
+lib view=1 items=4818 qml-loaded=661ms first-frame=740ms items-ready=750ms scroll-121-frames=3598ms
+lib view=1 items=4818 qml-loaded=686ms first-frame=775ms items-ready=788ms scroll-121-frames=3480ms
