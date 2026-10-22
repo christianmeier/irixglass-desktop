@@ -112,7 +112,6 @@ def corner(eid, x, y, sx, sy, rim_kind, mask=False):
 
 def straight(eid, x, y, horizontal, outer_first, rim_kind, mask=False):
     """Edge tile. horizontal: S wide x R tall (top/bottom); else R wide x S tall."""
-    w_, h_ = (S, R) if horizontal else (R, S)
     g = f'<g id="{eid}">'
     if mask:
         o = MASK_INSET if outer_first else 0

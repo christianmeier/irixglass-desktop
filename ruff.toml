@@ -1,0 +1,20 @@
+# ruff (https://docs.astral.sh/ruff/): theme generators, mockup and icon scripts. CI: .github/workflows/lint.yml
+# No `ruff format`: the generators keep their own compact layout (aligned tables, %-formatted SVG).
+target-version = "py312"
+line-length = 120
+
+[lint]
+# pyflakes, pycodestyle errors/warnings, bugbear, simplify, import order, executable bits, ruff's own
+select = ["F", "E", "W", "B", "SIM", "I", "EXE", "RUF"]
+ignore = [
+    "E501",   # long lines: SVG paths and colour tables read better unwrapped
+    "E731",   # small lambdas as local helpers are the house style
+    "RUF001", # ×, –, ’ in strings are intended (labels, SVG text)
+    "RUF003", # same in comments
+    "RUF005", # list concatenation reads fine in the geometry tables
+    "B905",   # zip(strict=) would raise where unequal lengths are intended (anchor pairs)
+]
+
+[lint.per-file-ignores]
+# frame(): the lambdas are called at once by fills(), inside the loop iteration
+"theme/gen-kvantum.py" = ["B023"]

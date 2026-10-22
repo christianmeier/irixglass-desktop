@@ -11,7 +11,8 @@ src, dst = sys.argv[1], sys.argv[2]
 W = int(sys.argv[3]) if len(sys.argv) > 3 else 300
 H = int(sys.argv[4]) if len(sys.argv) > 4 else 50
 
-svg = open(src).read()
+with open(src) as f:
+    svg = f.read()
 # Piece geometry from the generator: corners R x R, edge tiles S long, laid out
 # top-left at (0,0), top at (R,0), top-right at (R+S,0), etc.
 m = re.search(r'id="top">\s*<rect[^>]*x="([0-9.]+)"[^>]*width="([0-9.]+)"', svg)
@@ -35,10 +36,11 @@ pieces = [
     ('bottomright', W - R, H - R, 1, 1, R + S, R + S),
 ]
 body = ''.join(use(*p) for p in pieces)
-open(dst, 'w').write(
-    f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-    f'width="{W + 40}" height="{H + 40}">'
-    f'<defs><linearGradient id="bg" x1="0" x2="1"><stop offset="0" stop-color="#1b2a4a"/>'
-    f'<stop offset="1" stop-color="#6a3a5a"/></linearGradient>{inner}</defs>'
-    f'<rect width="{W + 40}" height="{H + 40}" fill="url(#bg)"/>'
-    f'<g transform="translate(20,20)">{body}</g></svg>')
+with open(dst, 'w') as f:
+    f.write(
+        f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'width="{W + 40}" height="{H + 40}">'
+        f'<defs><linearGradient id="bg" x1="0" x2="1"><stop offset="0" stop-color="#1b2a4a"/>'
+        f'<stop offset="1" stop-color="#6a3a5a"/></linearGradient>{inner}</defs>'
+        f'<rect width="{W + 40}" height="{H + 40}" fill="url(#bg)"/>'
+        f'<g transform="translate(20,20)">{body}</g></svg>')

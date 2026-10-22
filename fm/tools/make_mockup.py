@@ -105,7 +105,7 @@ def carpet(sel, strong=False):
     op = .95 if sel else (.75 if strong else .30)
     s = ""
     if sel:
-        s += f'<polygon points="6,84 58,97 98,80 46,68" fill="url(#carpetSel)" opacity=".8" filter="url(#glow)"/>'
+        s += '<polygon points="6,84 58,97 98,80 46,68" fill="url(#carpetSel)" opacity=".8" filter="url(#glow)"/>'
     s += f'<polygon points="6,84 58,97 98,80 46,68" fill="url(#{fill})" opacity="{op}" stroke="#1a1040" stroke-opacity=".5"/>'
     return s
 
