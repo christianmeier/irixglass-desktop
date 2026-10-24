@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container:
-      image: archlinux:latest
+      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0  # same pinned image as lint.yml / security.yml
       # QtWebEngine (browser_test) wants more shared memory than Docker's 64 MB default
       options: --shm-size=1g
     outputs:
@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: archlinux:latest
+      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0  # same pinned image as lint.yml / security.yml
     steps:
       - name: Install packages
         run: |
