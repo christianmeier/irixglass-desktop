@@ -32,6 +32,4 @@ First release: the whole desktop (theme + fm) in one repo, installable with `scr
   a green pipeline.
 
 ### Known issues
-- `split_test` passes locally but its keyboard-shortcut checks fail on the GitHub runner; it's
-  quarantined on CI (it still runs, its failures show as warnings).
 - `network_test` has two KIO timing checks that fail now and then; CI retries it once.

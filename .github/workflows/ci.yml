@@ -66,10 +66,8 @@ jobs:
       # The container runs as root; Chromium refuses to start its sandbox as root
       QTWEBENGINE_DISABLE_SANDBOX: '1'
       IRIXFM_FLAKY_TESTS: network_test
-      # split_test passes locally (with and without KDE's platform theme) but its keyboard shortcut
-      # checks (Ctrl+T, Ctrl+1/3, Ctrl+Alt+Up, arrow keys) fail on the GitHub runner. Quarantined until
-      # that's understood: it still runs, its FAILs show as warnings. Known issue in CHANGELOG.md.
-      IRIXFM_QUARANTINED_TESTS: split_test
+      # Tests to report as warnings only (see fm/tests/ci_test.sh); none at the moment.
+      IRIXFM_QUARANTINED_TESTS: ""
     steps:
       - name: Install packages
         run: |
