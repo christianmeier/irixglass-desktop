@@ -341,7 +341,7 @@ step_irixfm() {
     [[ -d "$IRIXFM_REPO" ]] || { warn "$IRIXFM_REPO missing (fm/ in this repo)"; return; }
     # Build needs (fm's README): Qt 6 (qt6-base has Qt6Network; WebEngine for web tabs), KF6 (KIO,
     # Kirigami, Solid, KArchive, SyntaxHighlighting, Pty) and libvterm for the terminal tabs.
-    for p in base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm plasma-integration; do
+    for p in base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm qqc2-desktop-style plasma-integration; do
         pacman -Q "$p" &>/dev/null || warn "missing package: $p (sudo pacman -S --needed $p)"
     done
     make -C "$IRIXFM_REPO" install

@@ -145,7 +145,7 @@ KDE Plasma 6 on Wayland (KWin draws the blur and the shadow), Qt 6.8 or newer, K
 On Arch / CachyOS:
 
 ```
-sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm plasma-integration
+sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia qt6-webengine kio kwindowsystem kirigami karchive solid syntax-highlighting kpty libvterm qqc2-desktop-style plasma-integration
 ```
 
 The text uses **SF Pro Text** if it's installed and falls back to the system font otherwise.

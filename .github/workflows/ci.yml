@@ -40,9 +40,9 @@ env:
   FM_PACKAGES: >-
     base-devel git qt6-base qt6-declarative qt6-multimedia qt6-webengine qt6-svg
     kio kio-extras kwindowsystem kirigami karchive kcoreaddons solid syntax-highlighting kpty libvterm
-    dbus glib2 ttf-dejavu
+    qqc2-desktop-style dbus glib2 ttf-dejavu diffutils
   THEME_PACKAGES: >-
-    git python python-gobject librsvg libxml2 xz
+    git python python-gobject librsvg libxml2 xz diffutils gzip
   # WhiteSur sources for gen-kvantum / gen-plasma-dialogs / gen-gtk / patch-tasks, pinned so an
   # upstream change can't turn CI red on its own (bump these together with the generators).
   WHITESUR_KDE_SHA: cf4df59ce91004f7ea39358b1b8ff917d5c329f7      # vinceliuice/WhiteSur-kde, 2026-08-07
@@ -54,7 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container:
-      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0  # same pinned image as lint.yml / security.yml
+      # same pinned image as lint.yml / security.yml
+      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
       # QtWebEngine (browser_test) wants more shared memory than Docker's 64 MB default
       options: --shm-size=1g
     outputs:
@@ -72,7 +73,7 @@ jobs:
           # shellcheck disable=SC2086
           pacman -Syu --noconfirm --needed $FM_PACKAGES
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -89,7 +90,7 @@ jobs:
 
       - name: Upload test logs
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fm-test-logs
           path: ${{ runner.temp }}/fm-test-logs
@@ -113,7 +114,7 @@ jobs:
           ls -l "$d"
 
       - name: Upload the build
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fm-build-x86_64
           path: ${{ runner.temp }}/pack/irixfm-x86_64/
@@ -125,14 +126,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0  # same pinned image as lint.yml / security.yml
+      # same pinned image as lint.yml / security.yml
+      image: archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
     steps:
       - name: Install packages
         run: |
           # shellcheck disable=SC2086
           pacman -Syu --noconfirm --needed $THEME_PACKAGES
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
