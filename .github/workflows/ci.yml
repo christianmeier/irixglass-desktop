@@ -94,7 +94,7 @@ jobs:
           printf '[Desktop Entry]\nType=Application\nName=Fixture Image Viewer\nExec=true %%f\nIcon=image-x-generic\nMimeType=image/png;image/jpeg;\n' \
             > /usr/share/applications/fixture-image-viewer.desktop
           update-desktop-database /usr/share/applications 2>/dev/null || true
-          ls /usr/share/applications | wc -l
+          find /usr/share/applications -name '*.desktop' | wc -l
 
       - name: Run the tests
         run: |
