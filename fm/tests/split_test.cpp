@@ -71,7 +71,13 @@ int main(int argc, char *argv[])
     auto *window = qobject_cast<QQuickWindow *>(win);
     auto *pane = win->findChild<QQuickItem *>(QStringLiteral("splitPane"));
     auto *grid = win->findChild<QQuickItem *>(QStringLiteral("grid"));
-    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) { QTest::keyClick(window, k, m); QTest::qWait(250); };
+    // QML Shortcuts only fire in the active window; a synthetic drag or a popup can leave the window
+    // inactive (it happened on the CI runner), so make it active again before each key, like a user's.
+    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) {
+        if (!window->isActive()) { window->requestActivate(); QTest::qWaitForWindowActive(window); }
+        QTest::keyClick(window, k, m);
+        QTest::qWait(250);
+    };
     auto exists = [&](const QString &n) { return QFile::exists(at(n)); };
 
     auto dropOn = [&](QQuickItem *item, QPointF local, const QStringList &files) {

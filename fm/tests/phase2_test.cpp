@@ -106,7 +106,13 @@ int main(int argc, char *argv[])
             m[p] = true;
         win->setProperty("selection", m);
     };
-    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) { QTest::keyClick(window, k, m); QTest::qWait(30); };
+    // QML Shortcuts only fire in the active window; a synthetic drag or a popup can leave the window
+    // inactive (it happened on the CI runner), so make it active again before each key, like a user's.
+    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) {
+        if (!window->isActive()) { window->requestActivate(); QTest::qWaitForWindowActive(window); }
+        QTest::keyClick(window, k, m);
+        QTest::qWait(30);
+    };
 
     QTimer::singleShot(1200, &app, [&] {
         window->requestActivate();

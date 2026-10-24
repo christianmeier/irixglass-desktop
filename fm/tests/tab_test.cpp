@@ -86,7 +86,13 @@ int main(int argc, char *argv[])
     auto tabs = [&] { return win->property("tabs").toList().size(); };
     auto idx = [&] { return win->property("tabIndex").toInt(); };
     auto dir = [&] { return win->property("dir").toString(); };
-    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) { QTest::keyClick(window, k, m); QTest::qWait(150); };
+    // QML Shortcuts only fire in the active window; a synthetic drag or a popup can leave the window
+    // inactive (it happened on the CI runner), so make it active again before each key, like a user's.
+    auto key = [&](Qt::Key k, Qt::KeyboardModifiers m = Qt::NoModifier) {
+        if (!window->isActive()) { window->requestActivate(); QTest::qWaitForWindowActive(window); }
+        QTest::keyClick(window, k, m);
+        QTest::qWait(150);
+    };
     auto call = [&](const char *fn, QVariantList args) {
         switch (args.size()) {
         case 1: QMetaObject::invokeMethod(win, fn, Q_ARG(QVariant, args[0])); break;
