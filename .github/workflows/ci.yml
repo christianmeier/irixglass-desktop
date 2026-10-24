@@ -40,7 +40,7 @@ env:
   FM_PACKAGES: >-
     base-devel git qt6-base qt6-declarative qt6-multimedia qt6-webengine qt6-svg
     kio kio-extras kwindowsystem kirigami karchive kcoreaddons solid syntax-highlighting kpty libvterm
-    qqc2-desktop-style dbus glib2 ttf-dejavu diffutils
+    qqc2-desktop-style dbus glib2 ttf-dejavu diffutils neovim
   THEME_PACKAGES: >-
     git python python-gobject librsvg libxml2 xz diffutils gzip
   # WhiteSur sources for gen-kvantum / gen-plasma-dialogs / gen-gtk / patch-tasks, pinned so an
