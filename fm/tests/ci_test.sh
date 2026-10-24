@@ -13,6 +13,10 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 flaky=" ${IRIXFM_FLAKY_TESTS-network_test} "
+# Quarantined tests ($IRIXFM_QUARANTINED_TESTS): built and run, but their FAILs are reported as
+# warnings and don't fail the run. Only for tests that pass locally and fail on the CI runner for
+# reasons not yet understood; each one needs a note in ci.yml.
+quarantine=" ${IRIXFM_QUARANTINED_TESTS-} "
 logs=${IRIXFM_CI_LOGS:-$(mktemp -d)}
 mkdir -p "$logs"
 gh=${GITHUB_ACTIONS:-}
@@ -37,7 +41,7 @@ suite=()
 for t in $(make -s --no-print-directory test-list); do suite+=("$(basename "$t")|$t"); done
 suite+=("single_instance_test|tests/single_instance_test.sh $fm" "dbus_test|tests/dbus_test.sh $fm")
 
-failed=() retried=() rows=()
+failed=() retried=() quarantined=() rows=()
 pass=0 fail=0
 for entry in "${suite[@]}"; do
     name=${entry%%|*}
@@ -56,6 +60,15 @@ for entry in "${suite[@]}"; do
     cat "$logs/$name.out"
     secs=$((SECONDS - start))
     p=$(grep -c '^PASS' "$logs/$name.out"); f=$(grep -c '^FAIL' "$logs/$name.out")
+    if [ $rc != 0 ] && [[ "$quarantine" == *" $name "* ]]; then
+        echo "-- $name failed, but it's quarantined on CI: reported as warnings"
+        [ -n "$gh" ] && grep '^FAIL' "$logs/$name.out" | head -n 20 | while read -r line; do echo "::warning title=$name (quarantined)::$line"; done
+        quarantined+=("$name")
+        rows+=("| $name | $p | $f | $((SECONDS - start))s | quarantined |")
+        pass=$((pass + p))
+        [ -n "$gh" ] && echo "::endgroup::"
+        continue
+    fi
     pass=$((pass + p)); fail=$((fail + f))
     if [ $rc != 0 ]; then
         failed+=("$name")
@@ -75,7 +88,7 @@ for entry in "${suite[@]}"; do
     fi
 done
 
-echo "== total: $pass PASS, $fail FAIL${retried:+, retried: ${retried[*]}}${failed:+, failed: ${failed[*]}}"
+echo "== total: $pass PASS, $fail FAIL${retried:+, retried: ${retried[*]}}${quarantined:+, quarantined: ${quarantined[*]}}${failed:+, failed: ${failed[*]}}"
 echo "== logs in $logs"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
