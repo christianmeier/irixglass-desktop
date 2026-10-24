@@ -68,7 +68,10 @@ for entry in "${suite[@]}"; do
     printf -- '-- %s: %d PASS, %d FAIL, %ds\n' "$name" "$p" "$f" "$secs"
     if [ $rc != 0 ] && [ -n "$gh" ]; then
         grep '^FAIL' "$logs/$name.out" | head -n 20 | while read -r line; do echo "::error title=$name::$line"; done
-        [ "$f" = 0 ] && echo "::error title=$name::exited non-zero without a FAIL line (crash?), see its stderr"
+        # The last stderr lines go into the annotation too: annotations can be read without a login,
+        # job logs and artifacts can't.
+        tailmsg=$(tail -n 8 "$logs/$name.err" 2>/dev/null | cut -c1-200 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+        [ "$f" = 0 ] && echo "::error title=$name::exited non-zero without a FAIL line (crash?), stderr:%0A$tailmsg"
     fi
 done
 
