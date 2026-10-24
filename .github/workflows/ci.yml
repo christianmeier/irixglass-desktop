@@ -81,6 +81,21 @@ jobs:
       - name: Build fm and the tests
         run: make -C fm -j"$(nproc)" tests
 
+      - name: Add fixture apps (CI container only)
+        # Several tests use /usr/share/applications as a big folder (scroll_test, split_test) or need
+        # installed apps (Open With for a picture, the app icons in Icon…); a desktop has plenty,
+        # the bare container two. 90 small launchers, one of them an image viewer.
+        run: |
+          for i in $(seq -w 1 90); do
+            printf '[Desktop Entry]\nType=Application\nName=Fixture App %s\nExec=true\nIcon=%s\n' \
+              "$i" "$( [ $((10#$i % 3)) = 0 ] && echo utilities-terminal || echo application-x-executable )" \
+              > "/usr/share/applications/fixture-app-$i.desktop"
+          done
+          printf '[Desktop Entry]\nType=Application\nName=Fixture Image Viewer\nExec=true %%f\nIcon=image-x-generic\nMimeType=image/png;image/jpeg;\n' \
+            > /usr/share/applications/fixture-image-viewer.desktop
+          update-desktop-database /usr/share/applications 2>/dev/null || true
+          ls /usr/share/applications | wc -l
+
       - name: Run the tests
         run: |
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/runtime" IRIXFM_CI_LOGS="$RUNNER_TEMP/fm-test-logs"
