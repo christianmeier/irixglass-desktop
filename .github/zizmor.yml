@@ -1,0 +1,7 @@
+# zizmor settings (security.yml runs zizmor over .github/workflows).
+rules:
+  # release.yml calls ci.yml, lint.yml and security.yml as "./.github/workflows/<file>.yml".
+  # zizmor suggests the newer "$/" self-repository form; the "./" form is the documented one that
+  # actionlint validates, and it only ever refers to this repository at the same commit.
+  self-repository:
+    disable: true

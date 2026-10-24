@@ -2,6 +2,8 @@
 #   make            build ./build/irixfm
 #   make run        run from the source tree
 #   make test       all tests, off-screen (scroll … browser, single instance, D-Bus); run under flock, see CLAUDE.md
+#   make tests      build fm and every test binary without running them (use -j: they build in parallel)
+#   make check-ci   CI: tests/ci_test.sh runs the suite with per-test logs and one retry for known-flaky tests
 #   make tools      build/shot (screenshot harness) and build/leak (leak test); not part of make test
 #   make install    install into ~/.local (PREFIX=... to change), with the D-Bus service file for
 #                   org.freedesktop.FileManager1 ("Show in folder" in other apps opens fm)
@@ -20,8 +22,12 @@ CXXFLAGS += -std=c++20 -O2 -fPIC -Wall -Wno-deprecated-declarations $(shell pkg-
 LDLIBS   += $(shell pkg-config --libs $(PKGS)) \
             -lKF6KIOCore -lKF6KIOGui -lKF6KIOWidgets -lKF6ConfigCore -lKF6Service -lKF6Solid -lKF6SyntaxHighlighting -lKF6Pty -lvterm
 
-LIBSRC := src/fm.cpp src/terminal.cpp src/kiomodel.cpp $(BUILD)/moc_fm.cpp $(BUILD)/moc_terminal.cpp $(BUILD)/moc_kiomodel.cpp
-SRC := src/main.cpp $(LIBSRC) $(BUILD)/moc_filemanager1.cpp
+# The shared sources are compiled once into build/obj/*.o and linked into fm and every test (and
+# tool), so `make -j tests` builds in parallel without compiling fm.cpp once per test.
+OBJ    := $(BUILD)/obj
+HDRS   := src/fm.h src/terminal.h src/kiomodel.h src/filemanager1.h
+LIBOBJ := $(OBJ)/fm.o $(OBJ)/terminal.o $(OBJ)/kiomodel.o $(OBJ)/moc_fm.o $(OBJ)/moc_terminal.o $(OBJ)/moc_kiomodel.o
+MAINOBJ := $(OBJ)/main.o $(OBJ)/moc_filemanager1.o $(LIBOBJ)
 
 all: $(BUILD)/irixfm
 
@@ -37,60 +43,66 @@ $(BUILD)/moc_kiomodel.cpp: src/kiomodel.h | $(BUILD)
 $(BUILD)/moc_filemanager1.cpp: src/filemanager1.h | $(BUILD)
 	$(MOC) $< -o $@
 
-$(BUILD)/irixfm: $(SRC) src/fm.h src/terminal.h src/kiomodel.h src/filemanager1.h
-	$(CXX) $(CXXFLAGS) -Isrc $(SRC) -o $@ $(LDLIBS)
+$(OBJ)/%.o: src/%.cpp $(HDRS) | $(OBJ)
+	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
 
-$(BUILD):
+$(OBJ)/moc_%.o: $(BUILD)/moc_%.cpp $(HDRS) | $(OBJ)
+	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
+
+$(BUILD)/irixfm: $(MAINOBJ)
+	$(CXX) $(CXXFLAGS) $(MAINOBJ) -o $@ $(LDLIBS)
+
+$(BUILD) $(OBJ):
 	mkdir -p $@
 
-$(BUILD)/scroll_test: tests/scroll_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/scroll_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/scroll_test: tests/scroll_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/scroll_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/path_test: tests/path_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/path_test.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+$(BUILD)/path_test: tests/path_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/path_test.cpp $(LIBOBJ) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
 
-$(BUILD)/sidebar_test: tests/sidebar_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/sidebar_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/sidebar_test: tests/sidebar_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/sidebar_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/finder_test: tests/finder_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/finder_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/finder_test: tests/finder_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/finder_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/phase2_test: tests/phase2_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/phase2_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/phase2_test: tests/phase2_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/phase2_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/tag_test: tests/tag_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tag_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/tag_test: tests/tag_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tag_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/tab_test: tests/tab_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tab_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/tab_test: tests/tab_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/tab_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/split_test: tests/split_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/split_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/split_test: tests/split_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/split_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/dock_test: tests/dock_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/dock_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/dock_test: tests/dock_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/dock_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/preview_test: tests/preview_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/preview_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/preview_test: tests/preview_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/preview_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/browser_test: tests/browser_test.cpp $(LIBSRC) src/fm.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/browser_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/browser_test: tests/browser_test.cpp $(LIBOBJ) src/fm.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/browser_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/network_test: tests/network_test.cpp $(LIBSRC) src/fm.h src/terminal.h src/kiomodel.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/network_test.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+$(BUILD)/network_test: tests/network_test.cpp $(LIBOBJ) src/fm.h src/terminal.h src/kiomodel.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/network_test.cpp $(LIBOBJ) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
 
-$(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/terminal_test: tests/terminal_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/terminal_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/devices_test: tests/devices_test.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/devices_test.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/devices_test: tests/devices_test.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc -DIRIXFM_SOURCE_DIR='"$(CURDIR)"' tests/devices_test.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
 # Dev tools (tools/*.cpp, usage at the top of each file and in CLAUDE.md); not in TESTS.
-$(BUILD)/shot: tools/shot.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc tools/shot.cpp $(LIBSRC) -o $@ $(LDLIBS)
+$(BUILD)/shot: tools/shot.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/shot.cpp $(LIBOBJ) -o $@ $(LDLIBS)
 
-$(BUILD)/leak: tools/leak.cpp $(LIBSRC) src/fm.h src/terminal.h
-	$(CXX) $(CXXFLAGS) -Isrc tools/leak.cpp $(LIBSRC) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
+$(BUILD)/leak: tools/leak.cpp $(LIBOBJ) src/fm.h src/terminal.h
+	$(CXX) $(CXXFLAGS) -Isrc tools/leak.cpp $(LIBOBJ) -o $@ $(LDLIBS) $(shell pkg-config --libs Qt6Test)
 
 tools: $(BUILD)/shot $(BUILD)/leak
 
@@ -102,6 +114,15 @@ test: $(TESTS) $(BUILD)/irixfm
 	echo "== single_instance_test"; tmp=$$(mktemp -d); XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache tests/single_instance_test.sh $(BUILD)/irixfm || rc=1; rm -rf $$tmp; \
 	echo "== dbus_test"; tmp=$$(mktemp -d); XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache tests/dbus_test.sh $(BUILD)/irixfm || rc=1; rm -rf $$tmp; \
 	exit $$rc
+
+# Build everything `make test` runs, in parallel with -j (each test links its own copy of the sources).
+tests: $(TESTS) $(BUILD)/irixfm
+
+test-list:
+	@echo $(TESTS)
+
+check-ci: tests
+	tests/ci_test.sh
 
 icons:
 	python3 tools/make_icons.py
@@ -130,4 +151,4 @@ uninstall:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all icons run test tools install uninstall clean
+.PHONY: all icons run test tests test-list check-ci tools install uninstall clean

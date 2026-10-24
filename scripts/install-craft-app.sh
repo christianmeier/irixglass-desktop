@@ -17,6 +17,7 @@ chmod +x "$asset"
 X=$(mktemp -d); cd "$X"
 "$D/$asset" --appimage-extract '*.desktop' >/dev/null 2>&1 || true
 "$D/$asset" --appimage-extract 'usr/share/icons/*' >/dev/null 2>&1 || true
+# shellcheck disable=SC2012  # ls fails loudly under set -e when nothing matched; a glob wouldn't
 desk=$(ls squashfs-root/*.desktop | head -1)
 id=$(basename "$desk")
 cp -r squashfs-root/usr/share/icons/hicolor/. "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
