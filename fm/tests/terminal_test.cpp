@@ -528,6 +528,7 @@ int main(int argc, char *argv[])
 
         // Neovim on the selected file
         win->setProperty("selection", QVariantMap{{base + QStringLiteral("/hello.txt"), true}});
+        if (!window->isActive()) { window->requestActivate(); QTest::qWaitForWindowActive(window); }   // Shortcuts need the active window
         QTest::keyClick(window, Qt::Key_F4, Qt::ShiftModifier);
         QTest::qWait(300);
         TerminalView *nv = activeTerm();
@@ -542,6 +543,7 @@ int main(int argc, char *argv[])
         QMetaObject::invokeMethod(win, "toggleSplit");
         QTest::qWait(300);
         win->setProperty("activePane", 1);
+        if (!window->isActive()) { window->requestActivate(); QTest::qWaitForWindowActive(window); }   // Shortcuts need the active window
         QTest::keyClick(window, Qt::Key_F4);
         QTest::qWait(300);
         auto *pane = win->findChild<QQuickItem *>(QStringLiteral("splitPane"));
