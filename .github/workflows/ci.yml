@@ -1,0 +1,218 @@
+# Build and test fm (Qt 6 / KF6, on Arch for current Qt and KDE Frameworks) and check that the theme
+# generators in theme/ still produce valid files.
+#
+# Reusable: the release workflow calls this file (uses: ./.github/workflows/ci.yml) and downloads the
+# artifact named in the `fm-artifact` output, fm-build-x86_64. Its top level holds irixfm (the binary;
+# artifacts drop the executable bit, so chmod +x it), qml/, icons/, irixfm.desktop,
+# org.freedesktop.FileManager1.service, README.md, LICENSE, VERSION, and fm-build-x86_64.tar.gz: the
+# same files under irixfm-x86_64/ with the executable bit kept. The binary links against Arch's
+# current Qt 6 / KF6 shared libraries, so it runs on an up-to-date Arch / CachyOS.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      fm-artifact:
+        description: Name of the artifact with the built fm (irixfm, qml/, icons/ at its top level)
+        value: ${{ jobs.fm.outputs.artifact }}
+      fm-version:
+        description: git describe of the built commit
+        value: ${{ jobs.fm.outputs.version }}
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the older run. The literal prefix keeps this group apart
+# from a calling workflow's group; tag builds (releases) are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  LANG: C.UTF-8
+  # fm's build and test needs (fm/README.md, fm/Makefile PKGS, install.sh step_irixfm), plus what CI
+  # needs on top: kio-extras (the tar:/ smb:// sftp:// KIO workers network_test uses), dbus + glib2
+  # (dbus-run-session, gdbus for dbus_test.sh), a font for off-screen text layout, git for describe.
+  FM_PACKAGES: >-
+    base-devel git qt6-base qt6-declarative qt6-multimedia qt6-webengine qt6-svg
+    kio kio-extras kwindowsystem kirigami karchive kcoreaddons solid syntax-highlighting kpty libvterm
+    dbus glib2 ttf-dejavu
+  THEME_PACKAGES: >-
+    git python python-gobject librsvg libxml2 xz
+  # WhiteSur sources for gen-kvantum / gen-plasma-dialogs / gen-gtk / patch-tasks, pinned so an
+  # upstream change can't turn CI red on its own (bump these together with the generators).
+  WHITESUR_KDE_SHA: cf4df59ce91004f7ea39358b1b8ff917d5c329f7      # vinceliuice/WhiteSur-kde, 2026-08-07
+  WHITESUR_GTK_SHA: d5782652d412137e26fb8ff55b55a5572e4c6995      # vinceliuice/WhiteSur-gtk-theme, 2026-09-11
+
+jobs:
+  fm:
+    name: fm build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: archlinux:latest
+      # QtWebEngine (browser_test) wants more shared memory than Docker's 64 MB default
+      options: --shm-size=1g
+    outputs:
+      artifact: fm-build-x86_64
+      version: ${{ steps.pack.outputs.version }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      # The container runs as root; Chromium refuses to start its sandbox as root
+      QTWEBENGINE_DISABLE_SANDBOX: '1'
+      IRIXFM_FLAKY_TESTS: network_test
+    steps:
+      - name: Install packages
+        run: |
+          sed -i 's/^#\?ParallelDownloads.*/ParallelDownloads = 10/' /etc/pacman.conf
+          # shellcheck disable=SC2086
+          pacman -Syu --noconfirm --needed $FM_PACKAGES
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build fm and the tests
+        run: make -C fm -j"$(nproc)" tests
+
+      - name: Run the tests
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/runtime" IRIXFM_CI_LOGS="$RUNNER_TEMP/fm-test-logs"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          # A private session bus for KIO and fm's single-instance and FileManager1 code
+          dbus-run-session -- make -C fm check-ci
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fm-test-logs
+          path: ${{ runner.temp }}/fm-test-logs
+          retention-days: 7
+
+      - name: Package the build
+        id: pack
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          version=$(git describe --tags --always)
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          d="$RUNNER_TEMP/pack/irixfm-x86_64"
+          mkdir -p "$d"
+          install -m755 fm/build/irixfm "$d/irixfm"
+          cp -r fm/qml fm/icons "$d/"
+          cp fm/irixfm.desktop fm/org.freedesktop.FileManager1.service fm/README.md fm/LICENSE "$d/"
+          echo "$version" >"$d/VERSION"
+          # The same files once more as a tarball inside, which keeps the executable bit
+          tar -C "$RUNNER_TEMP/pack" -czf "$RUNNER_TEMP/fm-build-x86_64.tar.gz" irixfm-x86_64
+          mv "$RUNNER_TEMP/fm-build-x86_64.tar.gz" "$d/"
+          ls -l "$d"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fm-build-x86_64
+          path: ${{ runner.temp }}/pack/irixfm-x86_64/
+          if-no-files-found: error
+          retention-days: 14
+
+  theme:
+    name: theme generators and scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install packages
+        run: |
+          # shellcheck disable=SC2086
+          pacman -Syu --noconfirm --needed $THEME_PACKAGES
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch WhiteSur sources (pinned)
+        run: |
+          fetch() {  # fetch <owner/repo> <sha> <dir>
+            git init -q "$3"
+            git -C "$3" fetch -q --depth 1 "https://github.com/$1.git" "$2"
+            git -C "$3" checkout -q FETCH_HEAD
+          }
+          fetch vinceliuice/WhiteSur-kde "$WHITESUR_KDE_SHA" "$RUNNER_TEMP/WhiteSur-kde"
+          fetch vinceliuice/WhiteSur-gtk-theme "$WHITESUR_GTK_SHA" "$RUNNER_TEMP/WhiteSur-gtk-theme"
+
+      - name: Run the generators and check their output
+        shell: bash
+        run: |
+          set -euo pipefail
+          o="$RUNNER_TEMP/out" kde="$RUNNER_TEMP/WhiteSur-kde" gtk="$RUNNER_TEMP/WhiteSur-gtk-theme"
+          mkdir -p "$o"
+          svg_ok() { for f in "$@"; do xmllint --noout "$f"; done; }
+          svgz_ok() { for f in "$@"; do gzip -t "$f" && zcat "$f" | xmllint --noout -; done; }
+
+          echo "::group::gen-decoration.py (Aurorae window decoration)"
+          python3 -I theme/gen-decoration.py "$o/deco"
+          ls "$o/deco"
+          svg_ok "$o"/deco/*.svg
+          python3 -I -m json.tool "$o/deco/metadata.json" >/dev/null
+          test -s "$o/deco/IrixGlassrc"
+          echo "::endgroup::"
+
+          echo "::group::gen-panel-background.py (dock and top bar)"
+          python3 -I theme/gen-panel-background.py >"$o/panel-background.svg"
+          svg_ok "$o/panel-background.svg"
+          rsvg-convert "$o/panel-background.svg" -o "$o/panel-background.png"
+          python3 -I theme/preview.py "$o/panel-background.svg" "$o/preview.svg"
+          svg_ok "$o/preview.svg"
+          zcat theme/generated/panel-background.svgz | cmp -s - "$o/panel-background.svg" \
+            || echo "::notice title=theme/generated::panel-background.svgz differs from what gen-panel-background.py makes now"
+          echo "::endgroup::"
+
+          echo "::group::patch-tasks.py (task manager without backgrounds)"
+          zcat "$kde/plasma/desktoptheme/WhiteSurLiquid-dark/widgets/tasks.svgz" >"$o/tasks-in.svg"
+          python3 -I theme/patch-tasks.py "$o/tasks-in.svg" "$o/tasks.svg"
+          svg_ok "$o/tasks.svg"
+          zcat theme/generated/tasks.svgz | cmp -s - "$o/tasks.svg" \
+            || echo "::notice title=theme/generated::tasks.svgz differs from what patch-tasks.py makes now"
+          echo "::endgroup::"
+
+          echo "::group::gen-kvantum.py (Qt widget style)"
+          python3 -I theme/gen-kvantum.py "$kde/Kvantum/WhiteSur" "$o/kvantum"
+          svg_ok "$o/kvantum/IrixGlass.svg"
+          python3 -I -c 'import configparser, sys
+          c = configparser.ConfigParser(strict=False, interpolation=None)
+          c.read_file(open(sys.argv[1], encoding="utf-8"))
+          assert "%General" in c and "GeneralColors" in c, c.sections()' "$o/kvantum/IrixGlass.kvconfig"
+          echo "::endgroup::"
+
+          echo "::group::gen-plasma-dialogs.py (Plasma pop-ups, on a copy of WhiteSurLiquid-dark)"
+          cp -r "$kde/plasma/desktoptheme/WhiteSurLiquid-dark" "$o/plasma"
+          python3 -I theme/gen-plasma-dialogs.py "$o/plasma" configs/color-schemes/IrixGlass.colors
+          mapfile -t svgz < <(find "$o/plasma" -name '*.svgz')
+          svgz_ok "${svgz[@]}"
+          mapfile -t svgs < <(find "$o/plasma" -name '*.svg')
+          svg_ok "${svgs[@]}"
+          cmp configs/color-schemes/IrixGlass.colors "$o/plasma/colors"
+          echo "::endgroup::"
+
+          echo "::group::gen-gtk.py (GTK 3/4 from WhiteSur-Dark)"
+          mkdir -p "$o/gtk-src"
+          tar -xJf "$gtk/release/WhiteSur-Dark.tar.xz" -C "$o/gtk-src"
+          python3 -I theme/gen-gtk.py "$o/gtk-src/WhiteSur-Dark" "$o/gtk"
+          for v in gtk-3.0 gtk-4.0; do
+            head -n 1 "$o/gtk/$v/gtk.css" | grep -q 'Generated by theme/gen-gtk.py'
+            test "$(find "$o/gtk/$v/windows-assets" -name 'titlebutton-*.png' | wc -l)" -gt 0
+          done
+          test -s "$o/gtk/index.theme"
+          echo "::endgroup::"
+
+      - name: Check shell script syntax
+        run: |
+          for f in scripts/*.sh fm/tests/*.sh fm/tools/*.sh; do
+            echo "bash -n $f"; bash -n "$f"
+          done
