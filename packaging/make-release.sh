@@ -179,7 +179,7 @@ PREV="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$SHA^" 2>/dev/null || 
     fi
     echo
     n="$(git rev-list --no-merges --count "$range")"
-    git log --no-merges --format='- %s (%h)' "$range" | head -100
+    git log -n 100 --no-merges --format='- %s (%h)' "$range"   # -n, not | head: head closing the pipe is SIGPIPE under pipefail
     if (( n > 100 )); then echo "- … and $((n - 100)) older commits"; fi
     echo
     cat <<EOF
