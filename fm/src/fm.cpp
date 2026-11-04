@@ -228,22 +228,27 @@ void Fm::readDockReserve()
 {
     // Bottom panels (location 4) whose visibility lets windows go below them — "Windows Go Below"
     // (3) and "Auto Hide" / "Dodge Windows" (1, 2) — don't reserve space, so a maximized window
-    // ends under them. "Always Visible" (0) panels already shrink the maximized area.
+    // ends under them. "Always Visible" (0) panels already shrink the maximized area, across the
+    // whole edge on Wayland: the desktop keeps an empty one as tall as the floating dock
+    // (scripts/panels.js "Dock reserve"), so only what that doesn't cover is left to keep free.
     const KConfig applets(QStringLiteral("plasma-org.kde.plasma.desktop-appletsrc"), KConfig::SimpleConfig);
     const KConfig shell(QStringLiteral("plasmashellrc"), KConfig::SimpleConfig);
     const KConfigGroup containments = applets.group(QStringLiteral("Containments"));
-    int reserve = 0;
+    int reserve = 0, reserved = 0;
     for (const QString &id : containments.groupList()) {
         const KConfigGroup c = containments.group(id);
         if (c.readEntry("plugin") != QLatin1String("org.kde.panel") || c.readEntry("location", 0) != 4)
             continue;
         const KConfigGroup view = shell.group(QStringLiteral("PlasmaViews")).group(QStringLiteral("Panel ") + id);
-        if (view.readEntry("panelVisibility", 0) == 0)
-            continue;
         const int thickness = view.group(QStringLiteral("Defaults")).readEntry("thickness", 44);
         const bool floating = view.readEntry("floating", 1) != 0;
+        if (view.readEntry("panelVisibility", 0) == 0) {
+            reserved = std::max(reserved, thickness + (floating ? 16 : 0));   // already outside the maximized area
+            continue;
+        }
         reserve = std::max(reserve, thickness + (floating ? 16 : 4));   // a floating panel sits ~8 px up, plus a gap
     }
+    reserve = std::max(0, reserve - reserved);
     if (reserve != m_dockReserve) {
         m_dockReserve = reserve;
         Q_EMIT dockReserveChanged();

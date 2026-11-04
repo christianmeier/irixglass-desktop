@@ -54,7 +54,8 @@ make tools                                   # build/shot and build/leak (not pa
   covers what: `terminal_test` (terminal tabs), `browser_test` (web tabs), `split_test` (split view,
   list columns), `tab_test`, `sidebar_test`, `tag_test`, `finder_test` / `phase2_test` (Finder
   commands), `path_test`, `scroll_test`, `dock_test`, `preview_test`, `devices_test` (devices in
-  Locations, with a fake backend: `Fm::setFakeDevices`), `network_test` (KIO URLs: model, crumbs, navigation).
+  Locations, with a fake backend: `Fm::setFakeDevices`), `network_test` (KIO URLs: model, crumbs, navigation), `tests/tst_trafficlights.qml` (window controls: hover,
+  clicks; run with `qmltestrunner -input`, part of `make test`).
 
 ## Environment variables
 

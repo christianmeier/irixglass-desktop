@@ -38,7 +38,7 @@ CRAFT_APPS=(
     "craft-launcher v0.6.1 artcraft-launcher-0.6.1-linux-x86_64.AppImage ArtCraftLauncher"
 )
 
-STEPS=(packages whitesur fonts theme apply panels kwin search firefox terminal teams zapzap wallpaper appimageupdate craft irixfm)
+STEPS=(packages whitesur fonts theme apply panels kwin search firefox chromium terminal teams zapzap wallpaper appimageupdate craft irixfm)
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
@@ -103,7 +103,11 @@ step_fonts() {
         [[ -f "$dl/$f.dmg" ]] || curl -fsSL -o "$dl/$f.dmg" "https://devimages-cdn.apple.com/design/resources/download/$f.dmg"
         rm -rf "${dl:?}/$f" && mkdir -p "$dl/$f" && (cd "$dl/$f" && $z x -y "../$f.dmg" >/dev/null)
         local pkg; pkg=$(find "$dl/$f" -name '*.pkg' | head -1)
-        mkdir -p "$dl/$f/p" && (cd "$dl/$f/p" && $z x -y "$pkg" >/dev/null && $z x -y 'Payload~' -ofonts >/dev/null)
+        # Older 7z unpacks the xar flat (Payload~, a cpio); 7zip 26 keeps the inner
+        # <name>.pkg/Payload (gzip), which unpacks to that Payload~ first.
+        mkdir -p "$dl/$f/p" && (cd "$dl/$f/p" && $z x -y "$pkg" >/dev/null &&
+            if [[ -f 'Payload~' ]]; then $z x -y 'Payload~' -ofonts >/dev/null
+            else $z x -y ./*.pkg/Payload -ofonts >/dev/null && $z x -y 'fonts/Payload~' -ofonts >/dev/null; fi)
     done
     mkdir -p "$HOME/.local/share/fonts/apple"
     find "$dl" -path '*/fonts/*' -type f \( -name '*.otf' -o -name '*.ttf' \) -exec cp {} "$HOME/.local/share/fonts/apple/" \;
@@ -158,6 +162,28 @@ step_apply() {
     kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key BorderSizeAuto --type bool false
     kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnLeft XIA
     kwriteconfig6 --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnRight ""
+    # GTK (and Firefox 159+, which reads it for its own buttons) must match: close, minimize, maximize
+    # on the left. kde-gtk-config doesn't resync from a kwriteconfig change and once left the default.
+    local f
+    for f in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+        mkdir -p "$(dirname "$f")"
+        [[ -f "$f" ]] || printf '[Settings]\n' > "$f"
+        if grep -q '^gtk-decoration-layout=' "$f"; then
+            sed -i 's/^gtk-decoration-layout=.*/gtk-decoration-layout=close,minimize,maximize:/' "$f"
+        else
+            sed -i '/^\[Settings\]/a gtk-decoration-layout=close,minimize,maximize:' "$f"
+        fi
+    done
+    gsettings set org.gnome.desktop.wm.preferences button-layout 'close,minimize,maximize:' 2>/dev/null || true
+    x="$HOME/.config/xsettingsd/xsettingsd.conf"
+    if [[ -f "$x" ]]; then
+        if grep -q '^Gtk/DecorationLayout ' "$x"; then
+            sed -i 's/^Gtk\/DecorationLayout .*/Gtk\/DecorationLayout "close,minimize,maximize:"/' "$x"
+        else
+            echo 'Gtk/DecorationLayout "close,minimize,maximize:"' >> "$x"
+        fi
+        pkill -HUP -x xsettingsd || true
+    fi
     kwriteconfig6 --file kwinrc --group Plugins --key blurEnabled true
     kwriteconfig6 --file kwinrc --group Plugins --key contrastEnabled true
     kwriteconfig6 --file kwinrc --group Effect-blur --key NoiseStrength 0   # grain made dock corners look rough
@@ -216,10 +242,15 @@ step_panels() {
 }
 
 step_kwin() {
-    log "KWin script: macOS Move & Resize menu (title bar right-click / Alt+F3)"
-    local dst="$HOME/.local/share/kwin/scripts/macos-window-menu"
-    mkdir -p "$dst" && cp -r "$REPO/kwin-scripts/macos-window-menu/." "$dst/"
-    kwriteconfig6 --file kwinrc --group Plugins --key macos-window-menuEnabled true
+    # macos-window-menu: Move & Resize / Arrange in the window menu (title bar right-click, Alt+F3)
+    # fit-workarea: windows open inside the free area, never under the dock or the menu bar
+    local s dst
+    for s in macos-window-menu fit-workarea; do
+        log "KWin script: $s"
+        dst="$HOME/.local/share/kwin/scripts/$s"
+        mkdir -p "$dst" && cp -r "$REPO/kwin-scripts/$s/." "$dst/"
+        kwriteconfig6 --file kwinrc --group Plugins --key "${s}Enabled" true
+    done
     qdbus6 org.kde.KWin /KWin reconfigure
 }
 
@@ -272,6 +303,28 @@ step_terminal() {
     tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 }
 
+step_chromium() {
+    # Chromium in GTK mode with its own frame: two compact rows like Safari, and only GTK mode draws
+    # our window controls (gen-gtk.py chromium_css(): static per-button images, glow on the hovered
+    # one). The GTK theme gives the glass colours; a theme extension would switch GTK mode off
+    # (configs/chromium/irixglass-theme is the alternative for the KWin title bar). Flags: exact
+    # colours and overlay scrollbars (configs/chromium/chromium-flags.conf, read by /usr/bin/chromium).
+    log "Chromium: GTK mode, own frame, IrixGlass flags"
+    install_file "$CFG/chromium/chromium-flags.conf" "$HOME/.config/chromium-flags.conf"
+    local prefs="$HOME/.config/chromium/Default/Preferences"
+    [[ -f "$prefs" ]] || { log "  no Chromium profile yet: start Chromium once, quit it, rerun"; return 0; }
+    if pgrep -x chromium >/dev/null; then log "  Chromium is running (it rewrites Preferences on exit): quit it and rerun"; return 0; fi
+    mkdir -p "$BACKUP"; cp -a "$prefs" "$BACKUP/chromium-Preferences"
+    python3 - "$prefs" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d.setdefault('browser', {})['custom_chrome_frame'] = True
+d.setdefault('extensions', {}).setdefault('theme', {})['system_theme'] = 1   # 0 classic, 1 GTK, 2 Qt
+json.dump(d, open(p, 'w'), separators=(',', ':'))
+PY
+}
+
 step_teams() {
     log "teams-for-linux IrixGlass theme (fm's look; the Nord theme stays installed)"
     install_file "$CFG/teams-for-linux/config.json" "$HOME/.config/teams-for-linux/config.json"
@@ -287,8 +340,9 @@ step_zapzap() {
         curl -fsSL -o "$WORK/ZapZap.AppImage" \
             "https://github.com/rafatosta/zapzap/releases/download/$ZAPZAP_VERSION/ZapZap-$ZAPZAP_VERSION-linux-x86_64.AppImage"
         chmod +x "$WORK/ZapZap.AppImage"
-        (cd "$WORK" && rm -rf squashfs-root && ./ZapZap.AppImage --appimage-extract >/dev/null)
-        rm -rf "$dir" && mv "$WORK/squashfs-root" "$dir"
+        (cd "$WORK" && rm -rf squashfs-root AppDir && ./ZapZap.AppImage --appimage-extract >/dev/null)
+        # Newer AppImages extract to AppDir/ with squashfs-root a relative symlink to it: move the real dir.
+        rm -rf "$dir" && mv "$(realpath "$WORK/squashfs-root")" "$dir" && rm -f "$WORK/squashfs-root"
     fi
     mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
     cp "$dir/com.rtosta.zapzap.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/"
