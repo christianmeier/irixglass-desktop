@@ -130,8 +130,9 @@ Window {
     property string tabsJson: ""                // saved: [{dir, back, fwd, search}]
     property int savedTabIndex: 0
     readonly property real tabBarH: tabBarShown ? 26 * tu : 0
-    // Maximized or full screen, the window reaches under the floating dock (it doesn't reserve space):
-    // keep its height free so tabs and status bar stay visible. Follows the dock's size live.
+    // Maximized or full screen, the window may reach under the floating dock (it doesn't reserve space
+    // itself; the desktop's "Dock reserve" panel usually does, then this is 0): keep what's left of its
+    // height free so tabs and status bar stay visible. Follows the dock's size live.
     readonly property real dockInset: maximized ? Fm.dockReserve : 0
     // The bottom section (tabs + status bar) can be lifted by dragging the line above the tabs.
     property real bottomExtra: 0
@@ -1364,7 +1365,7 @@ Window {
     }
 
     // Traffic lights stay put when the sidebar hides; the sidebar button moves next to them.
-    TrafficLights { z: 5; window: win; x: 27.5 * win.u; y: 36 * win.u - height / 2 }
+    TrafficLights { id: trafficLights; objectName: "trafficLights"; z: 5; window: win; x: 16; y: 31 - height / 2 }   // same place as every window's lights
     Item {
         id: sidebarButton
         objectName: "sidebarButton"

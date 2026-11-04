@@ -71,3 +71,20 @@ tasks.writeConfig("iconSpacing", "0");  // macOS-tight icon spacing
 tasks.writeConfig("showOnlyCurrentDesktop", "false");
 tasks.writeConfig("indicateAudioStreams", "false");
 tasks.writeConfig("maxStripes", "1");
+
+// ---- Dock reserve ---------------------------------------------------------
+// macOS: maximized windows end above the dock, which keeps floating; only full screen covers it.
+// The dock can't reserve that space itself: an "Always visible" panel stops floating as soon as a
+// window touches it (Panel.qml: only non-NormalPanel modes never de-float). So an empty "Always
+// visible" panel in the corner reserves the band: on Wayland a panel's reserved space spans the
+// whole edge, and an empty panel draws nothing. 60 = the dock's window: 44 + 2 x 8 floating margin.
+// fm subtracts this from its own dock gap (fm/src/fm.cpp readDockReserve).
+var reserve = new Panel;
+reserve.location = "bottom";
+reserve.floating = false;
+reserve.hiding = "none";
+reserve.height = 60;
+reserve.lengthMode = "custom";
+reserve.alignment = "left";
+reserve.minimumLength = 1;
+reserve.maximumLength = 1;

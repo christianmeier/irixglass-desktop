@@ -14,9 +14,8 @@ other windows on the desktop. The rules that came out of using it:
 
 - **Geometry from the mockup, sizes from the system.** The window layout uses mockup pixels × `u`
   (0.85). Text, sidebar rows, label pills and inline rename use `tu` = system font px / 13.5 instead,
-  so they match other apps (SF Pro Text 10 pt = 13.33 px). The traffic lights are fixed at the size
-  of the KWin (WhiteSur) title bar buttons: 13.3 px circles, 26 px apart centre to centre, measured
-  from a screenshot of another window.
+  so they match other apps (SF Pro Text 10 pt = 13.33 px). The traffic lights use the desktop-wide
+  iPadOS 26 numbers (see "Traffic lights" below), the same in every window.
 - **IRIX inside, normal outside.** The IRIX icons are only for files inside the window. The menu
   entry and the window icon use the icon theme's `system-file-manager`, so the dock shows the usual
   Finder icon.
@@ -41,7 +40,7 @@ qml/Main.qml the window: state, navigation, selection, glass, sidebar, toolbar, 
              menus, shortcuts
 qml/EdgeRing.qml     the glass edge: a ring filled with a top-to-bottom gradient (brightest at the top)
 qml/Pill.qml         toolbar pill = tint + EdgeRing
-qml/TrafficLights.qml close / minimise / zoom, with glyphs on hover
+qml/TrafficLights.qml close / minimise / zoom: iPadOS 26 window controls (capsule that grows on hover)
 qml/Thumbwheel.qml   the SGI thumbwheel: ridges placed on a rotating cylinder (sin for x, cos for shading)
 qml/Rename.qml       inline rename field (F2)
 qml/SplitPane.qml    the split view's second side (own tabs, view, icon size); PaneHeader.qml its ‹ ↑ path
@@ -136,10 +135,20 @@ and renaming. `placeLabel()` shows "Icon Catalog" (older saved sidebars) as "App
 style: titles 13.5 tu, regular weight, white .55; rows 34 tu tall with the highlight 30 tu (`row.dy`
 shifts icon and text 2 tu down); 8 tu gap above a title (Finder style keeps 30 tu, 11 tu bold titles).
 
-**Traffic lights** (`TrafficLights.qml`): Shape circles (CurveRenderer) with the decoration SVG's
-0.5 px dark outline; an inner Rectangle border read as a thick grey rim. Grey (white .22) all the time
-like the desktop's IrixGlass lights; glyphs on hover only while the window is active. Their position
-(first centre 30, 31; 26 apart) is the reference the desktop's decoration, GTK and Firefox follow.
+**Traffic lights** (`TrafficLights.qml`): iPadOS 26 window controls, measured from Apple's WWDC25
+session 208 video, the same numbers as the desktop's title bars (`theme/gen-decoration.py`), GTK
+(`theme/gen-gtk.py`) and Firefox (`configs/firefox/customChrome.css`). At rest a grey glass capsule
+(38.67 × 20.67 px, see-through with a 1 device px white .14 rim, left edge x 16, centre y 31) holds three muted 6 px dots 9.33 px apart
+(#df5356 #eebb46 #5ecf4b; grey white .30 in an inactive window). Under the pointer (`HoverHandler`
+on the capsule) one progress value `t` springs 0 → 1 (`Easing.OutBack`, 380 ms; back 250 ms
+`OutCubic`): the capsule grows to 72.67 × 28.67 px, the dots to 16 px lights 22 px apart
+(#e90018 #f5cb00 #01e33e); only the light under the pointer gets the coloured drop glow (a
+`RadialGradient` Shape: `MultiEffect` renders nothing off-screen), and the glyphs (× − and the full-screen triangles, `PathSvg` in a
+40-unit box) grow out of a point. The light under the pointer lifts to 1.08. `forceGrown` shows the
+grown state for screenshots: `build/shot … 'trafficLights.forceGrown = true'`. The group's hover is a
+`HoverHandler` on the whole item, limited to the capsule's current outline: on the capsule itself it
+lost the hover to the lights on top, so the group shrank under the pointer and only close could be
+clicked. `tests/tst_trafficlights.qml` (qmltestrunner, in `make test`) hovers and clicks each light.
 
 ### Finder commands
 
@@ -306,7 +315,10 @@ bracketed paste, and reports `CopyAction`, so the source never deletes anything.
 A Plasma panel set to "Windows Go Below" (or auto-hide) doesn't reserve space, so a maximized
 window extends under it. `Fm::readDockReserve()` reads bottom panels (location 4) from
 `plasma-org.kde.plasma.desktop-appletsrc` + `plasmashellrc` (thickness, floating, visibility) and
-`Fm.dockReserve` = thickness + 16 (floating) or + 4. `~/.config` is watched (KConfig replaces files
+`Fm.dockReserve` = thickness + 16 (floating) or + 4, minus what "Always Visible" bottom panels already
+reserve (their thickness, + 16 if floating). The desktop keeps an empty "Always Visible" panel as tall
+as the floating dock (`scripts/panels.js` "Dock reserve"), so normally this is 0 and KWin's maximize
+area already ends above the dock. `~/.config` is watched (KConfig replaces files
 on save), so resizing the dock updates fm at once. `win.dockInset` applies it only when maximized or
 full screen: on Wayland a window doesn't know its position, so a merely large window can't be
 detected. The tab bar, status bar, sidebar and panes all end `dockInset` higher.

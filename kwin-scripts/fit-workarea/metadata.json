@@ -1,0 +1,12 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [{ "Name": "IrixGlass desktop" }],
+        "Description": "macOS: windows open inside the free area, never under the dock or the menu bar",
+        "Icon": "preferences-system-windows",
+        "Id": "fit-workarea",
+        "License": "GPL",
+        "Name": "Fit Windows Into the Work Area"
+    },
+    "X-Plasma-API": "javascript"
+}

@@ -107,10 +107,12 @@ $(BUILD)/leak: tools/leak.cpp $(LIBOBJ) src/fm.h src/terminal.h
 tools: $(BUILD)/shot $(BUILD)/leak
 
 # Off-screen, with throwaway settings, so it never touches the user's screen or config.
+QMLTESTRUNNER ?= /usr/lib/qt6/bin/qmltestrunner
 TESTS := $(BUILD)/scroll_test $(BUILD)/path_test $(BUILD)/sidebar_test $(BUILD)/finder_test $(BUILD)/phase2_test $(BUILD)/tag_test $(BUILD)/tab_test $(BUILD)/split_test $(BUILD)/dock_test $(BUILD)/preview_test $(BUILD)/devices_test $(BUILD)/terminal_test $(BUILD)/browser_test $(BUILD)/network_test
 test: $(TESTS) $(BUILD)/irixfm
 	@rc=0; for t in $(TESTS); do echo "== $$(basename $$t)"; tmp=$$(mktemp -d); \
 	  XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache QT_QPA_PLATFORM=offscreen $$t 2>/dev/null || rc=1; rm -rf $$tmp; done; \
+	echo "== tst_trafficlights"; QT_QPA_PLATFORM=offscreen $(QMLTESTRUNNER) -input tests/tst_trafficlights.qml 2>/dev/null || rc=1; \
 	echo "== single_instance_test"; tmp=$$(mktemp -d); XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache tests/single_instance_test.sh $(BUILD)/irixfm || rc=1; rm -rf $$tmp; \
 	echo "== dbus_test"; tmp=$$(mktemp -d); XDG_CONFIG_HOME=$$tmp XDG_CACHE_HOME=$$tmp/cache tests/dbus_test.sh $(BUILD)/irixfm || rc=1; rm -rf $$tmp; \
 	exit $$rc

@@ -6,8 +6,8 @@
 #   glass tint      rgba(20, 22, 29, .62)  (fm's bodyTint at "Standard")
 #   edge ring       white .65 at the top -> .10 at 25 % of the height -> .10 at 75 % -> .55
 #                   at the bottom (fm's EdgeRing with bottomAlpha .55)
-#   traffic lights  13.3 px circles, 26 px apart, #ff5f57 #febc2e #28c840,
-#                   glyphs (x - +) on hover of the group
+#   traffic lights  iPadOS 26 (WWDC25 session 208): a grey glass capsule with three small
+#                   dots that grows into vivid 16 px lights with glyphs on hover of the group
 # The client area behind the title bar is left clear: Kvantum (IrixGlass) paints
 # the same tint there, so title bar and window body read as one glass sheet.
 #
@@ -28,6 +28,10 @@
 # - Buttons come from kwinrc ButtonsOnLeft/Right (not from LeftButtons here).
 #   Button states: active, hover, pressed, deactivated (+ "-inactive"); with
 #   ButtonGroupHover all lights show their glyph when the group is hovered.
+#   v2 has no animation: the dots switch to the full lights instantly (Firefox,
+#   GTK and fm animate the same change). A button only paints its own box, so the
+#   three boxes touch and each paints its slice of the whole scene (capsule and
+#   all lights); the resting dots straddle the boxes' borders.
 #
 # Borders: BorderLeft/Right/Bottom are clamped to KWin's border-size range
 # (Tiny 1-4, Normal 4-6, Large 6-8, VeryLarge 8-12). install.sh sets
@@ -38,6 +42,7 @@
 # Crisp at 150 %: every edge (piece sizes, window edge, ring width, frame,
 # title) is a whole number of device pixels (multiples of 2/3 logical px).
 # Curves are SVG arcs and the shadow is gradients, so the file stays small.
+import math
 import os
 import sys
 
@@ -59,12 +64,23 @@ SHADOW_FALLOFF = 2.4    # Gaussian fall-off over the padding
 BORDER = 8              # glass frame at the sides and bottom. KWin doesn't clip the client to the
                         # rounded shape, so the client's square corners must sit inside the 22 px
                         # curve: (R - B)^2 * 2 <= R^2  ->  B >= 6.5
-LIGHTS = [('close', '#ff5f57', 'x'), ('minimize', '#febc2e', '-'),
-          ('maximize', '#28c840', '+'), ('restore', '#28c840', '+')]
-INACTIVE_LIGHT = 0.22    # the lights are grey (white .22 over the glass) in every window and state
-DIAMETER = 40 / 3       # fm TrafficLights.diameter
-BUTTON = 16             # button box (16 + 10 spacing = 26 px centre to centre)
-LIGHT_X = 30            # centre of the first light from the window's left edge (fm: 27.5 × 0.85 + 6.7)
+# The lights, same numbers as Firefox (customChrome.css), GTK (gen-gtk.py) and fm (TrafficLights.qml).
+# All x are from the window's left edge, y from its top; the bar's middle is y = 31.
+#   name, resting dot colour, light colour, glyph colour, glyph
+LIGHTS = [('close', '#df5356', '#e90018', '#520000', 'x'),
+          ('minimize', '#eebb46', '#f5cb00', '#5b2301', '-'),
+          ('maximize', '#5ecf4b', '#01e33e', '#0d7100', 'full'),
+          ('restore', '#5ecf4b', '#01e33e', '#0d7100', 'full')]
+MID = 31
+CAPSULE_X = 16
+# capsule size, dot diameter, first dot's centre, dot pitch, measured from Apple's frames: capsule
+# ~0.6 of a toolbar button, 6.5 dots wide; grown lights 1.36 of their diameter apart
+REST = dict(w=38 + 2 / 3, h=20 + 2 / 3, dot=6, x0=26, pitch=9 + 1 / 3)
+GROWN = dict(w=72 + 2 / 3, h=28 + 2 / 3, dot=16, x0=30 + 1 / 3, pitch=22)
+CAPSULE_FILL, CAPSULE_FILL_GROWN, RIM = .08, .10, .14   # see-through grey glass, 1 device px light rim
+INACTIVE_DOT = 0.30     # inactive windows: grey dots (white .30 over the glass)
+BUTTON_W, BUTTON_H = 26, 36   # three touching boxes 16..94 cover the grown capsule (16..88.7);
+                              # 36 px tall: room for the glow below the lights
 
 CL = PAD_L + R          # corner column width
 RT = PAD_T + TITLE      # top row height
@@ -240,50 +256,159 @@ def decoration_svg():
             f'<defs>{"".join(defs)}</defs>{"".join(body)}</svg>\n')
 
 
-def glyph(kind, c):
-    """fm's hover glyphs (x - +, black .6), drawn as strokes."""
-    s = DIAMETER * .22
-    st = 'stroke="#000" stroke-opacity="0.6" stroke-width="1.3" stroke-linecap="round" fill="none"'
-    if kind == 'x':
-        return f'<path d="M{n(c - s)} {n(c - s)}L{n(c + s)} {n(c + s)}M{n(c + s)} {n(c - s)}L{n(c - s)} {n(c + s)}" {st}/>'
-    s *= 1.2
-    d = f'M{n(c - s)} {n(c)}H{n(c + s)}' + ('' if kind == '-' else f'M{n(c)} {n(c - s)}V{n(c + s)}')
-    return f'<path d="{d}" {st}/>'
+# The glyphs in a 40-unit box over the light (same paths as the other three)
+GLYPHS = {
+    'x': '<path d="M13.7 13.7L26.3 26.3M26.3 13.7L13.7 26.3" stroke="{c}" stroke-width="4" stroke-linecap="round" fill="none"/>',
+    '-': '<path d="M13.8 20H26.2" stroke="{c}" stroke-width="3.3" stroke-linecap="round" fill="none"/>',
+    'full': '<path d="M12.5 12.5H23L12.5 23ZM27.5 27.5H17L27.5 17Z" fill="{c}" stroke="{c}" '
+            'stroke-width="1.6" stroke-linejoin="round"/>',
+}
 
 
-def button_svg(color, kind):
-    c = BUTTON / 2
-    r = n(DIAMETER / 2)
-    box = f'<rect width="{BUTTON}" height="{BUTTON}" opacity="0.001"/>'
-    edge = 'stroke="#000" stroke-opacity="0.25" stroke-width="0.5"'   # fm: border .5, black .25
-
-    def light(fill, opacity=1, g=False, darken=0):
-        s = f'<circle cx="{n(c)}" cy="{n(c)}" r="{r}" fill="{fill}"' + \
-            (f' fill-opacity="{opacity}"' if opacity != 1 else '') + f' {edge}/>'
-        if darken:
-            s += f'<circle cx="{n(c)}" cy="{n(c)}" r="{r}" fill-opacity="{darken}"/>'
-        return s + (glyph(kind, c) if g else '')
-
-    # The user wants the lights grey all the time (active, inactive, under the mouse); the
-    # active window still shows the glyphs on hover so the three can be told apart.
-    grey = '#fff'
-    states = {
-        'active': light(grey, INACTIVE_LIGHT),
-        'hover': light(grey, INACTIVE_LIGHT, g=True),
-        'pressed': light(grey, INACTIVE_LIGHT + .1, g=True),
-        'deactivated': light('#fff', .18),
-        'inactive': light('#fff', INACTIVE_LIGHT),
-        'hover-inactive': light('#fff', INACTIVE_LIGHT),
-        'pressed-inactive': light('#fff', INACTIVE_LIGHT),
-        'deactivated-inactive': light('#fff', .12),
-    }
-    body = ''.join(f'<g id="{k}-center">{box}{v}</g>' for k, v in states.items())
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{BUTTON}" height="{BUTTON}" '
-            f'viewBox="0 0 {BUTTON} {BUTTON}">{body}</svg>\n')
+def capsule_pts(x0, w, h, steps=48):
+    """Outline of a capsule (fully round ends) as a polygon."""
+    r = h / 2
+    pts = []
+    for i in range(steps + 1):   # right end, top to bottom
+        a = -math.pi / 2 + math.pi * i / steps
+        pts.append((x0 + w - r + r * math.cos(a), MID + r * math.sin(a)))
+    for i in range(steps + 1):   # left end, bottom to top
+        a = math.pi / 2 + math.pi * i / steps
+        pts.append((x0 + r + r * math.cos(a), MID + r * math.sin(a)))
+    return pts
 
 
-TITLE_EDGE_TOP = (TITLE - BUTTON) // 2
-TITLE_EDGE_LEFT = LIGHT_X - BUTTON // 2   # measured: Aurorae v2 counts TitleEdgeLeft from the frame's outer edge, borders not added
+def circle_pts(cx, d, steps=40):
+    return [(cx + d / 2 * math.cos(2 * math.pi * i / steps), MID + d / 2 * math.sin(2 * math.pi * i / steps))
+            for i in range(steps)]
+
+
+def clip_outline(pts, lo, hi):
+    """The closed outline `pts` as open polylines inside lo <= x <= hi (a stroke must not leave the box)."""
+    lines, cur = [], []
+    for i in range(len(pts)):
+        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
+        t0, t1 = 0.0, 1.0
+        if x1 != x0:
+            ta, tb = (lo - x0) / (x1 - x0), (hi - x0) / (x1 - x0)
+            t0, t1 = max(t0, min(ta, tb)), min(t1, max(ta, tb))
+        elif not lo <= x0 <= hi:
+            t0, t1 = 1, 0
+        if t0 > t1:
+            if cur:
+                lines.append(cur)
+                cur = []
+            continue
+        a = (x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0)
+        b = (x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1)
+        if not cur:
+            cur = [a]
+        cur.append(b)
+        if t1 < 1:
+            lines.append(cur)
+            cur = []
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def clip(pts, lo, hi):
+    """Sutherland-Hodgman against the vertical lines x = lo and x = hi (convex shapes)."""
+    for edge, inside in ((lo, lambda x: x >= lo), (hi, lambda x: x <= hi)):
+        out = []
+        for i, p in enumerate(pts):
+            q = pts[i - 1]
+            if inside(p[0]):
+                if not inside(q[0]):
+                    out.append((edge, q[1] + (p[1] - q[1]) * (edge - q[0]) / (p[0] - q[0])))
+                out.append(p)
+            elif inside(q[0]):
+                out.append((edge, q[1] + (p[1] - q[1]) * (edge - q[0]) / (p[0] - q[0])))
+        pts = out
+        if not pts:
+            break
+    return pts
+
+
+def button_svg(index, state, uid):
+    """Box `index` (0 close, 1 minimize, 2 maximize/restore) in `state`: its slice of the scene."""
+    bx, by = CAPSULE_X + index * BUTTON_W, MID - BUTTON_H / 2
+    lo, hi = bx, bx + BUTTON_W
+
+    def shape(pts, attrs):
+        pts = clip(pts, lo, hi)
+        if len(pts) < 3:
+            return ''
+        d = 'M' + 'L'.join(f'{n(x - bx)} {n(y - by)}' for x, y in pts) + 'Z'
+        return f'<path d="{d}" {attrs}/>'
+
+    grown = state.startswith(('hover', 'pressed'))
+    inactive = state.endswith('inactive') and not grown
+    g = GROWN if grown else REST
+    # the grey glass capsule (Apple's dark one: see-through with a 1 device px light rim)
+    defs = ''
+    rim = 2 / 3
+    body = shape(capsule_pts(CAPSULE_X, g['w'], g['h']),
+                 f'fill="#fff" fill-opacity="{CAPSULE_FILL_GROWN if grown else CAPSULE_FILL}"')
+    for line in clip_outline(capsule_pts(CAPSULE_X + rim / 2, g['w'] - rim, g['h'] - rim), lo, hi):
+        d = 'M' + 'L'.join(f'{n(x - bx)} {n(y - by)}' for x, y in line)
+        body += f'<path d="{d}" fill="none" stroke="#fff" stroke-opacity="{RIM}" stroke-width="{n(rim)}"/>'
+    for i, (_name, dot, light, gc, kind) in enumerate(LIGHTS[:3]):
+        cx = g['x0'] + i * g['pitch']
+        if not grown:
+            fill = '#fff" fill-opacity="' + str(INACTIVE_DOT) if inactive else dot
+            body += shape(circle_pts(cx, g['dot']), f'fill="{fill}"')
+            continue
+        # The glow belongs to the light under the pointer only, but Aurorae gives a button and its
+        # group-hovered neighbours the same state (v2/decorationbutton.cpp: isHovered() ||
+        # isParentHovered()), so only the pressed light, in its own box, glows here.
+        if not (state.startswith('pressed') and i == index):
+            continue
+        x, y, r = cx - bx, MID - by, g['dot'] / 2
+        gid = f'glow{uid}-{i}'   # the video's coloured drop glow: wider than the light, a bit lower
+        # it must stay inside this box (no neighbour paints the rest): sideways only as far as the
+        # box allows, more downwards
+        gy, rx, ry = y + 2, min(r + 6, cx - lo - .3, hi - cx - .3), r + 7
+        defs += (f'<radialGradient id="{gid}" gradientUnits="userSpaceOnUse" cx="{n(x)}" cy="{n(gy)}" r="{n(ry)}" '
+                 f'gradientTransform="translate({n(x)} {n(gy)}) scale({n(rx / ry)} 1) translate({n(-x)} {n(-gy)})">'
+                 f'<stop offset="0" stop-color="{light}" stop-opacity=".5"/>'
+                 f'<stop offset=".55" stop-color="{light}" stop-opacity=".35"/>'
+                 f'<stop offset="1" stop-color="{light}" stop-opacity="0"/></radialGradient>')
+        glow = [(cx + rx * math.cos(2 * math.pi * k / 48), MID + 2 + ry * math.sin(2 * math.pi * k / 48))
+                for k in range(48)]
+        body += shape(glow, f'fill="url(#{gid})"')
+    for i, (_name, dot, light, gc, kind) in enumerate(LIGHTS[:3] if grown else []):
+        cx = g['x0'] + i * g['pitch']
+        # the light may cross a box border (maximize's does): clipped in every box; its glyph lies
+        # inside the box that holds its centre
+        body += shape(circle_pts(cx, g['dot'], 64), f'fill="{light}"')
+        if state.startswith('pressed') and i == index:
+            body += shape(circle_pts(cx, g['dot'], 64), 'fill-opacity=".18"')
+        if lo <= cx <= hi:
+            x, y, r = cx - bx, MID - by, g['dot'] / 2
+            k = g['dot'] / 40
+            body += (f'<g transform="translate({n(x - r)} {n(y - r)}) scale({n(k)})">'
+                     f'{GLYPHS[kind].replace("{c}", gc)}</g>')
+    box = f'<rect width="{BUTTON_W}" height="{BUTTON_H}" opacity="0.001"/>'
+    return f'<defs>{defs}</defs>{box}{body}'
+
+
+STATES = ['active', 'hover', 'pressed', 'deactivated',
+          'inactive', 'hover-inactive', 'pressed-inactive', 'deactivated-inactive']
+
+
+def button_file(index):
+    # All states in one SVG: each state's gradients get their own ids.
+    parts = []
+    for st in STATES:
+        svg = button_svg(index, st.replace('deactivated', 'active'), f'-{st}')
+        parts.append(f'<g id="{st}-center">{svg}</g>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{BUTTON_W}" height="{BUTTON_H}" '
+            f'viewBox="0 0 {BUTTON_W} {BUTTON_H}">{"".join(parts)}</svg>\n')
+
+
+TITLE_EDGE_TOP = MID - BUTTON_H // 2
+TITLE_EDGE_LEFT = CAPSULE_X   # measured: Aurorae v2 counts TitleEdgeLeft from the frame's outer edge, borders not added
 RC = f"""[General]
 ActiveTextColor=235,235,240
 InactiveTextColor=140,142,150
@@ -297,19 +422,19 @@ BorderLeft={BORDER}
 BorderRight={BORDER}
 BorderBottom={BORDER}
 TitleEdgeTop={TITLE_EDGE_TOP}
-TitleEdgeBottom={TITLE - BUTTON - TITLE_EDGE_TOP}
+TitleEdgeBottom={TITLE - BUTTON_H - TITLE_EDGE_TOP}
 TitleEdgeLeft={TITLE_EDGE_LEFT}
 TitleEdgeRight={TITLE_EDGE_LEFT}
 TitleEdgeTopMaximized={TITLE_EDGE_TOP}
-TitleEdgeBottomMaximized={TITLE - BUTTON - TITLE_EDGE_TOP}
+TitleEdgeBottomMaximized={TITLE - BUTTON_H - TITLE_EDGE_TOP}
 TitleEdgeLeftMaximized={TITLE_EDGE_LEFT}
 TitleEdgeRightMaximized={TITLE_EDGE_LEFT}
 TitleBorderLeft=50
 TitleBorderRight=50
-TitleHeight={BUTTON}
-ButtonWidth={BUTTON}
-ButtonHeight={BUTTON}
-ButtonSpacing={26 - BUTTON}
+TitleHeight={BUTTON_H}
+ButtonWidth={BUTTON_W}
+ButtonHeight={BUTTON_H}
+ButtonSpacing=0
 ButtonMarginTop=0
 PaddingTop={PAD_T}
 PaddingBottom={PAD_B}
@@ -340,9 +465,9 @@ def main():
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, 'decoration.svg'), 'w') as f:
         f.write(decoration_svg())
-    for name, color, kind in LIGHTS:
+    for name, index in (('close', 0), ('minimize', 1), ('maximize', 2), ('restore', 2)):
         with open(os.path.join(out, f'{name}.svg'), 'w') as f:
-            f.write(button_svg(color, kind))
+            f.write(button_file(index))
     with open(os.path.join(out, 'IrixGlassrc'), 'w') as f:
         f.write(RC)
     with open(os.path.join(out, 'metadata.json'), 'w') as f:

@@ -63,9 +63,10 @@ Then log out and back in. Each step can also be run on its own: `scripts/install
 | `theme` | Builds the custom dock and menu bar background (`theme/gen-panel-background.py`: squircle corners, crisp 1-pixel edges), removes the grey squares behind dock icons (`theme/patch-tasks.py`), and turns off panel blur, which caused stair-step artifacts at the corners. Preview a change first with `theme/preview.py`. Also builds **IrixGlass**, fm's look for all windows: the Aurorae title bar and frame (`theme/gen-decoration.py`), the Kvantum widget style (`theme/gen-kvantum.py`), the GTK theme IrixGlass-Dark (`theme/gen-gtk.py`), the Plasma pop-ups/tooltips/OSDs (`theme/gen-plasma-dialogs.py`) and the colour scheme (`configs/color-schemes/IrixGlass.colors`) |
 | `apply` | Applies the IrixGlass colours, Plasma style, IrixGlass-Dark GTK theme, IrixGlass title bars (macOS button order, Aurorae v2, border size Large), icons, cursor, Kvantum style, SF fonts, macOS-style text rendering and GTK settings |
 | `panels` | **Replaces all panels** with the top menu bar and the floating dock (`scripts/panels.js`), then restarts plasmashell |
-| `kwin` | Installs the KWin script that adds a "Move & Resize" menu to the window menu |
+| `kwin` | Installs the KWin scripts: a "Move & Resize" menu in the window menu, and `fit-workarea` (windows open inside the free area, never under the dock or the top bar) |
 | `search` | Sets Meta+Space to open KRunner in a centered pop-up (Spotlight-style), shows apps then files, and turns on Baloo file-name indexing |
-| `firefox` | Installs the WhiteSur Firefox theme (tabs in their own row) with the IrixGlass override (`configs/firefox/customChrome.css`, `userContent-irixglass.css`: fm's colours, pills, traffic lights) into each `*.default-release` profile and hides the built-in VPN button |
+| `firefox` | Installs the WhiteSur Firefox theme (tabs in their own row) with the IrixGlass override (`configs/firefox/customChrome.css`, `userContent-irixglass.css`: fm's colours, pills, iPadOS-style window controls, Safari 26 toolbar and tab row) into each `*.default-release` profile and hides the built-in VPN button |
+| `chromium` | Chromium in GTK mode with its own frame (Preferences `system_theme` 1, `custom_chrome_frame` true), so the GTK theme gives it the glass colours and the iPadOS window controls; installs `configs/chromium/chromium-flags.conf` (exact colours, overlay scrollbars); skipped while Chromium runs |
 | `terminal` | Installs the tmux config (Ctrl-a prefix, Nord, mouse), Alacritty config (Nord, Noto Sans Mono 12) and LazyVim with Nord |
 | `teams` | Installs the teams-for-linux themes (IrixGlass active, Nord kept) |
 | `zapzap` | Installs WhatsApp (ZapZap AppImage, unpacked into `~/Applications/ZapZap`) and its launcher entry |
@@ -96,7 +97,7 @@ fm/              the file manager (own README, CLAUDE.md, tests: make -C fm test
 theme/           generators: dock/menu bar, title bars, Kvantum, GTK, Plasma pop-ups
 configs/         config files the installer copies (Firefox, Teams, Alacritty, tmux, Kvantum, …)
 scripts/         install.sh, panels.js, install-craft-app.sh
-kwin-scripts/    macos-window-menu KWin script
+kwin-scripts/    KWin scripts: macos-window-menu, fit-workarea
 docs/            SESSION-NOTES.md (history, gotchas), screenshots/, mockups/ (the design fm came from)
 .claude/skills/  Claude Code skills (macos-desktop here, irixfm in fm/)
 ```
